@@ -6,7 +6,7 @@ export function Alertas({ v }: { v: View }) {
   if (!v.alertsFull.length)
     return (
       <Screen label="Alertas" style={{ ...card, overflow: 'hidden' }}>
-        <Vacio titulo="Nada que atender" detalle="Acá van a aparecer los services por vencer, la VTV, el seguro y los vehículos en taller." />
+        <Vacio titulo="Nada que atender" detalle="Acá van a aparecer los services por vencer, los seguros por renovar y los vehículos en taller." />
       </Screen>
     );
 

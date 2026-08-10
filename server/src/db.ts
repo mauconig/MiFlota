@@ -18,8 +18,10 @@ export interface CarRow {
   service_cada: number;
   service_unidad: string;
   last_service_date: string;
-  vtv_date: string;
   seguro_date: string;
+  seguro_costo: number;
+  seguro_periodo: string;
+  seguro_cada: number;
 }
 
 export interface MovRow {
@@ -57,8 +59,10 @@ export function openDb() {
       service_cada       INTEGER NOT NULL DEFAULT 6,
       service_unidad     TEXT NOT NULL DEFAULT 'meses' CHECK (service_unidad IN ('dias','meses')),
       last_service_date  TEXT NOT NULL,
-      vtv_date           TEXT NOT NULL,
-      seguro_date        TEXT NOT NULL
+      seguro_date        TEXT NOT NULL,
+      seguro_costo       INTEGER NOT NULL DEFAULT 0,
+      seguro_periodo     TEXT NOT NULL DEFAULT 'mensual' CHECK (seguro_periodo IN ('mensual','anual')),
+      seguro_cada        INTEGER NOT NULL DEFAULT 12
     );
 
     CREATE TABLE IF NOT EXISTS movs (
@@ -107,6 +111,30 @@ function migrarOwner(db: Database.Database) {
       db.exec('ALTER TABLE cars DROP COLUMN service_cada_meses');
     }
   }
+  // La VTV es de otro país: acá no se controla nada equivalente, así que la
+  // fecha no representaba ninguna obligación real. Se va con su alerta.
+  if (cols('cars').includes('vtv_date')) db.exec('ALTER TABLE cars DROP COLUMN vtv_date');
+  // El seguro pasa a tener costo e intervalo propio de renovación: antes se
+  // renovaba siempre "12 meses desde hoy" y no se sabía cuánto costaba.
+  if (!cols('cars').includes('seguro_costo')) {
+    db.exec('ALTER TABLE cars ADD COLUMN seguro_costo INTEGER NOT NULL DEFAULT 0');
+    db.exec("ALTER TABLE cars ADD COLUMN seguro_periodo TEXT NOT NULL DEFAULT 'mensual'");
+    db.exec('ALTER TABLE cars ADD COLUMN seguro_cada INTEGER NOT NULL DEFAULT 12');
+    // Los vehículos de la flota de demostración llevan el costo que les habría
+    // puesto el generador. A los cargados por una persona no se les inventa
+    // ninguno: quedan en 0 y la ficha los muestra como "sin costo cargado".
+    //
+    // Un id sembrado es `c0…c14` (flota original, adoptada) o `u<dueño>c<n>`
+    // (siembras posteriores). Un id creado desde el alta es 'c' + timestamp en
+    // base 36, que siempre sigue con una letra: por eso el `[0-9]` alcanza para
+    // distinguirlos.
+    db.exec(`
+      UPDATE cars
+         SET seguro_costo = 400000 + ((CAST(substr(id, instr(id,'c') + 1) AS INTEGER) * 17) % 12) * 10000
+       WHERE seguro_costo = 0
+         AND (id GLOB 'u*c*' OR id GLOB 'c[0-9]' OR id GLOB 'c[0-9][0-9]')
+    `);
+  }
 }
 
 /** Reasigna toda la flota huérfana (owner_id = 0) a un usuario. */
@@ -127,8 +155,8 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
   const idDe = (carId: string) => `u${ownerId}${carId}`;
 
   const insCar = db.prepare(`
-    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, gps_tag, service_cada, service_unidad, last_service_date, vtv_date, seguro_date)
-    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @gps_tag, @service_cada, @service_unidad, @last_service_date, @vtv_date, @seguro_date)
+    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, gps_tag, service_cada, service_unidad, last_service_date, seguro_date, seguro_costo, seguro_periodo, seguro_cada)
+    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @gps_tag, @service_cada, @service_unidad, @last_service_date, @seguro_date, @seguro_costo, @seguro_periodo, @seguro_cada)
   `);
   const insMov = db.prepare(`
     INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado)
@@ -150,8 +178,10 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
         service_cada: c.serviceCadaMeses,
         service_unidad: 'meses',
         last_service_date: iso(c.lastServiceDate),
-        vtv_date: iso(c.vtvDate),
         seguro_date: iso(c.seguroDate),
+        seguro_costo: c.seguroCosto,
+        seguro_periodo: 'mensual',
+        seguro_cada: 12,
       });
     }
     for (const m of movs) {
@@ -185,8 +215,10 @@ export function carToJson(r: CarRow) {
     serviceCada: r.service_cada,
     serviceUnidad: r.service_unidad,
     lastServiceDate: r.last_service_date,
-    vtvDate: r.vtv_date,
     seguroDate: r.seguro_date,
+    seguroCosto: r.seguro_costo,
+    seguroPeriodo: r.seguro_periodo,
+    seguroCada: r.seguro_cada,
   };
 }
 

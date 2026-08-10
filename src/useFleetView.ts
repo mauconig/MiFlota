@@ -13,6 +13,9 @@ const SVC_AVISO_DIAS = 15;
  *  pasara un valor mayor, se guardaría con el 6 por defecto sin avisar. */
 const SVC_MAX = 3650;
 
+/** Tope de meses entre renovaciones de la póliza. Coincide con el del servidor. */
+const SEG_CADA_MAX = 120;
+
 const svcNextDate = (c: Car) => (c.serviceUnidad === 'meses' ? addM(c.lastServiceDate, c.serviceCada) : addD(c.lastServiceDate, c.serviceCada));
 /** "cada 6 meses" / "cada 90 días" */
 const svcIntervalo = (n: number, u: Car['serviceUnidad']) => n + ' ' + (u === 'meses' ? (n === 1 ? 'mes' : 'meses') : n === 1 ? 'día' : 'días');
@@ -179,6 +182,8 @@ export interface MovRow {
 export interface DetailDoc {
   label: string;
   txt: string;
+  /** Segunda línea en gris: el costo y cada cuánto se renueva. */
+  sub: string;
   fg: string;
   renew: () => void;
 }
@@ -330,9 +335,11 @@ export interface View {
   carModal: boolean;
   drvModal: boolean;
   ncar: NewCarForm;
-  ch: Record<Exclude<keyof NewCarForm, 'serviceUnidad'>, (e: React.ChangeEvent<HTMLInputElement>) => void>;
+  ch: Record<Exclude<keyof NewCarForm, 'serviceUnidad' | 'seguroPeriodo'>, (e: React.ChangeEvent<HTMLInputElement>) => void>;
   /** Selector días/meses del alta. */
   ncarUnidadOpts: Chip[];
+  /** Selector mensual/anual del costo del seguro. */
+  ncarPeriodoOpts: Chip[];
   /** Hoy en ISO, para topar el <input type="date"> del último service. */
   hoyISO: string;
   ndrv: NewDriverForm;
@@ -355,7 +362,20 @@ function CH(on: boolean) {
 }
 
 function blankCar(): NewCarForm {
-  return { plate: '', model: '', year: '2018', gpsTag: '', lastService: isoLocal(TODAY), serviceCada: '6', serviceUnidad: 'meses' };
+  return {
+    plate: '',
+    model: '',
+    year: '2018',
+    gpsTag: '',
+    lastService: isoLocal(TODAY),
+    serviceCada: '6',
+    serviceUnidad: 'meses',
+    // El vencimiento no se presupone: es el dato que hay que mirar en la póliza.
+    seguroVence: '',
+    seguroCosto: '',
+    seguroPeriodo: 'mensual',
+    seguroCada: '12',
+  };
 }
 
 function blankDrv(): NewDriverForm {
@@ -372,7 +392,6 @@ const FTAG: Record<Car['estado'], [string, string, string]> = {
 
 const KTAG: Record<string, [string, string]> = {
   Service: ['#fdf3e2', '#a8730f'],
-  VTV: ['#fdeeea', '#a8412f'],
   Seguro: ['#eef1f6', '#4a6d99'],
   Taller: ['#f3eefa', '#6b52a1'],
 };
@@ -440,6 +459,9 @@ export function useFleetView(
       gpsTag: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, gpsTag: e.target.value } })),
       lastService: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, lastService: e.target.value } })),
       serviceCada: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, serviceCada: e.target.value } })),
+      seguroVence: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, seguroVence: e.target.value } })),
+      seguroCosto: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, seguroCosto: e.target.value } })),
+      seguroCada: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, seguroCada: e.target.value } })),
     }),
     [],
   );
@@ -477,6 +499,20 @@ export function useFleetView(
       toast('El último service no puede ser una fecha futura');
       return;
     }
+    if (!n.seguroVence) {
+      toast('Indicá cuándo vence el seguro');
+      return;
+    }
+    const segCosto = numFromInput(n.seguroCosto);
+    if (!segCosto) {
+      toast('Indicá el costo del seguro');
+      return;
+    }
+    const segCada = numFromInput(n.seguroCada);
+    if (!segCada || segCada > SEG_CADA_MAX) {
+      toast('Cada cuánto se renueva el seguro: entre 1 y ' + SEG_CADA_MAX + ' meses');
+      return;
+    }
     // El alta es lo único que no se puede aplicar en optimista: el id lo asigna
     // el servidor, así que se espera la confirmación antes de cerrar el modal.
     persist
@@ -488,6 +524,10 @@ export function useFleetView(
         lastServiceDate: n.lastService || isoLocal(TODAY),
         serviceCada: cada,
         serviceUnidad: n.serviceUnidad,
+        seguroDate: n.seguroVence,
+        seguroCosto: segCosto,
+        seguroPeriodo: n.seguroPeriodo,
+        seguroCada: segCada,
       })
       .then(() => {
         update({ modal: null, ncar: blankCar(), nav: 'flota' });
@@ -540,14 +580,6 @@ export function useFleetView(
         kind: 'Service',
         sev: dLeft < 0 ? 2 : 1,
         text: 'Service ' + svcLeftLbl(dLeft, true),
-      });
-    const vtvLeft = daysBetween(TODAY, c.vtvDate);
-    if (vtvLeft <= 30)
-      alertList.push({
-        car: c,
-        kind: 'VTV',
-        sev: vtvLeft < 0 ? 2 : 1,
-        text: 'VTV ' + (vtvLeft < 0 ? 'vencida hace ' + durLbl(vtvLeft) : vtvLeft === 0 ? 'vence hoy' : 'vence en ' + durLbl(vtvLeft)),
       });
     const segLeft = daysBetween(TODAY, c.seguroDate);
     if (segLeft <= 20)
@@ -760,24 +792,22 @@ export function useFleetView(
           ? 'El próximo service pasaría al ' + dLblFull(svcNextDate({ ...c, serviceCada: borN, serviceUnidad: bor.unidad }))
           : '',
       docs: [
-        {
-          label: 'VTV',
-          txt: (docLeft(c.vtvDate) < 0 ? 'Vencida hace ' : docLeft(c.vtvDate) === 0 ? '' : 'Vence en ') + (docLeft(c.vtvDate) === 0 ? 'Vence hoy' : durLbl(docLeft(c.vtvDate))) + ' · ' + dLblFull(c.vtvDate),
-          fg: docLeft(c.vtvDate) < 0 ? COLORS.neg : docLeft(c.vtvDate) <= 30 ? COLORS.warn : '#3d3a34',
-          renew: () => {
-            patchCar(c.id, { vtvDate: addM(TODAY, 12) });
-            toast('VTV renovada hasta ' + dLblFull(addM(TODAY, 12)));
-          },
-        },
-        {
-          label: 'Seguro',
-          txt: (docLeft(c.seguroDate) < 0 ? 'Vencido hace ' : docLeft(c.seguroDate) === 0 ? '' : 'Vence en ') + (docLeft(c.seguroDate) === 0 ? 'Vence hoy' : durLbl(docLeft(c.seguroDate))) + ' · ' + dLblFull(c.seguroDate),
-          fg: docLeft(c.seguroDate) < 0 ? COLORS.neg : docLeft(c.seguroDate) <= 20 ? COLORS.warn : '#3d3a34',
-          renew: () => {
-            patchCar(c.id, { seguroDate: addM(TODAY, 12) });
-            toast('Seguro renovado hasta ' + dLblFull(addM(TODAY, 12)));
-          },
-        },
+        (() => {
+          // Renovar corre desde el vencimiento, no desde hoy, para no regalar
+          // días de póliza. Si ya venció, hoy es el único arranque posible.
+          const desde = c.seguroDate > TODAY ? c.seguroDate : TODAY;
+          const hasta = addM(desde, c.seguroCada);
+          return {
+            label: 'Seguro',
+            txt: (docLeft(c.seguroDate) < 0 ? 'Vencido hace ' : docLeft(c.seguroDate) === 0 ? '' : 'Vence en ') + (docLeft(c.seguroDate) === 0 ? 'Vence hoy' : durLbl(docLeft(c.seguroDate))) + ' · ' + dLblFull(c.seguroDate),
+            sub: (c.seguroCosto ? fmt(c.seguroCosto, st.hide) + (c.seguroPeriodo === 'mensual' ? ' por mes' : ' por año') : 'Sin costo cargado') + ' · se renueva cada ' + svcIntervalo(c.seguroCada, 'meses'),
+            fg: docLeft(c.seguroDate) < 0 ? COLORS.neg : docLeft(c.seguroDate) <= 20 ? COLORS.warn : '#3d3a34',
+            renew: () => {
+              patchCar(c.id, { seguroDate: hasta });
+              toast('Seguro renovado hasta ' + dLblFull(hasta));
+            },
+          };
+        })(),
       ],
       estadoOpts: (
         [
@@ -1018,6 +1048,11 @@ export function useFleetView(
       label: u === 'dias' ? 'días' : 'meses',
       ...CH(st.ncar.serviceUnidad === u),
       pick: () => update((s2) => ({ ncar: { ...s2.ncar, serviceUnidad: u } })),
+    })),
+    ncarPeriodoOpts: (['mensual', 'anual'] as const).map((p) => ({
+      label: p,
+      ...CH(st.ncar.seguroPeriodo === p),
+      pick: () => update((s2) => ({ ncar: { ...s2.ncar, seguroPeriodo: p } })),
     })),
 
     periodShort: r.short,

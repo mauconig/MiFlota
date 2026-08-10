@@ -1,5 +1,8 @@
 export type Estado = 'activo' | 'taller' | 'baja';
 export type ServiceUnidad = 'dias' | 'meses';
+/** Cada cuánto se paga el seguro, que no es lo mismo que cada cuánto se renueva
+    la póliza: se puede pagar por mes y renovar una vez al año. */
+export type SeguroPeriodo = 'mensual' | 'anual';
 
 export interface Car {
   id: string;
@@ -15,10 +18,14 @@ export interface Car {
   serviceCada: number;
   serviceUnidad: ServiceUnidad;
   lastServiceDate: Date;
-  /** Vencimientos como fecha, no como días restantes: un contador queda
+  /** Vencimiento como fecha, no como días restantes: un contador queda
       desactualizado apenas pasa un día en la base. */
-  vtvDate: Date;
   seguroDate: Date;
+  /** Costo de la póliza en guaraníes, en la periodicidad de `seguroPeriodo`. */
+  seguroCosto: number;
+  seguroPeriodo: SeguroPeriodo;
+  /** Meses entre renovaciones de la póliza. */
+  seguroCada: number;
 }
 
 export type MovEstado = 'pagado' | 'pendiente' | 'parcial';
@@ -49,6 +56,11 @@ export interface NewCarForm {
   lastService: string;
   serviceCada: string;
   serviceUnidad: ServiceUnidad;
+  /** ISO `YYYY-MM-DD`: cuándo vence la póliza vigente. */
+  seguroVence: string;
+  seguroCosto: string;
+  seguroPeriodo: SeguroPeriodo;
+  seguroCada: string;
 }
 
 export interface NewDriverForm {

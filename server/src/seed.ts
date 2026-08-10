@@ -18,8 +18,8 @@ export interface SeedCar {
   estado: Estado;
   serviceCadaMeses: number;
   lastServiceDate: Date;
-  vtvDate: Date;
   seguroDate: Date;
+  seguroCosto: number;
 }
 
 export interface SeedMov {
@@ -95,8 +95,11 @@ export function generateFleetData(): { cars: SeedCar[]; movs: SeedMov[] } {
       lastServiceDate: addD(SEED_TODAY, -gapDias),
       // Los offsets son los que tenía la versión anterior en días restantes,
       // convertidos a la fecha de vencimiento que representaban.
-      vtvDate: addD(SEED_TODAY, ((i * 53) % 330) - 15),
       seguroDate: addD(SEED_TODAY, ((i * 71) % 360) - 5),
+      // Sin tocar el PRNG, para no correrle la secuencia a los movimientos. El
+      // rango coincide con el de los egresos de categoría Seguro que se generan
+      // más abajo, así que el costo y lo que efectivamente se paga concuerdan.
+      seguroCosto: 400000 + ((i * 17) % 12) * 10000,
     };
   });
 

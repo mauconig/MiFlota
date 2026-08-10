@@ -166,8 +166,11 @@ export function DetailDrawer({ v }: { v: View }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 13, borderTop: '1px solid #f0ebe0' }}>
             {d.docs.map((doc) => (
               <div key={doc.label} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <span style={{ width: 72, flex: 'none', fontSize: 13, fontWeight: 700 }}>{doc.label}</span>
-                <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: doc.fg }}>{doc.txt}</span>
+                <span style={{ width: 62, flex: 'none', fontSize: 13, fontWeight: 700 }}>{doc.label}</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: 12, color: doc.fg }}>{doc.txt}</span>
+                  <span style={{ display: 'block', fontSize: 11, color: '#6b665c', marginTop: 2 }}>{doc.sub}</span>
+                </span>
                 <Btn
                   onClick={doc.renew}
                   style={{ border: '1px solid #e0d6c4', background: '#fffdf8', color: '#3d3a34', borderRadius: 11, minHeight: 32, padding: '0 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', flex: 'none' }}

@@ -129,6 +129,8 @@ app.get('/api/state', async (req) => {
 
 const ESTADOS = new Set(['activo', 'taller', 'baja']);
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
+/** Tope de meses entre renovaciones de la póliza. Igual al del cliente. */
+const SEG_CADA_MAX = 120;
 
 interface CarPatch {
   driver?: string;
@@ -138,8 +140,10 @@ interface CarPatch {
   serviceCada?: number;
   serviceUnidad?: string;
   lastServiceDate?: string;
-  vtvDate?: string;
   seguroDate?: string;
+  seguroCosto?: number;
+  seguroPeriodo?: string;
+  seguroCada?: number;
 }
 
 /** Mapea los campos que el cliente puede tocar a su columna, validando cada uno.
@@ -152,8 +156,10 @@ const CAMPOS: Record<keyof CarPatch, { col: string; ok: (v: unknown) => boolean 
   serviceCada: { col: 'service_cada', ok: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 3650 },
   serviceUnidad: { col: 'service_unidad', ok: (v) => v === 'dias' || v === 'meses' },
   lastServiceDate: { col: 'last_service_date', ok: (v) => typeof v === 'string' && FECHA.test(v) },
-  vtvDate: { col: 'vtv_date', ok: (v) => typeof v === 'string' && FECHA.test(v) },
   seguroDate: { col: 'seguro_date', ok: (v) => typeof v === 'string' && FECHA.test(v) },
+  seguroCosto: { col: 'seguro_costo', ok: (v) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 1_000_000_000 },
+  seguroPeriodo: { col: 'seguro_periodo', ok: (v) => v === 'mensual' || v === 'anual' },
+  seguroCada: { col: 'seguro_cada', ok: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= SEG_CADA_MAX },
 };
 
 app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (req, reply) => {
@@ -212,6 +218,10 @@ interface NuevoCar {
   lastServiceDate?: string;
   serviceCada?: number;
   serviceUnidad?: string;
+  seguroDate?: string;
+  seguroCosto?: number;
+  seguroPeriodo?: string;
+  seguroCada?: number;
 }
 
 app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
@@ -232,6 +242,11 @@ app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
     d.setMonth(d.getMonth() + n);
     return d.toISOString().slice(0, 10);
   };
+  // El vencimiento del seguro lo trae el alta. Si faltara, un año desde hoy es
+  // el único supuesto razonable, pero se acepta para no romper clientes viejos.
+  if (b.seguroDate !== undefined && !(typeof b.seguroDate === 'string' && FECHA.test(b.seguroDate))) {
+    return reply.code(400).send({ error: 'Fecha de vencimiento del seguro inválida' });
+  }
   const car = {
     id: 'c' + Date.now().toString(36),
     owner_id: u.id,
@@ -247,12 +262,14 @@ app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
     service_cada: Number.isInteger(b.serviceCada) && b.serviceCada! >= 1 && b.serviceCada! <= 3650 ? b.serviceCada! : 6,
     service_unidad: b.serviceUnidad === 'dias' ? 'dias' : 'meses',
     last_service_date: typeof b.lastServiceDate === 'string' && FECHA.test(b.lastServiceDate) && b.lastServiceDate <= hoy ? b.lastServiceDate : hoy,
-    vtv_date: enMeses(12),
-    seguro_date: enMeses(12),
+    seguro_date: b.seguroDate ?? enMeses(12),
+    seguro_costo: Number.isInteger(b.seguroCosto) && b.seguroCosto! >= 0 && b.seguroCosto! <= 1_000_000_000 ? b.seguroCosto! : 0,
+    seguro_periodo: b.seguroPeriodo === 'anual' ? 'anual' : 'mensual',
+    seguro_cada: Number.isInteger(b.seguroCada) && b.seguroCada! >= 1 && b.seguroCada! <= SEG_CADA_MAX ? b.seguroCada! : 12,
   };
   db.prepare(`
-    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, gps_tag, service_cada, service_unidad, last_service_date, vtv_date, seguro_date)
-    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @gps_tag, @service_cada, @service_unidad, @last_service_date, @vtv_date, @seguro_date)
+    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, gps_tag, service_cada, service_unidad, last_service_date, seguro_date, seguro_costo, seguro_periodo, seguro_cada)
+    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @gps_tag, @service_cada, @service_unidad, @last_service_date, @seguro_date, @seguro_costo, @seguro_periodo, @seguro_cada)
   `).run(car);
 
   return reply.code(201).send(carToJson(selCar.get(car.id, u.id) as CarRow));

@@ -58,6 +58,45 @@ export function CarModal({ v }: { v: View }) {
             </div>
           </div>
         </div>
+        <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#6b665c', flex: 'none' }}>Seguro</span>
+          <span style={{ flex: 1, height: 1, background: '#f0ebe0' }} />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <label style={fieldLabel}>
+            <span style={fieldLabelText}>Vence el</span>
+            <input type="date" value={v.ncar.seguroVence} onChange={v.ch.seguroVence} style={fieldInput} />
+          </label>
+          <div style={fieldLabel}>
+            <span style={fieldLabelText}>Renovar cada</span>
+            <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 9, minWidth: 0 }}>
+              <input
+                inputMode="numeric"
+                value={v.ncar.seguroCada}
+                onChange={v.ch.seguroCada}
+                placeholder="12"
+                aria-label="Meses"
+                style={{ ...fieldInput, width: 62, flex: 'none', padding: '0 10px', textAlign: 'center' }}
+              />
+              <span style={{ fontSize: 13, color: '#6b665c' }}>meses</span>
+            </div>
+          </div>
+          <div style={{ ...fieldLabel, gridColumn: '1 / -1' }}>
+            <span style={fieldLabelText}>Costo de la póliza</span>
+            <div style={{ display: 'flex', flexDirection: 'row', gap: 9, minWidth: 0 }}>
+              <input inputMode="numeric" value={v.ncar.seguroCosto} onChange={v.ch.seguroCosto} placeholder="400.000" aria-label="Costo" style={{ ...fieldInput, flex: 1 }} />
+              {v.ncarPeriodoOpts.map((p) => (
+                <Btn
+                  key={p.label}
+                  onClick={p.pick}
+                  style={{ border: `1px solid ${p.bd}`, background: p.bg, color: p.fg, borderRadius: 14, minHeight: 44, padding: '0 16px', flex: 'none', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+                >
+                  {p.label}
+                </Btn>
+              ))}
+            </div>
+          </div>
+        </div>
         <p style={{ margin: 0, fontSize: 12, color: '#6b665c' }}>La cuota se define al asignarle un chofer.</p>
         <div style={modalFooter}>
           <Btn onClick={v.closeModal} style={btnSecondary} hoverStyle={btnSecondaryHover}>

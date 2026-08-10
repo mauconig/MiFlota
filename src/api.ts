@@ -10,10 +10,10 @@ function parseDate(s: string): Date {
 
 const isoDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-type CarDto = Omit<Car, 'lastServiceDate' | 'vtvDate' | 'seguroDate'> & { lastServiceDate: string; vtvDate: string; seguroDate: string };
+type CarDto = Omit<Car, 'lastServiceDate' | 'seguroDate'> & { lastServiceDate: string; seguroDate: string };
 type MovDto = Omit<Mov, 'date'> & { date: string };
 
-const toCar = (c: CarDto): Car => ({ ...c, lastServiceDate: parseDate(c.lastServiceDate), vtvDate: parseDate(c.vtvDate), seguroDate: parseDate(c.seguroDate) });
+const toCar = (c: CarDto): Car => ({ ...c, lastServiceDate: parseDate(c.lastServiceDate), seguroDate: parseDate(c.seguroDate) });
 const toMov = (m: MovDto): Mov => ({ ...m, date: parseDate(m.date) });
 
 export class SinSesion extends Error {}
@@ -82,6 +82,10 @@ export interface NuevoCarPayload {
   lastServiceDate: string;
   serviceCada: number;
   serviceUnidad: 'dias' | 'meses';
+  seguroDate: string;
+  seguroCosto: number;
+  seguroPeriodo: 'mensual' | 'anual';
+  seguroCada: number;
 }
 
 export interface FleetStore {
