@@ -3,7 +3,7 @@ import fastifyStatic from '@fastify/static';
 import fastifyCookie from '@fastify/cookie';
 import fastifyMultipart from '@fastify/multipart';
 import { createReadStream, existsSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -211,7 +211,18 @@ app.delete<{ Params: { id: string } }>('/api/cars/:id', async (req, reply) => {
   if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
 
   const { n } = db.prepare('SELECT COUNT(*) AS n FROM movs WHERE car_id = ? AND owner_id = ?').get(req.params.id, u.id) as { n: number };
+
+  // Los movimientos se van en cascada, pero los archivos no: sin esto, cada
+  // vehículo borrado dejaría sus comprobantes ocupando el disco para siempre.
+  const adjuntos = db.prepare('SELECT comprobante FROM movs WHERE car_id = ? AND owner_id = ? AND comprobante IS NOT NULL').all(req.params.id, u.id) as { comprobante: string }[];
+
   db.prepare('DELETE FROM cars WHERE id = ? AND owner_id = ?').run(req.params.id, u.id);
+
+  for (const a of adjuntos) {
+    // Que falle un borrado de archivo no puede tumbar la respuesta: la fila ya
+    // no está, y un huérfano es preferible a un error después del hecho.
+    await rm(join(COMPROBANTES_DIR, a.comprobante), { force: true }).catch((e) => req.log.warn({ e, id: a.comprobante }, 'no se pudo borrar el comprobante'));
+  }
   req.log.info({ car: car.plate, movs: n }, 'vehículo eliminado');
   return { ok: true, plate: car.plate, movs: n };
 });
