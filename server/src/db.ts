@@ -73,10 +73,10 @@ export function openDb() {
 
     CREATE INDEX IF NOT EXISTS idx_movs_car   ON movs(car_id);
     CREATE INDEX IF NOT EXISTS idx_movs_date  ON movs(date);
-    CREATE INDEX IF NOT EXISTS idx_cars_owner ON cars(owner_id);
-    CREATE INDEX IF NOT EXISTS idx_movs_owner ON movs(owner_id);
   `);
 
+  // Los índices sobre owner_id se crean dentro de la migración, no acá: en una
+  // base anterior la columna todavía no existe cuando corre este bloque.
   migrarOwner(db);
   return db;
 }
