@@ -177,6 +177,20 @@ app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (re
   return carToJson(selCar.get(req.params.id, u.id) as CarRow);
 });
 
+/** Borra el vehículo y, por la FK en cascada, todos sus movimientos. Es
+ *  destructivo a propósito: `estado = 'baja'` es la alternativa que conserva
+ *  el historial, y la interfaz ofrece las dos. */
+app.delete<{ Params: { id: string } }>('/api/cars/:id', async (req, reply) => {
+  const u = quien(req);
+  const car = selCar.get(req.params.id, u.id) as CarRow | undefined;
+  if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
+
+  const { n } = db.prepare('SELECT COUNT(*) AS n FROM movs WHERE car_id = ? AND owner_id = ?').get(req.params.id, u.id) as { n: number };
+  db.prepare('DELETE FROM cars WHERE id = ? AND owner_id = ?').run(req.params.id, u.id);
+  req.log.info({ car: car.plate, movs: n }, 'vehículo eliminado');
+  return { ok: true, plate: car.plate, movs: n };
+});
+
 interface NuevoCar {
   plate: string;
   model: string;

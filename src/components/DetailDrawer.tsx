@@ -207,6 +207,18 @@ export function DetailDrawer({ v }: { v: View }) {
               </button>
             ))}
           </div>
+          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 12, borderTop: '1px solid #f0ebe0' }}>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: '#6b665c', lineHeight: 1.45 }}>
+              Baja lo saca de circulación y conserva su historial. Eliminarlo lo borra junto con sus movimientos.
+            </span>
+            <Btn
+              onClick={d.borrar}
+              style={{ border: '1px solid #f0d0c6', background: '#fffdf8', color: '#a8412f', borderRadius: 12, minHeight: 38, padding: '0 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', flex: 'none' }}
+              hoverStyle={{ background: '#fdeeea' }}
+            >
+              Eliminar
+            </Btn>
+          </div>
         </div>
       </div>
     </div>

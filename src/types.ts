@@ -74,6 +74,8 @@ export interface UIState {
   ncar: NewCarForm;
   ndrv: NewDriverForm;
   detailId: string | null;
+  /** Acción destructiva esperando confirmación. */
+  confirm: { tipo: 'borrarAuto' | 'quitarChofer'; carId: string } | null;
   /** Id del vehículo cuyo chofer se está viendo en detalle. */
   driverId: string | null;
 }

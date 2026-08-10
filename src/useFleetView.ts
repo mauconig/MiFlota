@@ -229,6 +229,7 @@ export interface DetailView {
   markService: () => void;
   editDriver: () => void;
   clearDriver: () => void;
+  borrar: () => void;
 }
 
 export interface CarOption {
@@ -301,6 +302,14 @@ export interface View {
   hasDetail: boolean;
   detail: DetailView;
   closeDetail: () => void;
+
+  confirmOpen: boolean;
+  confirmTitulo: string;
+  confirmDetalle: string;
+  confirmAviso: string;
+  confirmBoton: string;
+  confirmar: () => void;
+  cancelarConfirm: () => void;
 
   hasDriverDetail: boolean;
   driverDetail: DriverDetailView;
@@ -393,7 +402,11 @@ export function useFleetView(
   movs: Mov[],
   state: UIState,
   update: (patch: Partial<UIState> | ((s: UIState) => Partial<UIState>)) => void,
-  persist: { patchCar: (id: string, patch: Partial<Car>) => void; addCar: (nuevo: NuevoCarPayload) => Promise<Car> },
+  persist: {
+    patchCar: (id: string, patch: Partial<Car>) => void;
+    addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
+    deleteCar: (id: string) => Promise<{ plate: string; movs: number }>;
+  },
 ): View {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -659,6 +672,7 @@ export function useFleetView(
         markService: () => {},
         editDriver: () => {},
         clearDriver: () => {},
+        borrar: () => {},
       };
     }
     const cs = stats(movs, (m) => m.carId === c.id && inR(m));
@@ -775,10 +789,8 @@ export function useFleetView(
         toast('Service registrado el ' + dLblFull(TODAY) + ' · próximo en ' + svcIntervalo(c.serviceCada, c.serviceUnidad));
       },
       editDriver: () => update({ modal: 'drv', ndrv: { name: c.driver === 'Sin chofer' ? '' : c.driver, carId: c.id, cuota: c.cuota ? String(c.cuota) : '' } }),
-      clearDriver: () => {
-        patchCar(c.id, { driver: 'Sin chofer', cuota: 0 });
-        toast('Chofer desvinculado de ' + c.plate);
-      },
+      clearDriver: () => update({ confirm: { tipo: 'quitarChofer', carId: c.id } }),
+      borrar: () => update({ confirm: { tipo: 'borrarAuto', carId: c.id } }),
     };
   })();
 
@@ -861,11 +873,7 @@ export function useFleetView(
       sinPagos: !cuotas.length,
       verVehiculo: () => update({ driverId: null, detailId: c.id }),
       editar: () => update({ driverId: null, modal: 'drv', ndrv: { name: c.driver, carId: c.id, cuota: c.cuota ? String(c.cuota) : '' } }),
-      quitar: () => {
-        patchCar(c.id, { driver: 'Sin chofer', cuota: 0 });
-        update({ driverId: null });
-        toast('Chofer desvinculado de ' + c.plate);
-      },
+      quitar: () => update({ driverId: null, confirm: { tipo: 'quitarChofer', carId: c.id } }),
     };
   })();
 
@@ -1085,6 +1093,54 @@ export function useFleetView(
     hasDetail: !!st.detailId,
     detail,
     closeDetail: () => update({ detailId: null }),
+
+    ...(() => {
+      const c = st.confirm ? cars.find((x) => x.id === st.confirm!.carId) : undefined;
+      if (!st.confirm || !c) {
+        return { confirmOpen: false, confirmTitulo: '', confirmDetalle: '', confirmAviso: '', confirmBoton: '', confirmar: () => {}, cancelarConfirm: () => update({ confirm: null }) };
+      }
+      const cerrar = () => update({ confirm: null });
+
+      if (st.confirm.tipo === 'quitarChofer') {
+        return {
+          confirmOpen: true,
+          confirmTitulo: '¿Quitar a ' + c.driver + '?',
+          confirmDetalle: `${c.plate} queda sin chofer y deja de generar cuota. Los cobros ya registrados no se tocan.`,
+          confirmAviso: 'El nombre del chofer no se guarda en ningún otro lado: si lo quitás, hay que volver a escribirlo.',
+          confirmBoton: 'Quitar chofer',
+          confirmar: () => {
+            patchCar(c.id, { driver: 'Sin chofer', cuota: 0 });
+            cerrar();
+            toast('Chofer desvinculado de ' + c.plate);
+          },
+          cancelarConfirm: cerrar,
+        };
+      }
+
+      // Borrar el vehículo arrastra sus movimientos, así que el aviso dice
+      // exactamente cuánta plata registrada desaparece de los reportes.
+      const suyos = movs.filter((m) => m.carId === c.id);
+      const ing = suyos.filter((m) => m.type === 'ingreso').reduce((a, m) => a + m.amount, 0);
+      const egr = suyos.filter((m) => m.type === 'egreso').reduce((a, m) => a + m.amount, 0);
+      return {
+        confirmOpen: true,
+        confirmTitulo: '¿Eliminar ' + c.plate + '?',
+        confirmDetalle: `Se borra ${c.model} del ${c.year}${c.driver !== 'Sin chofer' ? ', junto con su chofer ' + c.driver : ''}. Esto no se puede deshacer.`,
+        confirmAviso: suyos.length
+          ? `También se borran sus ${suyos.length} movimientos (${fmt(ing)} cobrados y ${fmt(egr)} en gastos), así que los totales de Reportes van a cambiar. Si solo dejó de circular, conviene marcarlo como Baja en lugar de eliminarlo.`
+          : 'Si solo dejó de circular, conviene marcarlo como Baja en lugar de eliminarlo.',
+        confirmBoton: 'Eliminar vehículo',
+        confirmar: () => {
+          cerrar();
+          update({ detailId: null });
+          persist
+            .deleteCar(c.id)
+            .then((r) => toast('Vehículo eliminado · ' + r.plate + (r.movs ? ' y sus ' + r.movs + ' movimientos' : '')))
+            .catch((e: Error) => toast('No se pudo eliminar: ' + e.message));
+        },
+        cancelarConfirm: cerrar,
+      };
+    })(),
 
     hasDriverDetail: !!st.driverId,
     driverDetail,

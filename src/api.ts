@@ -87,6 +87,7 @@ export interface FleetStore {
   error: string;
   patchCar: (id: string, patch: Partial<Car>) => void;
   addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
+  deleteCar: (id: string) => Promise<{ plate: string; movs: number }>;
 }
 
 /**
@@ -143,5 +144,14 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     return creado;
   }, []);
 
-  return { cars, movs, cargando, error, patchCar, addCar };
+  const deleteCar = useCallback(async (id: string) => {
+    const r = await req<{ plate: string; movs: number }>(`/api/cars/${id}`, { method: 'DELETE' });
+    // Los movimientos se van en cascada del lado del servidor, así que hay que
+    // sacarlos también acá o quedarían sumando en los totales de la sesión.
+    setCars((cs) => cs.filter((c) => c.id !== id));
+    setMovs((ms) => ms.filter((m) => m.carId !== id));
+    return r;
+  }, []);
+
+  return { cars, movs, cargando, error, patchCar, addCar, deleteCar };
 }
