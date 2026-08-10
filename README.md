@@ -1,4 +1,4 @@
-# Sikka Flota — Dashboard Web
+# MiFlota — Dashboard Web
 
 Panel del dueño para gestión de una flota de vehículos: ingresos y egresos por
 vehículo, choferes, alertas de mantenimiento/documentación, reportes de

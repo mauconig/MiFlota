@@ -45,7 +45,7 @@ export function Login({ onEntrar }: { onEntrar: (usuario: string, password: stri
             <TruckLogo />
           </span>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.01em' }}>Sikka Flota</div>
+            <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.01em' }}>MiFlota</div>
             <div style={{ fontSize: 12, color: '#6b665c' }}>Panel del dueño</div>
           </div>
         </div>

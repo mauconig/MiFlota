@@ -23,7 +23,7 @@ export function Sidebar({
           <TruckLogo />
         </span>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>Sikka Flota</div>
+          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>MiFlota</div>
           <div style={{ fontSize: 11, color: '#bdb6a4' }}>Panel del dueño</div>
         </div>
       </div>
