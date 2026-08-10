@@ -1,5 +1,6 @@
 import type { Chip } from '../useFleetView';
 import { Btn } from './Btn';
+import { DateField } from './DateField';
 import { EyeIcon } from '../icons';
 
 export function Header({
@@ -22,8 +23,8 @@ export function Header({
   isCustom: boolean;
   cFrom: string;
   cTo: string;
-  onFrom: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onTo: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onFrom: (iso: string) => void;
+  onTo: (iso: string) => void;
   montosLbl: string;
   toggleMontos: () => void;
 }) {
@@ -45,10 +46,10 @@ export function Header({
           </Btn>
         ))}
         {isCustom && (
-          <span style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6, background: '#fffdf8', border: '1px solid #e0d6c4', borderRadius: 14, padding: '0 10px', minHeight: 34 }}>
-            <input type="date" value={cFrom} onChange={onFrom} style={{ border: 'none', background: 'none', fontSize: 12, color: '#3d3a34', outline: 'none', width: 118 }} />
+          <span style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6, flex: 'none' }}>
+            <DateField value={cFrom} onChange={onFrom} max={cTo} ariaLabel="Desde" compact style={{ width: 148 }} />
             <span style={{ fontSize: 12, color: '#6b665c' }}>→</span>
-            <input type="date" value={cTo} onChange={onTo} style={{ border: 'none', background: 'none', fontSize: 12, color: '#3d3a34', outline: 'none', width: 118 }} />
+            <DateField value={cTo} onChange={onTo} min={cFrom} ariaLabel="Hasta" compact style={{ width: 148 }} />
           </span>
         )}
         <Btn

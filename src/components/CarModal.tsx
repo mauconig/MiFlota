@@ -1,5 +1,6 @@
 import type { View } from '../useFleetView';
 import { Btn } from './Btn';
+import { DateField } from './DateField';
 import { CloseIcon } from '../icons';
 import { btnPrimary, btnPrimaryHover, btnSecondary, btnSecondaryHover, fieldInput, fieldLabel, fieldLabelText, modalCloseBtn, modalCloseBtnHover, modalFooter, modalOverlay, modalPanel, modalTitle } from '../styles';
 
@@ -29,7 +30,7 @@ export function CarModal({ v }: { v: View }) {
           </label>
           <label style={fieldLabel}>
             <span style={fieldLabelText}>Último service</span>
-            <input type="date" value={v.ncar.lastService} onChange={v.ch.lastService} max={v.hoyISO} style={fieldInput} />
+            <DateField value={v.ncar.lastService} onChange={v.setLastService} max={v.hoyISO} ariaLabel="Último service" />
           </label>
           <label style={fieldLabel}>
             <span style={fieldLabelText}>GPS tag</span>
@@ -65,7 +66,7 @@ export function CarModal({ v }: { v: View }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <label style={fieldLabel}>
             <span style={fieldLabelText}>Vence el</span>
-            <input type="date" value={v.ncar.seguroVence} onChange={v.ch.seguroVence} style={fieldInput} />
+            <DateField value={v.ncar.seguroVence} onChange={v.setSeguroVence} ariaLabel="Vencimiento del seguro" />
           </label>
           <div style={fieldLabel}>
             <span style={fieldLabelText}>Renovar cada</span>

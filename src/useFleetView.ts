@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import type { Car, Mov, UIState, NewCarForm, NewDriverForm } from './types';
 import type { NuevoCarPayload } from './api';
 import { CATS, CATCOLORS } from './data';
@@ -270,8 +270,8 @@ export interface View {
   isCustom: boolean;
   cFrom: string;
   cTo: string;
-  onFrom: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onTo: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onFrom: (iso: string) => void;
+  onTo: (iso: string) => void;
   montosLbl: string;
   toggleMontos: () => void;
 
@@ -335,7 +335,10 @@ export interface View {
   carModal: boolean;
   drvModal: boolean;
   ncar: NewCarForm;
-  ch: Record<Exclude<keyof NewCarForm, 'serviceUnidad' | 'seguroPeriodo'>, (e: React.ChangeEvent<HTMLInputElement>) => void>;
+  ch: Record<Exclude<keyof NewCarForm, 'serviceUnidad' | 'seguroPeriodo' | 'lastService' | 'seguroVence'>, (e: React.ChangeEvent<HTMLInputElement>) => void>;
+  /** Las fechas del alta entregan el ISO directo, no un evento. */
+  setLastService: (iso: string) => void;
+  setSeguroVence: (iso: string) => void;
   /** Selector días/meses del alta. */
   ncarUnidadOpts: Chip[];
   /** Selector mensual/anual del costo del seguro. */
@@ -457,14 +460,17 @@ export function useFleetView(
       model: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, model: e.target.value } })),
       year: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, year: e.target.value } })),
       gpsTag: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, gpsTag: e.target.value } })),
-      lastService: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, lastService: e.target.value } })),
       serviceCada: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, serviceCada: e.target.value } })),
-      seguroVence: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, seguroVence: e.target.value } })),
       seguroCosto: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, seguroCosto: e.target.value } })),
       seguroCada: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, seguroCada: e.target.value } })),
     }),
     [],
   );
+
+  // Las fechas no vienen de un evento de input: DateField entrega el ISO ya
+  // armado, porque lo que se tipea es `dd/mm/aaaa`.
+  const setLastService = useCallback((iso: string) => update((s) => ({ ncar: { ...s.ncar, lastService: iso } })), []);
+  const setSeguroVence = useCallback((iso: string) => update((s) => ({ ncar: { ...s.ncar, seguroVence: iso } })), []);
 
   const dh = useMemo(
     () => ({
@@ -984,8 +990,8 @@ export function useFleetView(
     isCustom: st.period === 'custom',
     cFrom: st.cFrom,
     cTo: st.cTo,
-    onFrom: (e) => update({ cFrom: e.target.value }),
-    onTo: (e) => update({ cTo: e.target.value }),
+    onFrom: (iso) => update({ cFrom: iso }),
+    onTo: (iso) => update({ cTo: iso }),
     montosLbl: st.hide ? 'Mostrar montos' : 'Ocultar montos',
     toggleMontos: () => update((s2) => ({ hide: !s2.hide })),
 
@@ -1049,6 +1055,8 @@ export function useFleetView(
       ...CH(st.ncar.serviceUnidad === u),
       pick: () => update((s2) => ({ ncar: { ...s2.ncar, serviceUnidad: u } })),
     })),
+    setLastService,
+    setSeguroVence,
     ncarPeriodoOpts: (['mensual', 'anual'] as const).map((p) => ({
       label: p,
       ...CH(st.ncar.seguroPeriodo === p),
