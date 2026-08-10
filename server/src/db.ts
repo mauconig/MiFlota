@@ -7,6 +7,7 @@ export const DB_PATH = process.env.MIFLOTA_DB ?? '/data/miflota.db';
 
 export interface CarRow {
   id: string;
+  owner_id: number;
   plate: string;
   model: string;
   year: number;
@@ -44,6 +45,7 @@ export function openDb() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS cars (
       id                 TEXT PRIMARY KEY,
+      owner_id           INTEGER NOT NULL DEFAULT 0,
       plate              TEXT NOT NULL,
       model              TEXT NOT NULL,
       year               INTEGER NOT NULL,
@@ -58,7 +60,8 @@ export function openDb() {
     );
 
     CREATE TABLE IF NOT EXISTS movs (
-      id          INTEGER PRIMARY KEY,
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner_id    INTEGER NOT NULL DEFAULT 0,
       car_id      TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
       type        TEXT NOT NULL CHECK (type IN ('ingreso','egreso')),
       amount      INTEGER NOT NULL,
@@ -68,33 +71,56 @@ export function openDb() {
       estado      TEXT CHECK (estado IN ('pagado','pendiente','parcial'))
     );
 
-    CREATE INDEX IF NOT EXISTS idx_movs_car  ON movs(car_id);
-    CREATE INDEX IF NOT EXISTS idx_movs_date ON movs(date);
+    CREATE INDEX IF NOT EXISTS idx_movs_car   ON movs(car_id);
+    CREATE INDEX IF NOT EXISTS idx_movs_date  ON movs(date);
+    CREATE INDEX IF NOT EXISTS idx_cars_owner ON cars(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_movs_owner ON movs(owner_id);
   `);
 
+  migrarOwner(db);
   return db;
 }
 
-/** Siembra la flota de demostración solo si la base está vacía, para que un
- *  reinicio del contenedor nunca pise datos reales. */
-export function seedIfEmpty(db: Database.Database): boolean {
-  const { n } = db.prepare('SELECT COUNT(*) AS n FROM cars').get() as { n: number };
-  if (n > 0) return false;
+/** Agrega `owner_id` a bases creadas antes de que la flota fuera por usuario.
+ *  Las filas viejas quedan en 0, que no es de nadie, hasta que se reasignen. */
+function migrarOwner(db: Database.Database) {
+  const cols = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
+  if (!cols('cars').includes('owner_id')) db.exec('ALTER TABLE cars ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0');
+  if (!cols('movs').includes('owner_id')) db.exec('ALTER TABLE movs ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_cars_owner ON cars(owner_id); CREATE INDEX IF NOT EXISTS idx_movs_owner ON movs(owner_id);');
+}
 
+/** Reasigna toda la flota huérfana (owner_id = 0) a un usuario. */
+export function adoptarHuerfanos(db: Database.Database, ownerId: number): number {
+  const r = db.prepare('UPDATE cars SET owner_id = ? WHERE owner_id = 0').run(ownerId);
+  db.prepare('UPDATE movs SET owner_id = ? WHERE owner_id = 0').run(ownerId);
+  return r.changes;
+}
+
+/**
+ * Siembra la flota de demostración para un usuario. Los ids de vehículo llevan
+ * el owner adelante porque el generador siempre produce `c0…c14`: sin prefijo,
+ * dos flotas sembradas chocarían en la clave primaria. Los ids de movimiento
+ * los asigna SQLite, por el mismo motivo.
+ */
+export function sembrarFlota(db: Database.Database, ownerId: number): { cars: number; movs: number } {
   const { cars, movs } = generateFleetData();
+  const idDe = (carId: string) => `u${ownerId}${carId}`;
+
   const insCar = db.prepare(`
-    INSERT INTO cars (id, plate, model, year, driver, cuota, estado, km, service_cada_meses, last_service_date, vtv_date, seguro_date)
-    VALUES (@id, @plate, @model, @year, @driver, @cuota, @estado, @km, @service_cada_meses, @last_service_date, @vtv_date, @seguro_date)
+    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, km, service_cada_meses, last_service_date, vtv_date, seguro_date)
+    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @km, @service_cada_meses, @last_service_date, @vtv_date, @seguro_date)
   `);
   const insMov = db.prepare(`
-    INSERT INTO movs (id, car_id, type, amount, date, descripcion, cat, estado)
-    VALUES (@id, @car_id, @type, @amount, @date, @descripcion, @cat, @estado)
+    INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado)
+    VALUES (@owner_id, @car_id, @type, @amount, @date, @descripcion, @cat, @estado)
   `);
 
   db.transaction(() => {
     for (const c of cars) {
       insCar.run({
-        id: c.id,
+        id: idDe(c.id),
+        owner_id: ownerId,
         plate: c.plate,
         model: c.model,
         year: c.year,
@@ -110,8 +136,8 @@ export function seedIfEmpty(db: Database.Database): boolean {
     }
     for (const m of movs) {
       insMov.run({
-        id: m.id,
-        car_id: m.carId,
+        owner_id: ownerId,
+        car_id: idDe(m.carId),
         type: m.type,
         amount: m.amount,
         date: iso(m.date),
@@ -122,7 +148,7 @@ export function seedIfEmpty(db: Database.Database): boolean {
     }
   })();
 
-  return true;
+  return { cars: cars.length, movs: movs.length };
 }
 
 /** Forma en la que el frontend consume un vehículo. */

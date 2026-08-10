@@ -1,8 +1,15 @@
 import type { View } from '../useFleetView';
-import { Screen, ScrollArea } from '../components/Screen';
+import { Screen, ScrollArea, Vacio } from '../components/Screen';
 import { card } from '../styles';
 
 export function Alertas({ v }: { v: View }) {
+  if (!v.alertsFull.length)
+    return (
+      <Screen label="Alertas" style={{ ...card, overflow: 'hidden' }}>
+        <Vacio titulo="Nada que atender" detalle="Acá van a aparecer los services por vencer, la VTV, el seguro y los vehículos en taller." />
+      </Screen>
+    );
+
   return (
     <Screen label="Alertas" style={{ ...card, overflow: 'hidden' }}>
       <ScrollArea style={{ padding: '8px 20px' }}>

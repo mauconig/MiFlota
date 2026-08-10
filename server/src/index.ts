@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { CarRow, MovRow } from './db.js';
-import { DB_PATH, carToJson, movToJson, openDb, seedIfEmpty } from './db.js';
+import { DB_PATH, carToJson, movToJson, openDb } from './db.js';
 import {
   COOKIE,
   bloqueado,
@@ -26,9 +26,6 @@ const PORT = Number(process.env.PORT ?? 3000);
 
 const db = openDb();
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
-
-const sembrada = seedIfEmpty(db);
-app.log.info({ db: DB_PATH, sembrada }, sembrada ? 'base vacía: flota de demostración sembrada' : 'base existente reutilizada');
 
 migrarAuth(db);
 limpiarSesionesVencidas(db);
@@ -96,18 +93,26 @@ app.get('/api/me', async (req) => {
 
 /* ------------------------------- API ------------------------------- */
 
-const selCars = db.prepare('SELECT * FROM cars ORDER BY rowid');
-const selMovs = db.prepare('SELECT * FROM movs ORDER BY date DESC, id DESC');
-const selCar = db.prepare('SELECT * FROM cars WHERE id = ?');
+// Toda lectura y escritura de flota lleva el owner en el WHERE: es lo único que
+// impide que un usuario toque los vehículos de otro.
+const selCars = db.prepare('SELECT * FROM cars WHERE owner_id = ? ORDER BY rowid');
+const selMovs = db.prepare('SELECT * FROM movs WHERE owner_id = ? ORDER BY date DESC, id DESC');
+const selCar = db.prepare('SELECT * FROM cars WHERE id = ? AND owner_id = ?');
+
+/** El preHandler ya rechazó las peticiones sin sesión, así que acá siempre hay usuario. */
+const quien = (req: { cookies: Record<string, string | undefined> }) => usuarioDeSesion(db, req.cookies[COOKIE])!;
 
 app.get('/api/health', async () => ({ ok: true, db: DB_PATH }));
 
 /** Un solo GET con todo: la vista deriva absolutamente todo de estas dos listas,
  *  así que partirlo en endpoints por pantalla solo agregaría viajes de red. */
-app.get('/api/state', async () => ({
-  cars: (selCars.all() as CarRow[]).map(carToJson),
-  movs: (selMovs.all() as MovRow[]).map(movToJson),
-}));
+app.get('/api/state', async (req) => {
+  const u = quien(req);
+  return {
+    cars: (selCars.all(u.id) as CarRow[]).map(carToJson),
+    movs: (selMovs.all(u.id) as MovRow[]).map(movToJson),
+  };
+});
 
 const ESTADOS = new Set(['activo', 'taller', 'baja']);
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
@@ -137,7 +142,10 @@ const CAMPOS: Record<keyof CarPatch, { col: string; ok: (v: unknown) => boolean 
 };
 
 app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (req, reply) => {
-  const actual = selCar.get(req.params.id) as CarRow | undefined;
+  const u = quien(req);
+  // Un vehículo de otro dueño responde igual que uno inexistente: distinguirlos
+  // permitiría sondear qué ids existen en otras cuentas.
+  const actual = selCar.get(req.params.id, u.id) as CarRow | undefined;
   if (!actual) return reply.code(404).send({ error: 'Vehículo inexistente' });
 
   const sets: string[] = [];
@@ -151,8 +159,8 @@ app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (re
   }
   if (!sets.length) return reply.code(400).send({ error: 'Nada para actualizar' });
 
-  db.prepare(`UPDATE cars SET ${sets.join(', ')} WHERE id = ?`).run(...vals, req.params.id);
-  return carToJson(selCar.get(req.params.id) as CarRow);
+  db.prepare(`UPDATE cars SET ${sets.join(', ')} WHERE id = ? AND owner_id = ?`).run(...vals, req.params.id, u.id);
+  return carToJson(selCar.get(req.params.id, u.id) as CarRow);
 });
 
 interface NuevoCar {
@@ -165,13 +173,15 @@ interface NuevoCar {
 }
 
 app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
+  const u = quien(req);
   const b = req.body ?? ({} as NuevoCar);
   const plate = String(b.plate ?? '').trim().toUpperCase();
   const model = String(b.model ?? '').trim();
   if (!plate) return reply.code(400).send({ error: 'La chapa es obligatoria' });
   if (!model) return reply.code(400).send({ error: 'La marca y modelo son obligatorios' });
 
-  const dup = db.prepare('SELECT id FROM cars WHERE UPPER(plate) = ?').get(plate);
+  // La chapa es única dentro de la flota de cada uno, no de toda la base.
+  const dup = db.prepare('SELECT id FROM cars WHERE UPPER(plate) = ? AND owner_id = ?').get(plate, u.id);
   if (dup) return reply.code(409).send({ error: 'Ya existe un vehículo con esa chapa' });
 
   const hoy = new Date().toISOString().slice(0, 10);
@@ -182,6 +192,7 @@ app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
   };
   const car = {
     id: 'c' + Date.now().toString(36),
+    owner_id: u.id,
     plate,
     model,
     year: Number.isInteger(b.year) && b.year > 1950 && b.year < 2100 ? b.year : 2018,
@@ -195,11 +206,11 @@ app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
     seguro_date: enMeses(12),
   };
   db.prepare(`
-    INSERT INTO cars (id, plate, model, year, driver, cuota, estado, km, service_cada_meses, last_service_date, vtv_date, seguro_date)
-    VALUES (@id, @plate, @model, @year, @driver, @cuota, @estado, @km, @service_cada_meses, @last_service_date, @vtv_date, @seguro_date)
+    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, km, service_cada_meses, last_service_date, vtv_date, seguro_date)
+    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @km, @service_cada_meses, @last_service_date, @vtv_date, @seguro_date)
   `).run(car);
 
-  return reply.code(201).send(carToJson(selCar.get(car.id) as CarRow));
+  return reply.code(201).send(carToJson(selCar.get(car.id, u.id) as CarRow));
 });
 
 /* --------------------------- SPA estática --------------------------- */

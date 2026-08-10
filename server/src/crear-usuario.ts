@@ -2,15 +2,19 @@
  * Alta y cambio de contraseña de usuarios del panel.
  *
  *   node dist/crear-usuario.js <usuario> [--nombre "Nombre Apellido"]
- *                              [--password <clave> | --generar] [--reset]
+ *                              [--password <clave>] [--reset]
+ *                              [--seed] [--adoptar]
  *
  * Sin --password genera una contraseña fuerte y la imprime una única vez: no
  * queda guardada en ningún lado más que en la base, y ahí solo su hash.
- * --reset cambia la contraseña de un usuario que ya existe.
+ *
+ *   --reset    cambia la contraseña de un usuario que ya existe
+ *   --seed     le carga la flota de demostración (si no, arranca vacío)
+ *   --adoptar  le asigna la flota que quedó sin dueño al migrar la base
  */
 import { randomInt } from 'node:crypto';
 import { hashPassword, migrarAuth } from './auth.js';
-import { openDb } from './db.js';
+import { adoptarHuerfanos, openDb, sembrarFlota } from './db.js';
 
 // Sin caracteres que se confundan al leerlos en voz alta o al copiarlos a mano:
 // 0/O, 1/l/I, 5/S, 8/B.
@@ -58,19 +62,38 @@ if (password.length < 12) {
 
 const hash = await hashPassword(password);
 
+let userId: number;
+
 if (existente) {
-  db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(hash, existente.id);
+  userId = existente.id;
+  db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(hash, userId);
   // Cambiar la contraseña invalida lo que haya quedado abierto en otro lado.
-  const { changes } = db.prepare('DELETE FROM sessions WHERE user_id = ?').run(existente.id);
+  const { changes } = db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
   console.log(`Contraseña actualizada para "${usuario}". Sesiones cerradas: ${changes}.`);
 } else {
-  db.prepare('INSERT INTO users (usuario, nombre, pass_hash, creado) VALUES (?, ?, ?, ?)').run(
+  const r = db.prepare('INSERT INTO users (usuario, nombre, pass_hash, creado) VALUES (?, ?, ?, ?)').run(
     usuario,
     arg('nombre') || usuario,
     hash,
     new Date().toISOString(),
   );
-  console.log(`Usuario "${usuario}" creado.`);
+  userId = Number(r.lastInsertRowid);
+  console.log(`Usuario "${usuario}" creado${flag('seed') ? '' : ' con la flota vacía'}.`);
+}
+
+if (flag('adoptar')) {
+  const n = adoptarHuerfanos(db, userId);
+  console.log(`Vehículos sin dueño reasignados a "${usuario}": ${n}.`);
+}
+
+if (flag('seed')) {
+  const { n } = db.prepare('SELECT COUNT(*) AS n FROM cars WHERE owner_id = ?').get(userId) as { n: number };
+  if (n > 0) {
+    console.log(`"${usuario}" ya tiene ${n} vehículos: no se siembra encima.`);
+  } else {
+    const s = sembrarFlota(db, userId);
+    console.log(`Flota de demostración cargada para "${usuario}": ${s.cars} vehículos, ${s.movs} movimientos.`);
+  }
 }
 
 if (generada) {

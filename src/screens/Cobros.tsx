@@ -1,8 +1,15 @@
 import type { View } from '../useFleetView';
-import { Screen, ScrollArea } from '../components/Screen';
+import { Screen, ScrollArea, Vacio } from '../components/Screen';
 import { card } from '../styles';
 
 export function Cobros({ v }: { v: View }) {
+  if (!v.pendFull.length)
+    return (
+      <Screen label="Cobros pendientes" style={{ ...card, overflow: 'hidden' }}>
+        <Vacio titulo="No hay cuotas sin cobrar" detalle="Las cuotas pendientes o pagadas a medias del período aparecen acá." />
+      </Screen>
+    );
+
   return (
     <Screen label="Cobros pendientes" style={{ ...card, overflow: 'hidden' }}>
       <ScrollArea style={{ padding: '8px 20px' }}>

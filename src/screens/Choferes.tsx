@@ -1,6 +1,6 @@
 import type { View } from '../useFleetView';
 import { Btn } from '../components/Btn';
-import { Screen, ScrollArea } from '../components/Screen';
+import { Screen, ScrollArea, Vacio } from '../components/Screen';
 import { PlusIcon } from '../icons';
 import { card } from '../styles';
 
@@ -33,6 +33,7 @@ export function Choferes({ v }: { v: View }) {
           Agregar chofer
         </Btn>
       </div>
+      {!v.choferes.length && <Vacio titulo="Todavía no hay choferes" detalle="Se crean asignando un chofer a un vehículo, con el botón de arriba o desde la ficha del vehículo." />}
       <ScrollArea style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, alignContent: 'start' }}>
         {v.choferes.map((d, i) => (
           <Btn

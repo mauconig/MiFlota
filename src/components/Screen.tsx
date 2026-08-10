@@ -22,3 +22,13 @@ export function Screen({ label, style, children }: { label: string; style?: CSSP
 export function ScrollArea({ style, children }: { style?: CSSProperties; children: ReactNode }) {
   return <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', ...style }}>{children}</div>;
 }
+
+/** Estado vacío: una pantalla sin datos tiene que decir por qué, no quedar en blanco. */
+export function Vacio({ titulo, detalle }: { titulo: string; detalle?: string }) {
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5, padding: 32, textAlign: 'center' }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: '#3d3a34' }}>{titulo}</div>
+      {detalle && <div style={{ fontSize: 13, color: '#6b665c', maxWidth: 380 }}>{detalle}</div>}
+    </div>
+  );
+}
