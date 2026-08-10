@@ -1,6 +1,7 @@
 import type { View } from '../useFleetView';
 import { Btn } from './Btn';
 import { DateField } from './DateField';
+import { MoneyInput } from './MoneyInput';
 import { CloseIcon } from '../icons';
 import { btnPrimary, btnPrimaryHover, btnSecondary, btnSecondaryHover, fieldInput, fieldLabel, fieldLabelText, modalCloseBtn, modalCloseBtnHover, modalFooter, modalOverlay, modalPanel, modalTitle } from '../styles';
 
@@ -85,7 +86,16 @@ export function CarModal({ v }: { v: View }) {
           <div style={{ ...fieldLabel, gridColumn: '1 / -1' }}>
             <span style={fieldLabelText}>Costo de la póliza</span>
             <div style={{ display: 'flex', flexDirection: 'row', gap: 9, minWidth: 0 }}>
-              <input inputMode="numeric" value={v.ncar.seguroCosto} onChange={v.ch.seguroCosto} placeholder="400.000" aria-label="Costo" style={{ ...fieldInput, flex: 1 }} />
+              <span style={{ ...fieldInput, flex: 1, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 7, padding: '0 14px' }}>
+                <span style={{ fontSize: 13, color: '#a09a8d', flex: 'none' }}>₲</span>
+                <MoneyInput
+                  value={v.ncar.seguroCosto}
+                  onChange={v.setSeguroCosto}
+                  placeholder="400.000"
+                  ariaLabel="Costo"
+                  style={{ flex: 1, minWidth: 0, width: '100%', border: 'none', background: 'none', outline: 'none', fontSize: 14, color: '#1a1a18', fontVariantNumeric: 'tabular-nums' }}
+                />
+              </span>
               {v.ncarPeriodoOpts.map((p) => (
                 <Btn
                   key={p.label}

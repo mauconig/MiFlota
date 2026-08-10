@@ -75,6 +75,13 @@ export function numFromInput(v: string): number {
   return parseInt(String(v).replace(/[^0-9]/g, '') || '0', 10);
 }
 
+/** `400000` → `400.000`, para escribir montos. Descarta todo lo que no sea
+ *  dígito, así que `numFromInput` sigue leyendo bien lo que produce. */
+export function miles(v: string): string {
+  const d = v.replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+  return d.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
 export function pct(n: number, d: number): string {
   return Math.round((n / d) * 100) + '%';
 }

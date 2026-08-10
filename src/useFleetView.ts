@@ -335,10 +335,11 @@ export interface View {
   carModal: boolean;
   drvModal: boolean;
   ncar: NewCarForm;
-  ch: Record<Exclude<keyof NewCarForm, 'serviceUnidad' | 'seguroPeriodo' | 'lastService' | 'seguroVence'>, (e: React.ChangeEvent<HTMLInputElement>) => void>;
-  /** Las fechas del alta entregan el ISO directo, no un evento. */
+  ch: Record<Exclude<keyof NewCarForm, 'serviceUnidad' | 'seguroPeriodo' | 'lastService' | 'seguroVence' | 'seguroCosto'>, (e: React.ChangeEvent<HTMLInputElement>) => void>;
+  /** Campos que ya entregan el valor formateado, no un evento. */
   setLastService: (iso: string) => void;
   setSeguroVence: (iso: string) => void;
+  setSeguroCosto: (v: string) => void;
   /** Selector días/meses del alta. */
   ncarUnidadOpts: Chip[];
   /** Selector mensual/anual del costo del seguro. */
@@ -461,7 +462,6 @@ export function useFleetView(
       year: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, year: e.target.value } })),
       gpsTag: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, gpsTag: e.target.value } })),
       serviceCada: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, serviceCada: e.target.value } })),
-      seguroCosto: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, seguroCosto: e.target.value } })),
       seguroCada: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, seguroCada: e.target.value } })),
     }),
     [],
@@ -471,6 +471,8 @@ export function useFleetView(
   // armado, porque lo que se tipea es `dd/mm/aaaa`.
   const setLastService = useCallback((iso: string) => update((s) => ({ ncar: { ...s.ncar, lastService: iso } })), []);
   const setSeguroVence = useCallback((iso: string) => update((s) => ({ ncar: { ...s.ncar, seguroVence: iso } })), []);
+  // El monto llega ya con los puntos puestos por MoneyInput.
+  const setSeguroCosto = useCallback((v: string) => update((s) => ({ ncar: { ...s.ncar, seguroCosto: v } })), []);
 
   const dh = useMemo(
     () => ({
@@ -1057,6 +1059,7 @@ export function useFleetView(
     })),
     setLastService,
     setSeguroVence,
+    setSeguroCosto,
     ncarPeriodoOpts: (['mensual', 'anual'] as const).map((p) => ({
       label: p,
       ...CH(st.ncar.seguroPeriodo === p),
