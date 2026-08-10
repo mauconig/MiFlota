@@ -97,9 +97,16 @@ export function DetailDrawer({ v }: { v: View }) {
           <div style={{ fontSize: 12, color: '#6b665c', paddingTop: 11, borderTop: '1px solid #f0ebe0' }}>{d.pendientes}</div>
         </div>
 
-        <div style={{ ...cardTight, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ ...cardTight, padding: 16, display: 'flex', flexDirection: 'column', gap: 13 }}>
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <span style={{ flex: 1, fontSize: 15, fontWeight: 700 }}>Mantenimiento</span>
+            <Btn
+              onClick={d.markService}
+              style={{ border: 'none', background: '#16150f', color: '#fffdf8', borderRadius: 12, minHeight: 34, padding: '0 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', flex: 'none' }}
+              hoverStyle={{ background: '#2a2820' }}
+            >
+              Registrar service
+            </Btn>
           </div>
           <div style={{ height: 8, borderRadius: 4, background: '#f0ebe0', overflow: 'hidden' }}>
             <span style={{ display: 'block', height: '100%', borderRadius: 4, background: d.svcBar, width: d.svcPct }} />
@@ -108,36 +115,55 @@ export function DetailDrawer({ v }: { v: View }) {
             <div style={{ fontSize: 13, fontWeight: 600, color: d.svcFg }}>{d.svcLbl}</div>
             <div style={{ fontSize: 12, color: '#6b665c', marginTop: 3 }}>{d.svcSub}</div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 12, color: '#6b665c', marginRight: 2 }}>Service cada</span>
-            {d.svcOpts.map((s) => (
-              <button
-                key={s.label}
-                onClick={s.pick}
-                style={{ border: `1px solid ${s.bd}`, background: s.bg, color: s.fg, borderRadius: 11, minHeight: 32, minWidth: 38, padding: '0 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 9, paddingTop: 13, borderTop: '1px solid #f0ebe0' }}>
+            <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 12, color: '#6b665c', flex: 'none' }}>Service cada</span>
+              <input
+                value={d.svcCada}
+                onChange={d.svcSetCada}
+                inputMode="numeric"
+                aria-label="Cantidad"
+                style={{ width: 58, flex: 'none', textAlign: 'center', border: '1px solid #e0d6c4', borderRadius: 12, minHeight: 38, padding: '0 8px', fontSize: 14, fontWeight: 700, color: '#1a1a18', background: '#fffdf8', outline: 'none', fontVariantNumeric: 'tabular-nums' }}
+              />
+              {/* Segmentado: las dos unidades son una sola decisión, así que van
+                  dentro de un mismo riel en vez de como dos botones sueltos. */}
+              <div style={{ display: 'flex', flexDirection: 'row', gap: 3, padding: 3, borderRadius: 12, background: '#f4f0e8', border: '1px solid #ece4d6', flex: 'none' }}>
+                {d.svcUnidadOpts.map((u) => (
+                  <button
+                    key={u.label}
+                    onClick={u.pick}
+                    aria-pressed={u.on}
+                    style={{
+                      border: 'none',
+                      background: u.on ? '#16150f' : 'transparent',
+                      color: u.on ? '#fffdf8' : '#6b665c',
+                      borderRadius: 9,
+                      minHeight: 30,
+                      padding: '0 13px',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {u.label}
+                  </button>
+                ))}
+              </div>
+              <Btn
+                onClick={d.svcGuardar}
+                disabled={!d.svcPuedeGuardar}
+                style={{ border: '1px solid #e0d6c4', background: '#fffdf8', color: '#3d3a34', borderRadius: 12, minHeight: 38, padding: '0 15px', fontSize: 12, fontWeight: 700, cursor: 'pointer', flex: 'none', marginLeft: 'auto' }}
+                hoverStyle={{ background: '#f7f1e5' }}
+                disabledStyle={{ borderColor: '#f0ebe0', color: '#c2bbac' }}
               >
-                {s.label}
-              </button>
-            ))}
-            <span style={{ width: 1, height: 20, background: '#ece4d6', margin: '0 2px' }} />
-            {d.svcUnidadOpts.map((u) => (
-              <button
-                key={u.label}
-                onClick={u.pick}
-                style={{ border: `1px solid ${u.bd}`, background: u.bg, color: u.fg, borderRadius: 11, minHeight: 32, padding: '0 11px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-              >
-                {u.label}
-              </button>
-            ))}
-            <Btn
-              onClick={d.markService}
-              style={{ border: 'none', background: '#16150f', color: '#fffdf8', borderRadius: 11, minHeight: 32, padding: '0 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginLeft: 'auto' }}
-              hoverStyle={{ background: '#2a2820' }}
-            >
-              Registrar service
-            </Btn>
+                Guardar
+              </Btn>
+            </div>
+            {d.svcHint && <div style={{ fontSize: 12, color: d.svcPuedeGuardar ? '#6b665c' : '#a8412f' }}>{d.svcHint}</div>}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 12, borderTop: '1px solid #f0ebe0' }}>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 13, borderTop: '1px solid #f0ebe0' }}>
             {d.docs.map((doc) => (
               <div key={doc.label} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                 <span style={{ width: 72, flex: 'none', fontSize: 13, fontWeight: 700 }}>{doc.label}</span>

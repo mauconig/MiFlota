@@ -74,6 +74,9 @@ export interface UIState {
   ncar: NewCarForm;
   ndrv: NewDriverForm;
   detailId: string | null;
+  /** Intervalo de service que se está editando en la ficha, sin guardar todavía.
+      Lleva el id del vehículo para que abrir otro no arrastre el borrador. */
+  svcEdit: { carId: string; cada: string; unidad: ServiceUnidad } | null;
   /** Acción destructiva esperando confirmación. */
   confirm: { tipo: 'borrarAuto' | 'quitarChofer'; carId: string } | null;
   /** Id del vehículo cuyo chofer se está viendo en detalle. */

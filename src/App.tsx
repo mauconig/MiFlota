@@ -36,6 +36,7 @@ const initialState: UIState = {
   ncar: blankCar(),
   ndrv: blankDrv(),
   detailId: null,
+  svcEdit: null,
   driverId: null,
   confirm: null,
 };

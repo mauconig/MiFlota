@@ -8,19 +8,23 @@ interface BtnProps {
   children?: ReactNode;
   ariaLabel?: string;
   type?: 'button' | 'submit';
+  disabled?: boolean;
+  /** Se aplica encima de `style` cuando está deshabilitado. */
+  disabledStyle?: CSSProperties;
 }
 
-export const Btn = forwardRef<HTMLButtonElement, BtnProps>(function Btn({ onClick, style, hoverStyle, children, ariaLabel, type = 'button' }, ref) {
+export const Btn = forwardRef<HTMLButtonElement, BtnProps>(function Btn({ onClick, style, hoverStyle, children, ariaLabel, type = 'button', disabled, disabledStyle }, ref) {
   const [hover, setHover] = useState(false);
   return (
     <button
       ref={ref}
       type={type}
       onClick={onClick}
+      disabled={disabled}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       aria-label={ariaLabel}
-      style={{ ...style, ...(hover && hoverStyle ? hoverStyle : null) }}
+      style={{ ...style, ...(disabled ? { cursor: 'default', ...disabledStyle } : hover && hoverStyle ? hoverStyle : null) }}
     >
       {children}
     </button>

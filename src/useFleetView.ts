@@ -9,6 +9,10 @@ const UMBRAL_VERDE = 2500000;
 /** Días de aviso antes de que venza el service. */
 const SVC_AVISO_DIAS = 15;
 
+/** Tope del intervalo de service. Es el mismo que valida el servidor: si acá
+ *  pasara un valor mayor, se guardaría con el 6 por defecto sin avisar. */
+const SVC_MAX = 3650;
+
 const svcNextDate = (c: Car) => (c.serviceUnidad === 'meses' ? addM(c.lastServiceDate, c.serviceCada) : addD(c.lastServiceDate, c.serviceCada));
 /** "cada 6 meses" / "cada 90 días" */
 const svcIntervalo = (n: number, u: Car['serviceUnidad']) => n + ' ' + (u === 'meses' ? (n === 1 ? 'mes' : 'meses') : n === 1 ? 'día' : 'días');
@@ -24,6 +28,9 @@ export interface Chip {
   bg: string;
   fg: string;
   bd: string;
+  /** Si está seleccionado. Los colores ya lo reflejan, pero un control que se
+      dibuja distinto (un segmentado, por ejemplo) necesita el dato crudo. */
+  on: boolean;
   pick: () => void;
 }
 
@@ -220,8 +227,13 @@ export interface DetailView {
   svcFg: string;
   svcPct: string;
   svcBar: string;
-  svcOpts: Chip[];
+  /** Intervalo en edición: el campo muestra el borrador, no lo guardado. */
+  svcCada: string;
+  svcSetCada: (e: React.ChangeEvent<HTMLInputElement>) => void;
   svcUnidadOpts: Chip[];
+  svcGuardar: () => void;
+  svcPuedeGuardar: boolean;
+  svcHint: string;
   docs: DetailDoc[];
   estadoOpts: Chip[];
   months: DetailMonth[];
@@ -339,7 +351,7 @@ export interface View {
 }
 
 function CH(on: boolean) {
-  return { bg: on ? COLORS.ink : COLORS.paper, fg: on ? COLORS.paper : '#3d3a34', bd: on ? COLORS.ink : '#e0d6c4' };
+  return { on, bg: on ? COLORS.ink : COLORS.paper, fg: on ? COLORS.paper : '#3d3a34', bd: on ? COLORS.ink : '#e0d6c4' };
 }
 
 function blankCar(): NewCarForm {
@@ -663,8 +675,12 @@ export function useFleetView(
         svcFg: '',
         svcPct: '0%',
         svcBar: '',
-        svcOpts: [],
+        svcCada: '',
+        svcSetCada: () => {},
         svcUnidadOpts: [],
+        svcGuardar: () => {},
+        svcPuedeGuardar: false,
+        svcHint: '',
         docs: [],
         estadoOpts: [],
         months: [],
@@ -689,6 +705,16 @@ export function useFleetView(
     const mMax = Math.max(...months.map((m) => Math.max(m.ing, m.egr)), 1);
     const cuotasCobradas = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && m.estado === 'pagado' && inR(m)).length;
     const cuotasPend = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && m.estado !== 'pagado' && inR(m));
+
+    // El intervalo de service se edita en borrador y se confirma con "Guardar":
+    // a diferencia del resto de la ficha, escribir un número de a un dígito
+    // pasaría por valores absurdos si cada tecla se guardara sola.
+    const bor = st.svcEdit && st.svcEdit.carId === c.id ? st.svcEdit : { carId: c.id, cada: String(c.serviceCada), unidad: c.serviceUnidad };
+    const borN = Number(bor.cada);
+    const borOk = bor.cada !== '' && Number.isInteger(borN) && borN >= 1 && borN <= SVC_MAX;
+    const borCambio = borOk && (borN !== c.serviceCada || bor.unidad !== c.serviceUnidad);
+    const editarSvc = (patch: Partial<typeof bor>) => update({ svcEdit: { ...bor, ...patch } });
+
     return {
       plate: c.plate,
       rawModel: c.model,
@@ -712,18 +738,27 @@ export function useFleetView(
       svcFg: dLeft < 0 ? COLORS.neg : dLeft <= SVC_AVISO_DIAS ? COLORS.warn : COLORS.pos,
       svcPct: Math.max(4, Math.min(100, Math.round(((svcTotalDias - dLeft) / svcTotalDias) * 100))) + '%',
       svcBar: dLeft < 0 ? COLORS.neg : dLeft <= SVC_AVISO_DIAS ? COLORS.warn : COLORS.pos,
-      svcOpts: (c.serviceUnidad === 'meses' ? [3, 6, 9, 12] : [30, 60, 90, 180]).map((n) => ({
-        label: String(n),
-        ...CH(c.serviceCada === n),
-        pick: () => patchCar(c.id, { serviceCada: n }),
-      })),
+      svcCada: bor.cada,
+      // Solo dígitos: así "no es un número" deja de ser un estado posible y el
+      // único error que queda es el rango.
+      svcSetCada: (e) => editarSvc({ cada: e.target.value.replace(/\D/g, '').slice(0, 4) }),
       svcUnidadOpts: (['dias', 'meses'] as const).map((u) => ({
         label: u === 'dias' ? 'días' : 'meses',
-        ...CH(c.serviceUnidad === u),
-        // Cambiar de unidad conserva el número: el valor viejo casi nunca sirve
-        // en la nueva escala, así que se ofrece junto a los presets de esa unidad.
-        pick: () => patchCar(c.id, { serviceUnidad: u }),
+        ...CH(bor.unidad === u),
+        pick: () => editarSvc({ unidad: u }),
       })),
+      svcPuedeGuardar: borCambio,
+      svcGuardar: () => {
+        if (!borCambio) return;
+        patchCar(c.id, { serviceCada: borN, serviceUnidad: bor.unidad });
+        update({ svcEdit: null });
+        toast('Service cada ' + svcIntervalo(borN, bor.unidad) + ' · próximo el ' + dLblFull(svcNextDate({ ...c, serviceCada: borN, serviceUnidad: bor.unidad })));
+      },
+      svcHint: !borOk
+        ? 'Poné un número entre 1 y ' + SVC_MAX
+        : borCambio
+          ? 'El próximo service pasaría al ' + dLblFull(svcNextDate({ ...c, serviceCada: borN, serviceUnidad: bor.unidad }))
+          : '',
       docs: [
         {
           label: 'VTV',
@@ -1092,7 +1127,9 @@ export function useFleetView(
 
     hasDetail: !!st.detailId,
     detail,
-    closeDetail: () => update({ detailId: null }),
+    // Cerrar descarta el borrador del intervalo: si no, volver a abrir la ficha
+    // mostraría un número que nunca se guardó.
+    closeDetail: () => update({ detailId: null, svcEdit: null }),
 
     ...(() => {
       const c = st.confirm ? cars.find((x) => x.id === st.confirm!.carId) : undefined;
