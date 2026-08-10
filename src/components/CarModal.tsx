@@ -35,6 +35,34 @@ export function CarModal({ v }: { v: View }) {
             <span style={fieldLabelText}>Cuota diaria</span>
             <input inputMode="numeric" value={v.ncar.cuota} onChange={v.ch.cuota} placeholder="190000" style={fieldInput} />
           </label>
+          <label style={fieldLabel}>
+            <span style={fieldLabelText}>Último service</span>
+            <input type="date" value={v.ncar.lastService} onChange={v.ch.lastService} max={v.hoyISO} style={fieldInput} />
+          </label>
+          <div style={{ ...fieldLabel, gridColumn: 'span 2' }}>
+            <span style={fieldLabelText}>Service cada</span>
+            <div style={{ display: 'flex', flexDirection: 'row', gap: 10 }}>
+              <input
+                inputMode="numeric"
+                value={v.ncar.serviceCada}
+                onChange={v.ch.serviceCada}
+                placeholder="6"
+                aria-label="Cantidad"
+                style={{ ...fieldInput, width: 96, flex: 'none' }}
+              />
+              <div style={{ display: 'flex', flexDirection: 'row', gap: 7, alignItems: 'center' }}>
+                {v.ncarUnidadOpts.map((u) => (
+                  <Btn
+                    key={u.label}
+                    onClick={u.pick}
+                    style={{ border: `1px solid ${u.bd}`, background: u.bg, color: u.fg, borderRadius: 12, minHeight: 44, padding: '0 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    {u.label}
+                  </Btn>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
         <div style={modalFooter}>
           <Btn onClick={v.closeModal} style={btnSecondary} hoverStyle={btnSecondaryHover}>

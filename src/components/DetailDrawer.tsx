@@ -107,9 +107,19 @@ export function DetailDrawer({ v }: { v: View }) {
               <button
                 key={s.label}
                 onClick={s.pick}
-                style={{ border: `1px solid ${s.bd}`, background: s.bg, color: s.fg, borderRadius: 11, minHeight: 32, padding: '0 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                style={{ border: `1px solid ${s.bd}`, background: s.bg, color: s.fg, borderRadius: 11, minHeight: 32, minWidth: 38, padding: '0 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
               >
                 {s.label}
+              </button>
+            ))}
+            <span style={{ width: 1, height: 20, background: '#ece4d6', margin: '0 2px' }} />
+            {d.svcUnidadOpts.map((u) => (
+              <button
+                key={u.label}
+                onClick={u.pick}
+                style={{ border: `1px solid ${u.bd}`, background: u.bg, color: u.fg, borderRadius: 11, minHeight: 32, padding: '0 11px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+              >
+                {u.label}
               </button>
             ))}
             <Btn

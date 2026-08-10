@@ -1,4 +1,5 @@
 export type Estado = 'activo' | 'taller' | 'baja';
+export type ServiceUnidad = 'dias' | 'meses';
 
 export interface Car {
   id: string;
@@ -8,8 +9,9 @@ export interface Car {
   driver: string;
   cuota: number;
   estado: Estado;
-  /** Cada cuántos meses toca el service. */
-  serviceCadaMeses: number;
+  /** Cada cuánto toca el service, en la unidad de `serviceUnidad`. */
+  serviceCada: number;
+  serviceUnidad: ServiceUnidad;
   lastServiceDate: Date;
   /** Vencimientos como fecha, no como días restantes: un contador queda
       desactualizado apenas pasa un día en la base. */
@@ -42,6 +44,10 @@ export interface NewCarForm {
   year: string;
   driver: string;
   cuota: string;
+  /** ISO `YYYY-MM-DD`, tal como lo emite un <input type="date">. */
+  lastService: string;
+  serviceCada: string;
+  serviceUnidad: ServiceUnidad;
 }
 
 export interface NewDriverForm {

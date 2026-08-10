@@ -76,6 +76,9 @@ export interface NuevoCarPayload {
   year: number;
   driver: string;
   cuota: number;
+  lastServiceDate: string;
+  serviceCada: number;
+  serviceUnidad: 'dias' | 'meses';
 }
 
 export interface FleetStore {

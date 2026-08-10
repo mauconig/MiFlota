@@ -2,14 +2,16 @@ import { useMemo, useRef } from 'react';
 import type { Car, Mov, UIState, NewCarForm, NewDriverForm } from './types';
 import type { NuevoCarPayload } from './api';
 import { CATS, CATCOLORS } from './data';
-import { COLORS, TODAY, addD, addM, dLbl, dLblFull, daysBetween, durLbl, fmt, fmtShort, initials, statusColor, numFromInput } from './format';
+import { COLORS, TODAY, addD, addM, dLbl, dLblFull, daysBetween, durLbl, fmt, fmtShort, initials, isoLocal, statusColor, numFromInput } from './format';
 
 const UMBRAL_VERDE = 2500000;
 
 /** Días de aviso antes de que venza el service. */
 const SVC_AVISO_DIAS = 15;
 
-const svcNextDate = (c: Car) => addM(c.lastServiceDate, c.serviceCadaMeses);
+const svcNextDate = (c: Car) => (c.serviceUnidad === 'meses' ? addM(c.lastServiceDate, c.serviceCada) : addD(c.lastServiceDate, c.serviceCada));
+/** "cada 6 meses" / "cada 90 días" */
+const svcIntervalo = (n: number, u: Car['serviceUnidad']) => n + ' ' + (u === 'meses' ? (n === 1 ? 'mes' : 'meses') : n === 1 ? 'día' : 'días');
 /** Días que faltan para el próximo service (negativo = vencido). */
 const svcDaysLeft = (c: Car) => daysBetween(TODAY, svcNextDate(c));
 /** "vencido hace 8 días" / "vence hoy" / "en 3 meses" */
@@ -217,6 +219,7 @@ export interface DetailView {
   svcPct: string;
   svcBar: string;
   svcOpts: Chip[];
+  svcUnidadOpts: Chip[];
   docs: DetailDoc[];
   estadoOpts: Chip[];
   months: DetailMonth[];
@@ -304,7 +307,11 @@ export interface View {
   carModal: boolean;
   drvModal: boolean;
   ncar: NewCarForm;
-  ch: Record<keyof NewCarForm, (e: React.ChangeEvent<HTMLInputElement>) => void>;
+  ch: Record<Exclude<keyof NewCarForm, 'serviceUnidad'>, (e: React.ChangeEvent<HTMLInputElement>) => void>;
+  /** Selector días/meses del alta. */
+  ncarUnidadOpts: Chip[];
+  /** Hoy en ISO, para topar el <input type="date"> del último service. */
+  hoyISO: string;
   ndrv: NewDriverForm;
   dh: {
     name: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -325,7 +332,7 @@ function CH(on: boolean) {
 }
 
 function blankCar(): NewCarForm {
-  return { plate: '', model: '', year: '2018', driver: '', cuota: '' };
+  return { plate: '', model: '', year: '2018', driver: '', cuota: '', lastService: isoLocal(TODAY), serviceCada: '6', serviceUnidad: 'meses' };
 }
 
 function blankDrv(): NewDriverForm {
@@ -405,6 +412,8 @@ export function useFleetView(
       year: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, year: e.target.value } })),
       driver: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, driver: e.target.value } })),
       cuota: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, cuota: e.target.value } })),
+      lastService: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, lastService: e.target.value } })),
+      serviceCada: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, serviceCada: e.target.value } })),
     }),
     [],
   );
@@ -433,6 +442,15 @@ export function useFleetView(
       toast('Esa chapa ya está en la flota');
       return;
     }
+    const cada = numFromInput(n.serviceCada);
+    if (!cada) {
+      toast('Indicá cada cuánto se le hace el service');
+      return;
+    }
+    if (n.lastService > isoLocal(TODAY)) {
+      toast('El último service no puede ser una fecha futura');
+      return;
+    }
     // El alta es lo único que no se puede aplicar en optimista: el id lo asigna
     // el servidor, así que se espera la confirmación antes de cerrar el modal.
     persist
@@ -442,6 +460,9 @@ export function useFleetView(
         year: numFromInput(n.year) || 2018,
         driver: n.driver.trim() || 'Sin chofer',
         cuota: numFromInput(n.cuota),
+        lastServiceDate: n.lastService || isoLocal(TODAY),
+        serviceCada: cada,
+        serviceUnidad: n.serviceUnidad,
       })
       .then(() => {
         update({ modal: null, ncar: blankCar(), nav: 'flota' });
@@ -624,6 +645,7 @@ export function useFleetView(
         svcPct: '0%',
         svcBar: '',
         svcOpts: [],
+        svcUnidadOpts: [],
         docs: [],
         estadoOpts: [],
         months: [],
@@ -668,7 +690,18 @@ export function useFleetView(
       svcFg: dLeft < 0 ? COLORS.neg : dLeft <= SVC_AVISO_DIAS ? COLORS.warn : COLORS.pos,
       svcPct: Math.max(4, Math.min(100, Math.round(((svcTotalDias - dLeft) / svcTotalDias) * 100))) + '%',
       svcBar: dLeft < 0 ? COLORS.neg : dLeft <= SVC_AVISO_DIAS ? COLORS.warn : COLORS.pos,
-      svcOpts: [3, 6, 9, 12].map((m) => ({ label: m + ' meses', ...CH(c.serviceCadaMeses === m), pick: () => patchCar(c.id, { serviceCadaMeses: m }) })),
+      svcOpts: (c.serviceUnidad === 'meses' ? [3, 6, 9, 12] : [30, 60, 90, 180]).map((n) => ({
+        label: String(n),
+        ...CH(c.serviceCada === n),
+        pick: () => patchCar(c.id, { serviceCada: n }),
+      })),
+      svcUnidadOpts: (['dias', 'meses'] as const).map((u) => ({
+        label: u === 'dias' ? 'días' : 'meses',
+        ...CH(c.serviceUnidad === u),
+        // Cambiar de unidad conserva el número: el valor viejo casi nunca sirve
+        // en la nueva escala, así que se ofrece junto a los presets de esa unidad.
+        pick: () => patchCar(c.id, { serviceUnidad: u }),
+      })),
       docs: [
         {
           label: 'VTV',
@@ -731,7 +764,7 @@ export function useFleetView(
         }),
       markService: () => {
         patchCar(c.id, { lastServiceDate: TODAY });
-        toast('Service registrado el ' + dLblFull(TODAY) + ' · próximo en ' + c.serviceCadaMeses + ' meses');
+        toast('Service registrado el ' + dLblFull(TODAY) + ' · próximo en ' + svcIntervalo(c.serviceCada, c.serviceUnidad));
       },
       editDriver: () => update({ modal: 'drv', ndrv: { name: c.driver === 'Sin chofer' ? '' : c.driver, carId: c.id, cuota: c.cuota ? String(c.cuota) : '' } }),
       clearDriver: () => {
@@ -928,7 +961,13 @@ export function useFleetView(
     ]),
     rows: sorted.map(mkRow),
     flotaRows: sorted.map(mkRow),
+    hoyISO: isoLocal(TODAY),
     openCarModal: () => update({ modal: 'car', ncar: blankCar() }),
+    ncarUnidadOpts: (['dias', 'meses'] as const).map((u) => ({
+      label: u === 'dias' ? 'días' : 'meses',
+      ...CH(st.ncar.serviceUnidad === u),
+      pick: () => update((s2) => ({ ncar: { ...s2.ncar, serviceUnidad: u } })),
+    })),
 
     periodShort: r.short,
     egrTotal: fmt(tot.egr, st.hide),
