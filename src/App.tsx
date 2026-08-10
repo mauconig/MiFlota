@@ -1,6 +1,8 @@
 import { useCallback, useRef, useState } from 'react';
 import type { UIState } from './types';
-import { useFleetStore } from './api';
+import type { Sesion } from './api';
+import { useAuth, useFleetStore } from './api';
+import { Login } from './components/Login';
 import { useFleetView, blankCar, blankDrv } from './useFleetView';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -37,6 +39,15 @@ const initialState: UIState = {
 };
 
 function App() {
+  const auth = useAuth();
+  if (auth.cargando) return <Arranque error="" />;
+  if (!auth.sesion) return <Login onEntrar={auth.entrar} />;
+  // La key remonta todo el panel al cambiar de usuario, así que no queda estado
+  // de la sesión anterior colgando.
+  return <Panel key={auth.sesion.usuario} sesion={auth.sesion} onSalir={auth.salir} />;
+}
+
+function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
   const [state, setState] = useState<UIState>(initialState);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -52,14 +63,14 @@ function App() {
     toastTimer.current = setTimeout(() => setState((s) => ({ ...s, toast: '' })), 3600);
   }, []);
 
-  const store = useFleetStore(avisar);
+  const store = useFleetStore(avisar, onSalir);
   const v = useFleetView(store.cars, store.movs, state, update, store);
 
   if (store.cargando || store.error) return <Arranque error={store.error} />;
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '236px 1fr', height: '100vh', width: '100%', background: '#f4f0e8', position: 'relative', overflow: 'hidden' }}>
-      <Sidebar navItems={v.navItems} diasCierre={v.diasCierre} />
+      <Sidebar navItems={v.navItems} diasCierre={v.diasCierre} nombre={sesion.nombre} totalVehiculos={store.cars.length} onSalir={onSalir} />
 
       <main style={{ padding: '14px 22px 16px', display: 'flex', flexDirection: 'column', gap: 9, minWidth: 0, height: '100%', overflowY: 'auto' }}>
         <Header

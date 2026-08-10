@@ -1,10 +1,24 @@
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
+import fastifyCookie from '@fastify/cookie';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { CarRow, MovRow } from './db.js';
 import { DB_PATH, carToJson, movToJson, openDb, seedIfEmpty } from './db.js';
+import {
+  COOKIE,
+  bloqueado,
+  borrarSesion,
+  crearSesion,
+  limpiarFallos,
+  limpiarSesionesVencidas,
+  migrarAuth,
+  registrarFallo,
+  sembrarAdmin,
+  usuarioDeSesion,
+  verifyPassword,
+} from './auth.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = process.env.MIFLOTA_PUBLIC ?? join(HERE, '..', 'public');
@@ -15,6 +29,70 @@ const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
 
 const sembrada = seedIfEmpty(db);
 app.log.info({ db: DB_PATH, sembrada }, sembrada ? 'base vacía: flota de demostración sembrada' : 'base existente reutilizada');
+
+migrarAuth(db);
+limpiarSesionesVencidas(db);
+const adminCreado = await sembrarAdmin(db);
+if (adminCreado) app.log.info({ usuario: adminCreado }, 'usuario inicial creado');
+
+await app.register(fastifyCookie);
+
+/* ------------------------------ sesión ------------------------------ */
+
+/** Rutas que se pueden pedir sin sesión. Todo lo demás bajo /api la exige. */
+const ABIERTAS = new Set(['/api/health', '/api/login', '/api/me']);
+
+app.addHook('preHandler', async (req, reply) => {
+  if (!req.url.startsWith('/api/')) return;
+  if (ABIERTAS.has(req.url.split('?')[0])) return;
+  if (!usuarioDeSesion(db, req.cookies[COOKIE])) return reply.code(401).send({ error: 'Sesión requerida' });
+});
+
+const cookieOpts = {
+  httpOnly: true,
+  sameSite: 'lax' as const,
+  // Detrás de Caddy el navegador siempre habla HTTPS; en desarrollo plano una
+  // cookie Secure nunca llegaría, así que se ata al entorno.
+  secure: process.env.NODE_ENV === 'production',
+  path: '/',
+};
+
+app.post<{ Body: { usuario?: string; password?: string } }>('/api/login', async (req, reply) => {
+  const usuario = String(req.body?.usuario ?? '').trim();
+  const password = String(req.body?.password ?? '');
+  const clave = `${req.ip}|${usuario.toLowerCase()}`;
+
+  const espera = bloqueado(clave);
+  if (espera) return reply.code(429).send({ error: `Demasiados intentos. Probá de nuevo en ${Math.ceil(espera / 60)} minutos.` });
+  if (!usuario || !password) return reply.code(400).send({ error: 'Completá usuario y contraseña' });
+
+  const fila = db.prepare('SELECT id, usuario, nombre, pass_hash FROM users WHERE usuario = ?').get(usuario) as
+    | { id: number; usuario: string; nombre: string; pass_hash: string }
+    | undefined;
+
+  // Mismo mensaje exista o no el usuario: distinguirlos permitiría enumerar cuentas.
+  const ok = fila ? await verifyPassword(password, fila.pass_hash) : false;
+  if (!ok) {
+    registrarFallo(clave);
+    return reply.code(401).send({ error: 'Usuario o contraseña incorrectos' });
+  }
+
+  limpiarFallos(clave);
+  const { token, maxAge } = crearSesion(db, fila!.id);
+  reply.setCookie(COOKIE, token, { ...cookieOpts, maxAge });
+  return { usuario: fila!.usuario, nombre: fila!.nombre };
+});
+
+app.post('/api/logout', async (req, reply) => {
+  borrarSesion(db, req.cookies[COOKIE]);
+  reply.clearCookie(COOKIE, cookieOpts);
+  return { ok: true };
+});
+
+app.get('/api/me', async (req) => {
+  const u = usuarioDeSesion(db, req.cookies[COOKIE]);
+  return u ? { autenticado: true, usuario: u.usuario, nombre: u.nombre } : { autenticado: false };
+});
 
 /* ------------------------------- API ------------------------------- */
 

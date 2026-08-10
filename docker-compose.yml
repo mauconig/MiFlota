@@ -14,6 +14,12 @@ services:
     environment:
       MIFLOTA_DB: /data/miflota.db
       LOG_LEVEL: info
+      # Solo se usan para crear el primer usuario, cuando la tabla está vacía.
+      # Después de eso la contraseña vive hasheada en la base y estas variables
+      # dejan de tener efecto. Van en un .env que no se versiona.
+      MIFLOTA_ADMIN_USER: ${MIFLOTA_ADMIN_USER:?falta MIFLOTA_ADMIN_USER en .env}
+      MIFLOTA_ADMIN_PASSWORD: ${MIFLOTA_ADMIN_PASSWORD:?falta MIFLOTA_ADMIN_PASSWORD en .env}
+      MIFLOTA_ADMIN_NOMBRE: ${MIFLOTA_ADMIN_NOMBRE:-Dueño}
 
 volumes:
   miflota-data:

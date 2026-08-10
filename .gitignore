@@ -30,3 +30,6 @@ server/.tmp
 *.db
 *.db-wal
 *.db-shm
+
+# Credenciales locales
+.env

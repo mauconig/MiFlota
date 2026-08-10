@@ -1,8 +1,21 @@
 import type { NavItem } from '../useFleetView';
 import { Btn } from './Btn';
 import { IconPath, TruckLogo } from '../icons';
+import { initials } from '../format';
 
-export function Sidebar({ navItems, diasCierre }: { navItems: NavItem[]; diasCierre: number }) {
+export function Sidebar({
+  navItems,
+  diasCierre,
+  nombre,
+  totalVehiculos,
+  onSalir,
+}: {
+  navItems: NavItem[];
+  diasCierre: number;
+  nombre: string;
+  totalVehiculos: number;
+  onSalir: () => void;
+}) {
   return (
     <aside style={{ background: '#16150f', color: '#fffdf8', padding: '26px 18px', display: 'flex', flexDirection: 'column', gap: 26 }}>
       <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 11, padding: '0 6px' }}>
@@ -52,12 +65,22 @@ export function Sidebar({ navItems, diasCierre }: { navItems: NavItem[]; diasCie
         </div>
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10, padding: '0 4px' }}>
           <span style={{ width: 34, height: 34, borderRadius: 17, background: '#e8a13a', color: '#16150f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flex: 'none' }}>
-            MR
+            {initials(nombre)}
           </span>
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>Miguel Rojas</div>
-            <div style={{ fontSize: 11, color: '#bdb6a4' }}>15 vehículos</div>
+            <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nombre}</div>
+            <div style={{ fontSize: 11, color: '#bdb6a4' }}>
+              {totalVehiculos} {totalVehiculos === 1 ? 'vehículo' : 'vehículos'}
+            </div>
           </div>
+          <Btn
+            onClick={onSalir}
+            ariaLabel="Cerrar sesión"
+            style={{ border: '1px solid #333024', background: 'transparent', color: '#bdb6a4', borderRadius: 10, width: 30, height: 30, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', padding: 0 }}
+            hoverStyle={{ background: '#242219', color: '#fffdf8' }}
+          >
+            <IconPath d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11" size={15} />
+          </Btn>
         </div>
       </div>
     </aside>
