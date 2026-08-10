@@ -21,8 +21,9 @@ export class SinSesion extends Error {}
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   // El Content-Type solo va cuando hay cuerpo: si se anuncia JSON y el cuerpo
   // llega vacío (DELETE, logout), Fastify rechaza el pedido con un 400 antes de
-  // que la ruta llegue a ejecutarse.
-  const headers = init?.body ? { 'Content-Type': 'application/json' } : undefined;
+  // que la ruta llegue a ejecutarse. Con FormData tampoco se declara: lo pone
+  // el navegador, que es el único que sabe el separador que va a usar.
+  const headers = init?.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : undefined;
   const res = await fetch(url, { credentials: 'same-origin', ...init, headers: { ...headers, ...init?.headers } });
   if (!res.ok) {
     const cuerpo = await res.json().catch(() => null);
@@ -96,6 +97,7 @@ export interface FleetStore {
   patchCar: (id: string, patch: Partial<Car>) => void;
   addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
   deleteCar: (id: string) => Promise<{ plate: string; movs: number }>;
+  mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: File | null }) => Promise<void>;
 }
 
 /**
@@ -161,5 +163,18 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     return r;
   }, []);
 
-  return { cars, movs, cargando, error, patchCar, addCar, deleteCar };
+  // Mandar a taller cambia el estado y crea el gasto en la misma operación, así
+  // que no puede aplicarse en optimista: se espera al servidor y se aplican las
+  // dos cosas juntas o ninguna.
+  const mandarATaller = useCallback(async (id: string, datos: { razon: string; monto: number; comprobante: File | null }) => {
+    const fd = new FormData();
+    fd.append('razon', datos.razon);
+    fd.append('monto', String(datos.monto));
+    if (datos.comprobante) fd.append('comprobante', datos.comprobante);
+    const r = await req<{ car: CarDto; mov: MovDto }>(`/api/cars/${id}/taller`, { method: 'POST', body: fd });
+    setCars((cs) => cs.map((c) => (c.id === id ? toCar(r.car) : c)));
+    setMovs((ms) => [toMov(r.mov), ...ms]);
+  }, []);
+
+  return { cars, movs, cargando, error, patchCar, addCar, deleteCar, mandarATaller };
 }

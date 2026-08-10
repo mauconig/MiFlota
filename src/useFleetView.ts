@@ -202,6 +202,8 @@ export interface DetailMov {
   dateLbl: string;
   desc: string;
   sub: string;
+  /** URL del comprobante, o '' si el movimiento no tiene uno. */
+  comprobante: string;
   amt: string;
   amtFg: string;
   iconBg: string;
@@ -328,6 +330,18 @@ export interface View {
   confirmar: () => void;
   cancelarConfirm: () => void;
 
+  tallerOpen: boolean;
+  tallerPlate: string;
+  tallerRazon: string;
+  tallerMonto: string;
+  tallerArchivo: string;
+  tallerGuardando: boolean;
+  setTallerRazon: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  setTallerMonto: (v: string) => void;
+  setTallerArchivo: (f: File | null) => void;
+  tallerGuardar: () => void;
+  cerrarTaller: () => void;
+
   hasDriverDetail: boolean;
   driverDetail: DriverDetailView;
   closeDriverDetail: () => void;
@@ -441,6 +455,7 @@ export function useFleetView(
     patchCar: (id: string, patch: Partial<Car>) => void;
     addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
     deleteCar: (id: string) => Promise<{ plate: string; movs: number }>;
+    mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: File | null }) => Promise<void>;
   },
 ): View {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -827,6 +842,12 @@ export function useFleetView(
         label,
         ...CH(c.estado === k),
         pick: () => {
+          // Mandar a taller no es solo cambiar un estado: hay un gasto detrás y
+          // se pregunta por él antes, no después.
+          if (k === 'taller' && c.estado !== 'taller') {
+            update({ taller: { carId: c.id, razon: '', monto: '', archivo: null, guardando: false } });
+            return;
+          }
           patchCar(c.id, { estado: k });
           toast('Estado actualizado · ' + label);
         },
@@ -850,6 +871,7 @@ export function useFleetView(
             dateLbl: dLbl(m.date),
             desc: m.desc,
             sub: inc ? (m.estado === 'pagado' ? 'Cobrado' : m.estado === 'parcial' ? 'Pago parcial' : 'Pendiente') : m.cat!,
+            comprobante: m.comprobante ? '/api/comprobantes/' + m.comprobante.id : '',
             amt: (inc ? '+' : '−') + fmtShort(m.amount, st.hide),
             amtFg: inc ? COLORS.pos : COLORS.neg,
             iconBg: inc ? '#eef4f0' : '#fdeeea',
@@ -936,6 +958,8 @@ export function useFleetView(
             dateLbl: dLbl(m.date),
             desc: m.desc,
             sub: pagado ? 'Cobrado' : m.estado === 'parcial' ? 'Pago parcial' : 'Pendiente',
+            // Los cobros de cuota no llevan adjunto: el comprobante es del gasto.
+            comprobante: '',
             amt: '+' + fmtShort(m.amount, st.hide),
             amtFg: pagado ? COLORS.pos : COLORS.neg,
             iconBg: pagado ? '#eef4f0' : '#fdeeea',
@@ -1223,6 +1247,45 @@ export function useFleetView(
             .catch((e: Error) => toast('No se pudo eliminar: ' + e.message));
         },
         cancelarConfirm: cerrar,
+      };
+    })(),
+
+    ...(() => {
+      const t = st.taller;
+      const car = t ? cars.find((c) => c.id === t.carId) : undefined;
+      const editar = (patch: Partial<NonNullable<UIState['taller']>>) => update((s) => (s.taller ? { taller: { ...s.taller, ...patch } } : {}));
+      const cerrar = () => update({ taller: null });
+      return {
+        tallerOpen: !!t && !!car,
+        tallerPlate: car ? car.plate : '',
+        tallerRazon: t?.razon ?? '',
+        tallerMonto: t?.monto ?? '',
+        tallerArchivo: t?.archivo?.name ?? '',
+        tallerGuardando: t?.guardando ?? false,
+        setTallerRazon: (e: React.ChangeEvent<HTMLInputElement>) => editar({ razon: e.target.value }),
+        setTallerMonto: (v: string) => editar({ monto: v }),
+        setTallerArchivo: (f: File | null) => editar({ archivo: f }),
+        cerrarTaller: cerrar,
+        tallerGuardar: () => {
+          if (!t || !car || t.guardando) return;
+          const razon = t.razon.trim();
+          if (!razon) return toast('Escribí por qué entra a taller');
+          const monto = numFromInput(t.monto);
+          if (!monto) return toast('Indicá cuánto se gasta en el taller');
+          // El botón se bloquea mientras sube: con un comprobante de varios MB
+          // hay tiempo de sobra para apretarlo dos veces y duplicar el gasto.
+          editar({ guardando: true });
+          persist
+            .mandarATaller(car.id, { razon, monto, comprobante: t.archivo })
+            .then(() => {
+              cerrar();
+              toast(car.plate + ' en taller · gasto de ' + fmt(monto) + ' registrado');
+            })
+            .catch((e: Error) => {
+              editar({ guardando: false });
+              toast('No se pudo registrar: ' + e.message);
+            });
+        },
       };
     })(),
 

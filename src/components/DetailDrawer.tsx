@@ -377,6 +377,14 @@ export function DetailDrawer({ v }: { v: View }) {
                       <span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>{m.desc}</span>
                       <span style={{ display: 'block', fontSize: 11, color: '#6b665c', marginTop: 1 }}>
                         {m.dateLbl} · {m.sub}
+                        {m.comprobante && (
+                          <>
+                            {' · '}
+                            <a href={m.comprobante} target="_blank" rel="noreferrer" style={{ fontWeight: 700 }}>
+                              ver comprobante
+                            </a>
+                          </>
+                        )}
                       </span>
                     </span>
                     <span style={{ flex: 'none', fontSize: 13, fontWeight: 700, color: m.amtFg }}>{m.amt}</span>

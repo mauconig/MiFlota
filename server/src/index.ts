@@ -1,11 +1,14 @@
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyCookie from '@fastify/cookie';
-import { existsSync } from 'node:fs';
+import fastifyMultipart from '@fastify/multipart';
+import { createReadStream, existsSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { CarRow, MovRow } from './db.js';
-import { DB_PATH, carToJson, movToJson, openDb } from './db.js';
+import { COMPROBANTES_DIR, DB_PATH, carToJson, movToJson, openDb } from './db.js';
 import {
   COOKIE,
   bloqueado,
@@ -33,6 +36,9 @@ const adminCreado = await sembrarAdmin(db);
 if (adminCreado) app.log.info({ usuario: adminCreado }, 'usuario inicial creado');
 
 await app.register(fastifyCookie);
+// El límite del archivo lo aplica el plugin mientras lo lee, así que un envío
+// gigante se corta en el camino en vez de terminar entero en memoria.
+await app.register(fastifyMultipart, { limits: { fileSize: 8 * 1024 * 1024, files: 1, fields: 8 } });
 
 // Un cuerpo vacío anunciado como JSON no es un error: fetch manda el
 // Content-Type aunque el pedido no lleve datos (DELETE, logout). Con el parser
@@ -273,6 +279,100 @@ app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
   `).run(car);
 
   return reply.code(201).send(carToJson(selCar.get(car.id, u.id) as CarRow));
+});
+
+/* ---------------------------- taller ---------------------------- */
+
+/** Tipos aceptados como comprobante. La clave es que ninguno se ejecuta en el
+ *  navegador: nada de SVG ni HTML, que servidos desde el mismo origen serían
+ *  un XSS con sesión válida. El Content-Type de la descarga sale de acá y no
+ *  del que declaró el cliente. */
+const TIPOS_COMPROBANTE: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/heic': 'heic',
+  'application/pdf': 'pdf',
+};
+
+app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) => {
+  const u = quien(req);
+  const car = selCar.get(req.params.id, u.id) as CarRow | undefined;
+  if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
+
+  let razon = '';
+  let monto = 0;
+  let archivo: { id: string; nombre: string; tipo: string } | null = null;
+
+  try {
+    for await (const parte of req.parts()) {
+      if (parte.type === 'field') {
+        if (parte.fieldname === 'razon') razon = String(parte.value).trim().slice(0, 120);
+        if (parte.fieldname === 'monto') monto = Number(String(parte.value).replace(/\D/g, '')) || 0;
+        continue;
+      }
+      if (parte.fieldname !== 'comprobante') {
+        await parte.toBuffer();
+        continue;
+      }
+      const ext = TIPOS_COMPROBANTE[parte.mimetype];
+      if (!ext) {
+        await parte.toBuffer();
+        return reply.code(415).send({ error: 'El comprobante tiene que ser una foto o un PDF' });
+      }
+      const buf = await parte.toBuffer();
+      if (!buf.length) continue;
+      // El nombre del archivo lo inventa el servidor: usar el que manda el
+      // cliente permitiría escribir fuera del directorio con un `../`.
+      const id = randomUUID() + '.' + ext;
+      await writeFile(join(COMPROBANTES_DIR, id), buf);
+      archivo = { id, nombre: String(parte.filename || 'comprobante').slice(0, 120), tipo: parte.mimetype };
+    }
+  } catch (e) {
+    const err = e as { code?: string };
+    if (err.code === 'FST_REQ_FILE_TOO_LARGE') return reply.code(413).send({ error: 'El comprobante no puede pasar de 8 MB' });
+    throw e;
+  }
+
+  if (!razon) return reply.code(400).send({ error: 'Indicá el motivo de la entrada a taller' });
+  if (monto <= 0) return reply.code(400).send({ error: 'Indicá cuánto se gasta en el taller' });
+
+  const hoy = new Date().toISOString().slice(0, 10);
+  const info = db
+    .prepare(
+      `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
+       VALUES (?, ?, 'egreso', ?, ?, ?, 'Taller', NULL, ?, ?, ?)`,
+    )
+    .run(u.id, car.id, monto, hoy, razon, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
+
+  db.prepare("UPDATE cars SET estado = 'taller' WHERE id = ? AND owner_id = ?").run(car.id, u.id);
+  req.log.info({ car: car.plate, monto, comprobante: !!archivo }, 'vehículo a taller');
+
+  const mov = db.prepare('SELECT * FROM movs WHERE id = ?').get(info.lastInsertRowid) as MovRow;
+  return reply.code(201).send({ car: carToJson(selCar.get(car.id, u.id) as CarRow), mov: movToJson(mov) });
+});
+
+/** Descarga del comprobante. Se resuelve por el movimiento y no por el nombre
+ *  del archivo, así que el id solo sirve si el movimiento es del que pregunta. */
+app.get<{ Params: { id: string } }>('/api/comprobantes/:id', async (req, reply) => {
+  const u = quien(req);
+  const fila = db.prepare('SELECT comprobante, comprobante_nombre, comprobante_tipo FROM movs WHERE comprobante = ? AND owner_id = ?').get(req.params.id, u.id) as
+    | { comprobante: string; comprobante_nombre: string | null; comprobante_tipo: string | null }
+    | undefined;
+  if (!fila) return reply.code(404).send({ error: 'Comprobante inexistente' });
+
+  // El tipo sale de la tabla blanca, no de lo que se guardó: si alguna vez
+  // entrara un valor raro a la base, igual no se sirve como algo ejecutable.
+  const tipo = fila.comprobante_tipo && TIPOS_COMPROBANTE[fila.comprobante_tipo] ? fila.comprobante_tipo : 'application/octet-stream';
+  const nombre = (fila.comprobante_nombre ?? 'comprobante').replace(/[^\w.\- ]/g, '_');
+
+  return reply
+    .type(tipo)
+    .header('Content-Disposition', `inline; filename="${nombre}"`)
+    .header('X-Content-Type-Options', 'nosniff')
+    .header('Content-Security-Policy', "default-src 'none'; sandbox")
+    .header('Cache-Control', 'private, max-age=3600')
+    .send(createReadStream(join(COMPROBANTES_DIR, fila.comprobante)));
 });
 
 /* --------------------------- SPA estática --------------------------- */

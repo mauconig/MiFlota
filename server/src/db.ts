@@ -1,9 +1,13 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { generateFleetData } from './seed.js';
 
 export const DB_PATH = process.env.MIFLOTA_DB ?? '/data/miflota.db';
+
+/** Los comprobantes van al lado de la base, que es el volumen persistente:
+ *  si quedaran en la imagen, se perderían en cada reconstrucción. */
+export const COMPROBANTES_DIR = process.env.MIFLOTA_COMPROBANTES ?? join(dirname(DB_PATH), 'comprobantes');
 
 export interface CarRow {
   id: string;
@@ -33,6 +37,11 @@ export interface MovRow {
   descripcion: string;
   cat: string | null;
   estado: string | null;
+  /** Id del archivo en COMPROBANTES_DIR. Null = el movimiento no tiene adjunto. */
+  comprobante: string | null;
+  /** Nombre original, solo para mostrar y para la descarga. */
+  comprobante_nombre: string | null;
+  comprobante_tipo: string | null;
 }
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`: ordenan lexicográficamente en SQL y
@@ -41,6 +50,7 @@ const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 export function openDb() {
   mkdirSync(dirname(DB_PATH), { recursive: true });
+  mkdirSync(COMPROBANTES_DIR, { recursive: true });
   const db = new Database(DB_PATH);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
@@ -74,7 +84,10 @@ export function openDb() {
       date        TEXT NOT NULL,
       descripcion TEXT NOT NULL,
       cat         TEXT,
-      estado      TEXT CHECK (estado IN ('pagado','pendiente','parcial'))
+      estado      TEXT CHECK (estado IN ('pagado','pendiente','parcial')),
+      comprobante        TEXT,
+      comprobante_nombre TEXT,
+      comprobante_tipo   TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_movs_car   ON movs(car_id);
@@ -116,6 +129,13 @@ function migrarOwner(db: Database.Database) {
   if (cols('cars').includes('vtv_date')) db.exec('ALTER TABLE cars DROP COLUMN vtv_date');
   // El seguro pasa a tener costo e intervalo propio de renovación: antes se
   // renovaba siempre "12 meses desde hoy" y no se sabía cuánto costaba.
+  // Comprobante del gasto. El archivo vive en disco; acá solo queda el id con
+  // el que se lo busca, más el nombre y el tipo para servirlo.
+  if (!cols('movs').includes('comprobante')) {
+    db.exec('ALTER TABLE movs ADD COLUMN comprobante TEXT');
+    db.exec('ALTER TABLE movs ADD COLUMN comprobante_nombre TEXT');
+    db.exec('ALTER TABLE movs ADD COLUMN comprobante_tipo TEXT');
+  }
   if (!cols('cars').includes('seguro_costo')) {
     db.exec('ALTER TABLE cars ADD COLUMN seguro_costo INTEGER NOT NULL DEFAULT 0');
     db.exec("ALTER TABLE cars ADD COLUMN seguro_periodo TEXT NOT NULL DEFAULT 'mensual'");
@@ -232,5 +252,7 @@ export function movToJson(r: MovRow) {
     desc: r.descripcion,
     ...(r.cat ? { cat: r.cat } : {}),
     ...(r.estado ? { estado: r.estado } : {}),
+    // El cliente nunca ve la ruta del archivo, solo si hay uno y cómo se llama.
+    ...(r.comprobante ? { comprobante: { id: r.comprobante, nombre: r.comprobante_nombre ?? 'comprobante', tipo: r.comprobante_tipo ?? '' } } : {}),
   };
 }

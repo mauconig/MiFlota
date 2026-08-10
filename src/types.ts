@@ -39,6 +39,8 @@ export interface Mov {
   desc: string;
   cat?: string;
   estado?: MovEstado;
+  /** Adjunto del gasto. El archivo se pide por `/api/comprobantes/:id`. */
+  comprobante?: { id: string; nombre: string; tipo: string };
 }
 
 export type Nav = 'resumen' | 'flota' | 'choferes' | 'alertas' | 'reportes' | 'cobros';
@@ -89,6 +91,8 @@ export interface UIState {
   /** Intervalo de service que se está editando en la ficha, sin guardar todavía.
       Lleva el id del vehículo para que abrir otro no arrastre el borrador. */
   svcEdit: { carId: string; cada: string; unidad: ServiceUnidad } | null;
+  /** Entrada a taller a medio cargar. Null = el modal está cerrado. */
+  taller: { carId: string; razon: string; monto: string; archivo: File | null; guardando: boolean } | null;
   /** Acción destructiva esperando confirmación. */
   confirm: { tipo: 'borrarAuto' | 'quitarChofer'; carId: string } | null;
   /** Id del vehículo cuyo chofer se está viendo en detalle. */

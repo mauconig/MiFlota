@@ -15,6 +15,7 @@ import { Cobros } from './screens/Cobros';
 import { DetailDrawer } from './components/DetailDrawer';
 import { DriverDetail } from './components/DriverDetail';
 import { Confirm } from './components/Confirm';
+import { TallerModal } from './components/TallerModal';
 import { CarModal } from './components/CarModal';
 import { DriverModal } from './components/DriverModal';
 import { Toast } from './components/Toast';
@@ -37,6 +38,7 @@ const initialState: UIState = {
   ndrv: blankDrv(),
   detailId: null,
   svcEdit: null,
+  taller: null,
   driverId: null,
   confirm: null,
 };
@@ -101,6 +103,7 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
       <DetailDrawer v={v} />
       <DriverDetail v={v} />
       <Confirm v={v} />
+      <TallerModal v={v} />
       <CarModal v={v} />
       <DriverModal v={v} />
       <Toast v={v} />
