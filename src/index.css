@@ -59,6 +59,20 @@ select.field-select {
   background-position: right 14px center;
 }
 
+/* Las dos columnas de la ficha del vehículo. Se apilan cuando la ventana no
+   da el ancho: dos columnas apretadas se leen peor que una sola. */
+.detalle-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+@media (max-width: 1060px) {
+  .detalle-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
 ::selection {
   background: #f7dfae;
 }
