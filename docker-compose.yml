@@ -1,0 +1,19 @@
+services:
+  miflota:
+    build: .
+    image: miflota:latest
+    container_name: miflota
+    restart: unless-stopped
+    # Solo loopback: el único entrypoint público es Caddy, que además pone el
+    # TLS y el basic auth. El puerto 3000 del contenedor nunca se expone a
+    # internet directamente.
+    ports:
+      - '127.0.0.1:8791:3000'
+    volumes:
+      - miflota-data:/data
+    environment:
+      MIFLOTA_DB: /data/miflota.db
+      LOG_LEVEL: info
+
+volumes:
+  miflota-data:

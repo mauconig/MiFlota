@@ -1,7 +1,10 @@
 export const BRANDS: Record<string, string[]> = {
+  // Las tres elipses del emblema: la exterior ancha, la vertical arriba y la
+  // horizontal abajo, cruzándose para formar la T. Todas centradas en 12,12.
   Toyota: [
-    'M2.4 14.7a9.6 3.8 0 1 0 19.2 0a9.6 3.8 0 1 0 -19.2 0',
-    'M8.6 11.7a3.4 6.2 0 1 0 6.8 0a3.4 6.2 0 1 0 -6.8 0',
+    'M1 12a11 7.6 0 1 0 22 0a11 7.6 0 1 0 -22 0',
+    'M9.1 9.8a2.9 4.5 0 1 0 5.8 0a2.9 4.5 0 1 0 -5.8 0',
+    'M5.2 14.3a6.8 2.8 0 1 0 13.6 0a6.8 2.8 0 1 0 -13.6 0',
   ],
   Nissan: ['M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0 -18', 'M3.3 9.7h17.4', 'M3.3 14.3h17.4'],
   Chevrolet: ['M2 9.6h7.4V7h5.2v2.6H22v4.8h-7.4V17H9.4v-2.6H2z'],

@@ -1,5 +1,6 @@
 import { useMemo, useRef } from 'react';
 import type { Car, Mov, UIState, NewCarForm, NewDriverForm } from './types';
+import type { NuevoCarPayload } from './api';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, dLbl, dLblFull, daysBetween, durLbl, fmt, fmtShort, initials, statusColor, numFromInput } from './format';
 
@@ -12,6 +13,8 @@ const svcNextDate = (c: Car) => addM(c.lastServiceDate, c.serviceCadaMeses);
 /** Días que faltan para el próximo service (negativo = vencido). */
 const svcDaysLeft = (c: Car) => daysBetween(TODAY, svcNextDate(c));
 /** "vencido hace 8 días" / "vence hoy" / "en 3 meses" */
+/** Días que faltan para el vencimiento de un documento (negativo = vencido). */
+const docLeft = (d: Date) => daysBetween(TODAY, d);
 const svcLeftLbl = (d: number, largo = false) => (d < 0 ? (largo ? 'vencido hace ' : 'vencido ') + durLbl(d) : d === 0 ? (largo ? 'vence hoy' : 'hoy') : (largo ? 'vence en ' : 'en ') + durLbl(d));
 
 export interface Chip {
@@ -122,6 +125,35 @@ export interface ChoferItem {
   tag: string;
   tagBg: string;
   tagFg: string;
+  open: () => void;
+}
+
+export interface DriverDetailView {
+  initials: string;
+  name: string;
+  tag: string;
+  tagBg: string;
+  tagFg: string;
+  periodShort: string;
+  cobrado: string;
+  pendiente: string;
+  pendienteFg: string;
+  cumplimiento: string;
+  cumplimientoPct: string;
+  cumplimientoFg: string;
+  plate: string;
+  rawModel: string;
+  model: string;
+  estado: string;
+  estadoBg: string;
+  estadoFg: string;
+  cuota: string;
+  cuotasLbl: string;
+  pagos: DetailMov[];
+  sinPagos: boolean;
+  verVehiculo: () => void;
+  editar: () => void;
+  quitar: () => void;
 }
 
 export interface MovRow {
@@ -266,6 +298,10 @@ export interface View {
   detail: DetailView;
   closeDetail: () => void;
 
+  hasDriverDetail: boolean;
+  driverDetail: DriverDetailView;
+  closeDriverDetail: () => void;
+
   carModal: boolean;
   drvModal: boolean;
   ncar: NewCarForm;
@@ -346,10 +382,10 @@ function range(state: UIState) {
 
 export function useFleetView(
   cars: Car[],
-  setCars: React.Dispatch<React.SetStateAction<Car[]>>,
   movs: Mov[],
   state: UIState,
   update: (patch: Partial<UIState> | ((s: UIState) => Partial<UIState>)) => void,
+  persist: { patchCar: (id: string, patch: Partial<Car>) => void; addCar: (nuevo: NuevoCarPayload) => Promise<Car> },
 ): View {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -361,7 +397,7 @@ export function useFleetView(
 
   const go = (nav: UIState['nav'], extra?: Partial<UIState>) => update({ nav, ...(extra || {}) });
 
-  const patchCar = (id: string, patch: Partial<Car>) => setCars((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const patchCar = persist.patchCar;
 
   const ch = useMemo(
     () => ({
@@ -399,26 +435,22 @@ export function useFleetView(
       toast('Esa chapa ya está en la flota');
       return;
     }
-    const km = numFromInput(n.km) || 80000;
-    setCars((cs) => [
-      ...cs,
-      {
-        id: 'n' + Date.now(),
+    // El alta es lo único que no se puede aplicar en optimista: el id lo asigna
+    // el servidor, así que se espera la confirmación antes de cerrar el modal.
+    persist
+      .addCar({
         plate,
         model: n.model.trim(),
         year: numFromInput(n.year) || 2018,
         driver: n.driver.trim() || 'Sin chofer',
         cuota: numFromInput(n.cuota),
-        estado: 'activo',
-        km,
-        serviceCadaMeses: 6,
-        lastServiceDate: TODAY,
-        vtvIn: 180,
-        seguroIn: 120,
-      },
-    ]);
-    update({ modal: null, ncar: blankCar(), nav: 'flota' });
-    toast('Vehículo agregado · ' + plate);
+        km: numFromInput(n.km) || 80000,
+      })
+      .then(() => {
+        update({ modal: null, ncar: blankCar(), nav: 'flota' });
+        toast('Vehículo agregado · ' + plate);
+      })
+      .catch((e: Error) => toast('No se pudo agregar: ' + e.message));
   };
 
   const saveDrv = () => {
@@ -433,8 +465,8 @@ export function useFleetView(
       return;
     }
     const cuota = numFromInput(d.cuota);
-    setCars((cs) => cs.map((c) => (c.id === d.carId ? { ...c, driver: name, cuota: cuota || c.cuota } : c)));
     const car = cars.find((c) => c.id === d.carId)!;
+    patchCar(d.carId, { driver: name, cuota: cuota || car.cuota });
     update({ modal: null, ndrv: blankDrv(), nav: 'choferes' });
     toast('Chofer asignado · ' + name + ' · ' + car.plate);
   };
@@ -462,19 +494,21 @@ export function useFleetView(
         sev: dLeft < 0 ? 2 : 1,
         text: 'Service ' + svcLeftLbl(dLeft, true),
       });
-    if (c.vtvIn <= 30)
+    const vtvLeft = daysBetween(TODAY, c.vtvDate);
+    if (vtvLeft <= 30)
       alertList.push({
         car: c,
         kind: 'VTV',
-        sev: c.vtvIn < 0 ? 2 : 1,
-        text: c.vtvIn < 0 ? 'VTV vencida hace ' + Math.abs(c.vtvIn) + ' días' : 'VTV vence en ' + c.vtvIn + ' días',
+        sev: vtvLeft < 0 ? 2 : 1,
+        text: 'VTV ' + (vtvLeft < 0 ? 'vencida hace ' + durLbl(vtvLeft) : vtvLeft === 0 ? 'vence hoy' : 'vence en ' + durLbl(vtvLeft)),
       });
-    if (c.seguroIn <= 20)
+    const segLeft = daysBetween(TODAY, c.seguroDate);
+    if (segLeft <= 20)
       alertList.push({
         car: c,
         kind: 'Seguro',
-        sev: c.seguroIn < 0 ? 2 : 1,
-        text: c.seguroIn < 0 ? 'Seguro vencido hace ' + Math.abs(c.seguroIn) + ' días' : 'Seguro vence en ' + c.seguroIn + ' días',
+        sev: segLeft < 0 ? 2 : 1,
+        text: 'Seguro ' + (segLeft < 0 ? 'vencido hace ' + durLbl(segLeft) : segLeft === 0 ? 'vence hoy' : 'vence en ' + durLbl(segLeft)),
       });
     if (c.estado === 'taller') alertList.push({ car: c, kind: 'Taller', sev: 1, text: 'En taller, sin generar cuota' });
   });
@@ -643,20 +677,20 @@ export function useFleetView(
       docs: [
         {
           label: 'VTV',
-          txt: c.vtvIn < 0 ? 'Vencida hace ' + Math.abs(c.vtvIn) + ' días' : 'Vence en ' + c.vtvIn + ' días',
-          fg: c.vtvIn < 0 ? COLORS.neg : c.vtvIn <= 30 ? COLORS.warn : '#3d3a34',
+          txt: (docLeft(c.vtvDate) < 0 ? 'Vencida hace ' : docLeft(c.vtvDate) === 0 ? '' : 'Vence en ') + (docLeft(c.vtvDate) === 0 ? 'Vence hoy' : durLbl(docLeft(c.vtvDate))) + ' · ' + dLblFull(c.vtvDate),
+          fg: docLeft(c.vtvDate) < 0 ? COLORS.neg : docLeft(c.vtvDate) <= 30 ? COLORS.warn : '#3d3a34',
           renew: () => {
-            patchCar(c.id, { vtvIn: 365 });
-            toast('VTV renovada por 12 meses');
+            patchCar(c.id, { vtvDate: addM(TODAY, 12) });
+            toast('VTV renovada hasta ' + dLblFull(addM(TODAY, 12)));
           },
         },
         {
           label: 'Seguro',
-          txt: c.seguroIn < 0 ? 'Vencido hace ' + Math.abs(c.seguroIn) + ' días' : 'Vence en ' + c.seguroIn + ' días',
-          fg: c.seguroIn < 0 ? COLORS.neg : c.seguroIn <= 20 ? COLORS.warn : '#3d3a34',
+          txt: (docLeft(c.seguroDate) < 0 ? 'Vencido hace ' : docLeft(c.seguroDate) === 0 ? '' : 'Vence en ') + (docLeft(c.seguroDate) === 0 ? 'Vence hoy' : durLbl(docLeft(c.seguroDate))) + ' · ' + dLblFull(c.seguroDate),
+          fg: docLeft(c.seguroDate) < 0 ? COLORS.neg : docLeft(c.seguroDate) <= 20 ? COLORS.warn : '#3d3a34',
           renew: () => {
-            patchCar(c.id, { seguroIn: 365 });
-            toast('Seguro renovado por 12 meses');
+            patchCar(c.id, { seguroDate: addM(TODAY, 12) });
+            toast('Seguro renovado hasta ' + dLblFull(addM(TODAY, 12)));
           },
         },
       ],
@@ -707,6 +741,93 @@ export function useFleetView(
       editDriver: () => update({ modal: 'drv', ndrv: { name: c.driver === 'Sin chofer' ? '' : c.driver, carId: c.id, cuota: c.cuota ? String(c.cuota) : '' } }),
       clearDriver: () => {
         patchCar(c.id, { driver: 'Sin chofer' });
+        toast('Chofer desvinculado de ' + c.plate);
+      },
+    };
+  })();
+
+  const driverDetail: DriverDetailView = (() => {
+    const x = st.driverId ? perCar.find((p) => p.c.id === st.driverId) : undefined;
+    if (!x)
+      return {
+        initials: '',
+        name: '',
+        tag: '',
+        tagBg: '',
+        tagFg: '',
+        periodShort: '',
+        cobrado: '',
+        pendiente: '',
+        pendienteFg: '',
+        cumplimiento: '',
+        cumplimientoPct: '0%',
+        cumplimientoFg: '',
+        plate: '',
+        rawModel: '',
+        model: '',
+        estado: '',
+        estadoBg: '',
+        estadoFg: '',
+        cuota: '',
+        cuotasLbl: '',
+        pagos: [],
+        sinPagos: true,
+        verVehiculo: () => {},
+        editar: () => {},
+        quitar: () => {},
+      };
+    const c = x.c;
+    const cuotas = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && inR(m));
+    const impagas = cuotas.filter((m) => m.estado !== 'pagado');
+    const facturado = cuotas.reduce((a, m) => a + m.amount, 0);
+    const adeudado = impagas.reduce((a, m) => a + m.amount, 0);
+    // Qué porcentaje de lo que se le facturó en el período efectivamente entró.
+    const cumpl = facturado ? Math.round(((facturado - adeudado) / facturado) * 100) : 100;
+    const ok = adeudado === 0;
+    const t = FTAG[c.estado];
+    return {
+      initials: initials(c.driver),
+      name: c.driver,
+      tag: ok ? 'Al día' : 'Debe',
+      tagBg: ok ? '#eef4f0' : '#fdeeea',
+      tagFg: ok ? '#2e7d5b' : '#a8412f',
+      periodShort: r.short,
+      cobrado: fmt(facturado - adeudado, st.hide),
+      pendiente: adeudado ? fmt(adeudado, st.hide) : '—',
+      pendienteFg: adeudado ? COLORS.neg : '#6b665c',
+      cumplimiento: cumpl + '%',
+      cumplimientoPct: Math.max(2, Math.min(100, cumpl)) + '%',
+      cumplimientoFg: cumpl >= 95 ? COLORS.pos : cumpl >= 80 ? COLORS.warn : COLORS.neg,
+      plate: c.plate,
+      rawModel: c.model,
+      model: c.model + ' · ' + c.year,
+      estado: t[0],
+      estadoBg: t[1],
+      estadoFg: t[2],
+      cuota: c.cuota ? fmt(c.cuota, st.hide) : '—',
+      cuotasLbl: cuotas.length - impagas.length + ' de ' + cuotas.length + ' cuotas cobradas',
+      pagos: [...cuotas]
+        .sort((a, b) => +b.date - +a.date)
+        .slice(0, 8)
+        .map((m) => {
+          const pagado = m.estado === 'pagado';
+          return {
+            dateLbl: dLbl(m.date),
+            desc: m.desc,
+            sub: pagado ? 'Cobrado' : m.estado === 'parcial' ? 'Pago parcial' : 'Pendiente',
+            amt: '+' + fmtShort(m.amount, st.hide),
+            amtFg: pagado ? COLORS.pos : COLORS.neg,
+            iconBg: pagado ? '#eef4f0' : '#fdeeea',
+            iconFg: pagado ? '#2e7d5b' : '#a8412f',
+            sign: pagado ? '↓' : '!',
+          };
+        }),
+      sinPagos: !cuotas.length,
+      verVehiculo: () => update({ driverId: null, detailId: c.id }),
+      editar: () => update({ driverId: null, modal: 'drv', ndrv: { name: c.driver, carId: c.id, cuota: c.cuota ? String(c.cuota) : '' } }),
+      quitar: () => {
+        patchCar(c.id, { driver: 'Sin chofer' });
+        update({ driverId: null });
         toast('Chofer desvinculado de ' + c.plate);
       },
     };
@@ -878,6 +999,7 @@ export function useFleetView(
           tag: ok ? 'Al día' : 'Debe',
           tagBg: ok ? '#eef4f0' : '#fdeeea',
           tagFg: ok ? '#2e7d5b' : '#a8412f',
+          open: () => update({ driverId: x.c.id }),
         };
       }),
     choferesSub: (() => {
@@ -921,6 +1043,10 @@ export function useFleetView(
     hasDetail: !!st.detailId,
     detail,
     closeDetail: () => update({ detailId: null }),
+
+    hasDriverDetail: !!st.driverId,
+    driverDetail,
+    closeDriverDetail: () => update({ driverId: null }),
 
     carModal: st.modal === 'car',
     drvModal: st.modal === 'drv',

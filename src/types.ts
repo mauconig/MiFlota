@@ -12,8 +12,10 @@ export interface Car {
   /** Cada cuántos meses toca el service. */
   serviceCadaMeses: number;
   lastServiceDate: Date;
-  vtvIn: number;
-  seguroIn: number;
+  /** Vencimientos como fecha, no como días restantes: un contador queda
+      desactualizado apenas pasa un día en la base. */
+  vtvDate: Date;
+  seguroDate: Date;
 }
 
 export type MovEstado = 'pagado' | 'pendiente' | 'parcial';
@@ -67,4 +69,6 @@ export interface UIState {
   ncar: NewCarForm;
   ndrv: NewDriverForm;
   detailId: string | null;
+  /** Id del vehículo cuyo chofer se está viendo en detalle. */
+  driverId: string | null;
 }

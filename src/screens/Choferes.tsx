@@ -35,8 +35,13 @@ export function Choferes({ v }: { v: View }) {
       </div>
       <ScrollArea style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, alignContent: 'start' }}>
         {v.choferes.map((d, i) => (
-          <div key={i} style={{ ...card, padding: '17px 18px', display: 'flex', flexDirection: 'column', gap: 13 }}>
-            <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 11 }}>
+          <Btn
+            key={i}
+            onClick={d.open}
+            style={{ ...card, padding: '17px 18px', display: 'flex', flexDirection: 'column', gap: 13, alignItems: 'stretch', textAlign: 'left', color: 'inherit', cursor: 'pointer', font: 'inherit' }}
+            hoverStyle={{ background: '#fbf7ee', border: '1px solid #ddd2bd' }}
+          >
+            <span style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 11 }}>
               <span style={{ width: 40, height: 40, borderRadius: 20, background: '#16150f', color: '#f7dfae', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, flex: 'none' }}>
                 {d.initials}
               </span>
@@ -45,8 +50,8 @@ export function Choferes({ v }: { v: View }) {
                 <span style={{ display: 'block', fontSize: 11, color: '#6b665c', marginTop: 1 }}>{d.carLbl}</span>
               </span>
               <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', padding: '5px 9px', borderRadius: 11, background: d.tagBg, color: d.tagFg, flex: 'none' }}>{d.tag}</span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, paddingTop: 12, borderTop: '1px solid #f0ebe0' }}>
+            </span>
+            <span style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, paddingTop: 12, borderTop: '1px solid #f0ebe0' }}>
               <span style={{ minWidth: 0 }}>
                 <span style={{ display: 'block', fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#6b665c' }}>Cuota</span>
                 <span style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 3 }}>{d.cuota}</span>
@@ -59,8 +64,8 @@ export function Choferes({ v }: { v: View }) {
                 <span style={{ display: 'block', fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#6b665c' }}>Pendiente</span>
                 <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: d.pendFg, marginTop: 3 }}>{d.pend}</span>
               </span>
-            </div>
-          </div>
+            </span>
+          </Btn>
         ))}
       </ScrollArea>
     </Screen>

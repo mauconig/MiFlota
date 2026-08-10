@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { UIState } from './types';
-import { generateFleetData } from './data';
+import { useFleetStore } from './api';
 import { useFleetView, blankCar, blankDrv } from './useFleetView';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -11,6 +11,7 @@ import { Alertas } from './screens/Alertas';
 import { Reportes } from './screens/Reportes';
 import { Cobros } from './screens/Cobros';
 import { DetailDrawer } from './components/DetailDrawer';
+import { DriverDetail } from './components/DriverDetail';
 import { CarModal } from './components/CarModal';
 import { DriverModal } from './components/DriverModal';
 import { Toast } from './components/Toast';
@@ -32,18 +33,29 @@ const initialState: UIState = {
   ncar: blankCar(),
   ndrv: blankDrv(),
   detailId: null,
+  driverId: null,
 };
 
 function App() {
-  const [seed] = useState(() => generateFleetData());
-  const [cars, setCars] = useState(() => seed.cars);
   const [state, setState] = useState<UIState>(initialState);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const update = (patch: Partial<UIState> | ((s: UIState) => Partial<UIState>)) => {
     setState((s) => ({ ...s, ...(typeof patch === 'function' ? patch(s) : patch) }));
   };
 
-  const v = useFleetView(cars, setCars, seed.movs, state, update);
+  // El store necesita avisar de fallos de guardado antes de que exista la vista,
+  // así que escribe el toast directamente en el estado de UI.
+  const avisar = useCallback((msg: string) => {
+    clearTimeout(toastTimer.current);
+    setState((s) => ({ ...s, toast: msg }));
+    toastTimer.current = setTimeout(() => setState((s) => ({ ...s, toast: '' })), 3600);
+  }, []);
+
+  const store = useFleetStore(avisar);
+  const v = useFleetView(store.cars, store.movs, state, update, store);
+
+  if (store.cargando || store.error) return <Arranque error={store.error} />;
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '236px 1fr', height: '100vh', width: '100%', background: '#f4f0e8', position: 'relative', overflow: 'hidden' }}>
@@ -73,9 +85,26 @@ function App() {
       </main>
 
       <DetailDrawer v={v} />
+      <DriverDetail v={v} />
       <CarModal v={v} />
       <DriverModal v={v} />
       <Toast v={v} />
+    </div>
+  );
+}
+
+function Arranque({ error }: { error: string }) {
+  return (
+    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f4f0e8', padding: 24 }}>
+      <div style={{ maxWidth: 420, textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ fontSize: 15, fontWeight: 700 }}>{error ? 'No se pudo cargar la flota' : 'Cargando la flota…'}</div>
+        {error && (
+          <>
+            <div style={{ fontSize: 13, color: '#6b665c' }}>{error}</div>
+            <div style={{ fontSize: 12, color: '#a09a8d' }}>Revisá que el servidor esté corriendo y volvé a intentar.</div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
