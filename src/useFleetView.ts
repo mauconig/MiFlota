@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef } from 'react';
 import type { Car, Mov, UIState, NewCarForm, NewDriverForm } from './types';
 import type { NuevoCarPayload } from './api';
 import { CATS, CATCOLORS } from './data';
-import { COLORS, TODAY, addD, addM, dLbl, dLblFull, daysBetween, durLbl, fmt, fmtShort, initials, isoLocal, statusColor, numFromInput } from './format';
+import { COLORS, TODAY, addD, addM, dLbl, dLblFull, daysBetween, durLbl, fmt, fmtShort, initials, isoLocal, miles, statusColor, numFromInput } from './format';
 
 const UMBRAL_VERDE = 2500000;
 
@@ -350,8 +350,8 @@ export interface View {
   dh: {
     name: (e: React.ChangeEvent<HTMLInputElement>) => void;
     carId: (e: React.ChangeEvent<HTMLSelectElement>) => void;
-    cuota: (e: React.ChangeEvent<HTMLInputElement>) => void;
   };
+  setNdrvCuota: (v: string) => void;
   closeModal: () => void;
   saveCar: () => void;
   saveDrv: () => void;
@@ -473,12 +473,12 @@ export function useFleetView(
   const setSeguroVence = useCallback((iso: string) => update((s) => ({ ncar: { ...s.ncar, seguroVence: iso } })), []);
   // El monto llega ya con los puntos puestos por MoneyInput.
   const setSeguroCosto = useCallback((v: string) => update((s) => ({ ncar: { ...s.ncar, seguroCosto: v } })), []);
+  const setNdrvCuota = useCallback((v: string) => update((s) => ({ ndrv: { ...s.ndrv, cuota: v } })), []);
 
   const dh = useMemo(
     () => ({
       name: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ndrv: { ...s.ndrv, name: e.target.value } })),
       carId: (e: React.ChangeEvent<HTMLSelectElement>) => update((s) => ({ ndrv: { ...s.ndrv, carId: e.target.value } })),
-      cuota: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ndrv: { ...s.ndrv, cuota: e.target.value } })),
     }),
     [],
   );
@@ -861,7 +861,7 @@ export function useFleetView(
         patchCar(c.id, { lastServiceDate: TODAY });
         toast('Service registrado el ' + dLblFull(TODAY) + ' · próximo en ' + svcIntervalo(c.serviceCada, c.serviceUnidad));
       },
-      editDriver: () => update({ modal: 'drv', ndrv: { name: c.driver === 'Sin chofer' ? '' : c.driver, carId: c.id, cuota: c.cuota ? String(c.cuota) : '' } }),
+      editDriver: () => update({ modal: 'drv', ndrv: { name: c.driver === 'Sin chofer' ? '' : c.driver, carId: c.id, cuota: c.cuota ? miles(String(c.cuota)) : '' } }),
       clearDriver: () => update({ confirm: { tipo: 'quitarChofer', carId: c.id } }),
       borrar: () => update({ confirm: { tipo: 'borrarAuto', carId: c.id } }),
     };
@@ -945,7 +945,7 @@ export function useFleetView(
         }),
       sinPagos: !cuotas.length,
       verVehiculo: () => update({ driverId: null, detailId: c.id }),
-      editar: () => update({ driverId: null, modal: 'drv', ndrv: { name: c.driver, carId: c.id, cuota: c.cuota ? String(c.cuota) : '' } }),
+      editar: () => update({ driverId: null, modal: 'drv', ndrv: { name: c.driver, carId: c.id, cuota: c.cuota ? miles(String(c.cuota)) : '' } }),
       quitar: () => update({ driverId: null, confirm: { tipo: 'quitarChofer', carId: c.id } }),
     };
   })();
@@ -1060,6 +1060,7 @@ export function useFleetView(
     setLastService,
     setSeguroVence,
     setSeguroCosto,
+    setNdrvCuota,
     ncarPeriodoOpts: (['mensual', 'anual'] as const).map((p) => ({
       label: p,
       ...CH(st.ncar.seguroPeriodo === p),

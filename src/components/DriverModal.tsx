@@ -1,5 +1,6 @@
 import type { View } from '../useFleetView';
 import { Btn } from './Btn';
+import { MoneyInput } from './MoneyInput';
 import { CloseIcon } from '../icons';
 import { btnPrimary, btnPrimaryHover, btnSecondary, btnSecondaryHover, fieldInput, fieldLabel, fieldLabelText, modalCloseBtn, modalCloseBtnHover, modalFooter, modalOverlay, modalPanel, modalTitle } from '../styles';
 
@@ -32,7 +33,16 @@ export function DriverModal({ v }: { v: View }) {
           </label>
           <label style={fieldLabel}>
             <span style={fieldLabelText}>Cuota diaria</span>
-            <input inputMode="numeric" value={v.ndrv.cuota} onChange={v.dh.cuota} placeholder="190000" style={fieldInput} />
+            <span style={{ ...fieldInput, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+              <span style={{ fontSize: 13, color: '#a09a8d', flex: 'none' }}>₲</span>
+              <MoneyInput
+                value={v.ndrv.cuota}
+                onChange={v.setNdrvCuota}
+                placeholder="190.000"
+                ariaLabel="Cuota diaria"
+                style={{ flex: 1, minWidth: 0, width: '100%', border: 'none', background: 'none', outline: 'none', fontSize: 14, color: '#1a1a18', fontVariantNumeric: 'tabular-nums' }}
+              />
+            </span>
           </label>
         </div>
         <div style={modalFooter}>
