@@ -16,7 +16,6 @@ export interface SeedCar {
   driver: string;
   cuota: number;
   estado: Estado;
-  km: number;
   serviceCadaMeses: number;
   lastServiceDate: Date;
   vtvDate: Date;
@@ -77,7 +76,9 @@ export function generateFleetData(): { cars: SeedCar[]; movs: SeedMov[] } {
   const R = makeRng(7);
 
   const cars: SeedCar[] = BASE.map((b, i) => {
-    const km = 62000 + Math.round(R() * 90000);
+    // Se consume igual que antes para no correr la secuencia del PRNG y que
+    // la flota sembrada siga siendo idéntica a la original.
+    R();
     // Días desde el último service. Los valores replican las mismas fracciones
     // del intervalo que usaba el esquema por km (94% / 32% / 61% de 6 meses),
     // para que sigan siendo los mismos autos los que aparecen por vencer.
@@ -90,7 +91,6 @@ export function generateFleetData(): { cars: SeedCar[]; movs: SeedMov[] } {
       driver: b[3],
       cuota: b[4],
       estado: b[5],
-      km,
       serviceCadaMeses: 6,
       lastServiceDate: addD(SEED_TODAY, -gapDias),
       // Los offsets son los que tenía la versión anterior en días restantes,

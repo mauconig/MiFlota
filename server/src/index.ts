@@ -121,7 +121,6 @@ interface CarPatch {
   driver?: string;
   cuota?: number;
   estado?: string;
-  km?: number;
   serviceCadaMeses?: number;
   lastServiceDate?: string;
   vtvDate?: string;
@@ -134,7 +133,6 @@ const CAMPOS: Record<keyof CarPatch, { col: string; ok: (v: unknown) => boolean 
   driver: { col: 'driver', ok: (v) => typeof v === 'string' && v.trim().length > 0 && v.length <= 80 },
   cuota: { col: 'cuota', ok: (v) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 100_000_000 },
   estado: { col: 'estado', ok: (v) => typeof v === 'string' && ESTADOS.has(v) },
-  km: { col: 'km', ok: (v) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 10_000_000 },
   serviceCadaMeses: { col: 'service_cada_meses', ok: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 60 },
   lastServiceDate: { col: 'last_service_date', ok: (v) => typeof v === 'string' && FECHA.test(v) },
   vtvDate: { col: 'vtv_date', ok: (v) => typeof v === 'string' && FECHA.test(v) },
@@ -169,7 +167,6 @@ interface NuevoCar {
   year: number;
   driver: string;
   cuota: number;
-  km: number;
 }
 
 app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
@@ -199,15 +196,14 @@ app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
     driver: String(b.driver ?? '').trim() || 'Sin chofer',
     cuota: Number.isInteger(b.cuota) && b.cuota >= 0 ? b.cuota : 0,
     estado: 'activo',
-    km: Number.isInteger(b.km) && b.km >= 0 ? b.km : 80000,
     service_cada_meses: 6,
     last_service_date: hoy,
     vtv_date: enMeses(12),
     seguro_date: enMeses(12),
   };
   db.prepare(`
-    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, km, service_cada_meses, last_service_date, vtv_date, seguro_date)
-    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @km, @service_cada_meses, @last_service_date, @vtv_date, @seguro_date)
+    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, service_cada_meses, last_service_date, vtv_date, seguro_date)
+    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @service_cada_meses, @last_service_date, @vtv_date, @seguro_date)
   `).run(car);
 
   return reply.code(201).send(carToJson(selCar.get(car.id, u.id) as CarRow));

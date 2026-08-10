@@ -93,7 +93,6 @@ export function DetailDrawer({ v }: { v: View }) {
         <div style={{ ...cardTight, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <span style={{ flex: 1, fontSize: 15, fontWeight: 700 }}>Mantenimiento</span>
-            <span style={{ fontSize: 12, color: '#6b665c' }}>{d.km}</span>
           </div>
           <div style={{ height: 8, borderRadius: 4, background: '#f0ebe0', overflow: 'hidden' }}>
             <span style={{ display: 'block', height: '100%', borderRadius: 4, background: d.svcBar, width: d.svcPct }} />

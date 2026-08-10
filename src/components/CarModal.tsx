@@ -28,10 +28,6 @@ export function CarModal({ v }: { v: View }) {
             <input inputMode="numeric" value={v.ncar.year} onChange={v.ch.year} placeholder="2018" style={fieldInput} />
           </label>
           <label style={fieldLabel}>
-            <span style={fieldLabelText}>Km actuales</span>
-            <input inputMode="numeric" value={v.ncar.km} onChange={v.ch.km} placeholder="120000" style={fieldInput} />
-          </label>
-          <label style={fieldLabel}>
             <span style={fieldLabelText}>Chofer</span>
             <input value={v.ncar.driver} onChange={v.ch.driver} placeholder="Sin chofer" style={fieldInput} />
           </label>

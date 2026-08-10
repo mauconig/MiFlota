@@ -76,7 +76,6 @@ export interface NuevoCarPayload {
   year: number;
   driver: string;
   cuota: number;
-  km: number;
 }
 
 export interface FleetStore {

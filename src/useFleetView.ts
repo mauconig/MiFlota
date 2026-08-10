@@ -211,7 +211,6 @@ export interface DetailView {
   cuotaFmt: string;
   cobradas: string;
   pendientes: string;
-  km: string;
   svcLbl: string;
   svcSub: string;
   svcFg: string;
@@ -326,7 +325,7 @@ function CH(on: boolean) {
 }
 
 function blankCar(): NewCarForm {
-  return { plate: '', model: '', year: '2018', driver: '', cuota: '', km: '' };
+  return { plate: '', model: '', year: '2018', driver: '', cuota: '' };
 }
 
 function blankDrv(): NewDriverForm {
@@ -406,7 +405,6 @@ export function useFleetView(
       year: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, year: e.target.value } })),
       driver: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, driver: e.target.value } })),
       cuota: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, cuota: e.target.value } })),
-      km: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, km: e.target.value } })),
     }),
     [],
   );
@@ -444,7 +442,6 @@ export function useFleetView(
         year: numFromInput(n.year) || 2018,
         driver: n.driver.trim() || 'Sin chofer',
         cuota: numFromInput(n.cuota),
-        km: numFromInput(n.km) || 80000,
       })
       .then(() => {
         update({ modal: null, ncar: blankCar(), nav: 'flota' });
@@ -621,7 +618,6 @@ export function useFleetView(
         cuotaFmt: '',
         cobradas: '',
         pendientes: '',
-        km: '',
         svcLbl: '',
         svcSub: '',
         svcFg: '',
@@ -667,7 +663,6 @@ export function useFleetView(
       cuotaFmt: c.cuota ? fmt(c.cuota, st.hide) : '—',
       cobradas: cuotasCobradas + ' cuotas cobradas',
       pendientes: cuotasPend.length ? cuotasPend.length + ' sin cobrar · ' + fmtShort(cuotasPend.reduce((a, m) => a + m.amount, 0), st.hide) : 'Todo cobrado',
-      km: c.km.toLocaleString('de-DE') + ' km',
       svcLbl: (dLeft < 0 ? 'Service vencido hace ' + durLbl(dLeft) : dLeft === 0 ? 'El service vence hoy' : 'Próximo service en ' + durLbl(dLeft)) + ' · ' + dLblFull(svcNextDate(c)),
       svcSub: 'Último service: ' + dLblFull(c.lastServiceDate),
       svcFg: dLeft < 0 ? COLORS.neg : dLeft <= SVC_AVISO_DIAS ? COLORS.warn : COLORS.pos,

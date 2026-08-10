@@ -14,7 +14,6 @@ export interface CarRow {
   driver: string;
   cuota: number;
   estado: string;
-  km: number;
   service_cada_meses: number;
   last_service_date: string;
   vtv_date: string;
@@ -52,7 +51,6 @@ export function openDb() {
       driver             TEXT NOT NULL DEFAULT 'Sin chofer',
       cuota              INTEGER NOT NULL DEFAULT 0,
       estado             TEXT NOT NULL CHECK (estado IN ('activo','taller','baja')),
-      km                 INTEGER NOT NULL DEFAULT 0,
       service_cada_meses INTEGER NOT NULL DEFAULT 6,
       last_service_date  TEXT NOT NULL,
       vtv_date           TEXT NOT NULL,
@@ -88,6 +86,9 @@ function migrarOwner(db: Database.Database) {
   if (!cols('cars').includes('owner_id')) db.exec('ALTER TABLE cars ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0');
   if (!cols('movs').includes('owner_id')) db.exec('ALTER TABLE movs ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0');
   db.exec('CREATE INDEX IF NOT EXISTS idx_cars_owner ON cars(owner_id); CREATE INDEX IF NOT EXISTS idx_movs_owner ON movs(owner_id);');
+  // El kilometraje dejó de usarse: ya no lo pide el alta ni lo muestra ninguna
+  // pantalla, y mantenerlo al día era trabajo manual sin nada que lo consuma.
+  if (cols('cars').includes('km')) db.exec('ALTER TABLE cars DROP COLUMN km');
 }
 
 /** Reasigna toda la flota huérfana (owner_id = 0) a un usuario. */
@@ -108,8 +109,8 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
   const idDe = (carId: string) => `u${ownerId}${carId}`;
 
   const insCar = db.prepare(`
-    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, km, service_cada_meses, last_service_date, vtv_date, seguro_date)
-    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @km, @service_cada_meses, @last_service_date, @vtv_date, @seguro_date)
+    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, service_cada_meses, last_service_date, vtv_date, seguro_date)
+    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @service_cada_meses, @last_service_date, @vtv_date, @seguro_date)
   `);
   const insMov = db.prepare(`
     INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado)
@@ -127,7 +128,6 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
         driver: c.driver,
         cuota: c.cuota,
         estado: c.estado,
-        km: c.km,
         service_cada_meses: c.serviceCadaMeses,
         last_service_date: iso(c.lastServiceDate),
         vtv_date: iso(c.vtvDate),
@@ -161,7 +161,6 @@ export function carToJson(r: CarRow) {
     driver: r.driver,
     cuota: r.cuota,
     estado: r.estado,
-    km: r.km,
     serviceCadaMeses: r.service_cada_meses,
     lastServiceDate: r.last_service_date,
     vtvDate: r.vtv_date,

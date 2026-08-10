@@ -8,7 +8,6 @@ export interface Car {
   driver: string;
   cuota: number;
   estado: Estado;
-  km: number;
   /** Cada cuántos meses toca el service. */
   serviceCadaMeses: number;
   lastServiceDate: Date;
@@ -43,7 +42,6 @@ export interface NewCarForm {
   year: string;
   driver: string;
   cuota: string;
-  km: string;
 }
 
 export interface NewDriverForm {
