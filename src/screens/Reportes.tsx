@@ -27,6 +27,7 @@ export function Reportes({ v }: { v: View }) {
           <ChipRow chips={v.movCatChips} wrap />
         </div>
         <ScrollArea style={{ display: 'flex', flexDirection: 'column', padding: '4px 20px' }}>
+          {!v.movRows.length && <div style={{ padding: '30px 0', fontSize: 13, color: '#6b665c', textAlign: 'center' }}>Sin movimientos con estos filtros</div>}
           {v.movRows.map((m, i) => (
             <div key={i} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '11px 0', borderBottom: '1px solid #f4efe4' }}>
               <span style={{ width: 52, flex: 'none', fontSize: 12, color: '#6b665c' }}>{m.dateLbl}</span>
@@ -41,42 +42,6 @@ export function Reportes({ v }: { v: View }) {
             </div>
           ))}
         </ScrollArea>
-        <div style={{ padding: '13px 20px', display: 'flex', flexDirection: 'column', gap: 9, borderTop: '1px solid #f0ebe0', flex: 'none' }}>
-          <span style={{ fontSize: 12, color: '#6b665c' }}>{v.pageLbl}</span>
-          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Btn
-              onClick={v.prevPage}
-              style={{ flex: 'none', border: `1px solid ${v.prevBd}`, background: '#fffdf8', color: v.prevFg, borderRadius: 12, minHeight: 36, padding: '0 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
-              hoverStyle={{ background: '#f7f1e5' }}
-            >
-              ← Anterior
-            </Btn>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-              {v.pageDots.map((p, i) =>
-                p.gap ? (
-                  <span key={i} style={{ fontSize: 12, color: '#b3aa99', padding: '0 2px' }}>
-                    …
-                  </span>
-                ) : (
-                  <Btn
-                    key={i}
-                    onClick={p.pick}
-                    style={{ flex: 'none', border: `1px solid ${p.bd}`, background: p.bg, color: p.fg, borderRadius: 12, minHeight: 36, minWidth: 36, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-                  >
-                    {p.n}
-                  </Btn>
-                ),
-              )}
-            </div>
-            <Btn
-              onClick={v.nextPage}
-              style={{ flex: 'none', border: `1px solid ${v.nextBd}`, background: '#fffdf8', color: v.nextFg, borderRadius: 12, minHeight: 36, padding: '0 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
-              hoverStyle={{ background: '#f7f1e5' }}
-            >
-              Siguiente →
-            </Btn>
-          </div>
-        </div>
       </div>
 
       <div style={{ ...card, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0 }}>

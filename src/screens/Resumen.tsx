@@ -36,7 +36,7 @@ export function Resumen({ v }: { v: View }) {
                 </Btn>
               </div>
             </div>
-            <VehicleTable cols={v.cols} rows={v.rows} variant="resumen" autoFit />
+            <VehicleTable cols={v.cols} rows={v.rows} variant="resumen" mode="fit" />
           </div>
         </div>
 

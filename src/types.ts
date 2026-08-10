@@ -63,7 +63,6 @@ export interface UIState {
   cTo: string;
   movType: MovType;
   movCat: string;
-  movPage: number;
   modal: ModalKind;
   ncar: NewCarForm;
   ndrv: NewDriverForm;

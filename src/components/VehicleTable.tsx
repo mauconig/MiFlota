@@ -7,38 +7,48 @@ import { BrandIcon } from '../icons';
 const RESUMEN_GRID = '1.85fr 1.1fr 0.66fr 0.8fr 0.8fr 1.1fr 0.72fr';
 const FLOTA_GRID = '1.7fr 1.1fr 0.66fr 1fr 0.8fr 0.8fr 1.05fr 0.7fr';
 
-export function VehicleTable({ cols, rows, variant, autoFit = false }: { cols: ColItem[]; rows: VehicleRow[]; variant: 'resumen' | 'flota'; autoFit?: boolean }) {
+/**
+ * `fit`    — recorta las filas a las que entran y las estira para llenar exacto.
+ *            Para vistas de resumen que tienen un "Ver todo →" al lado.
+ * `scroll` — muestra todas las filas y scrollea dentro de la tarjeta, con el
+ *            encabezado de columnas fijo. Para vistas que son la lista completa.
+ */
+export function VehicleTable({ cols, rows, variant, mode }: { cols: ColItem[]; rows: VehicleRow[]; variant: 'resumen' | 'flota'; mode: 'fit' | 'scroll' }) {
   const grid = variant === 'resumen' ? RESUMEN_GRID : FLOTA_GRID;
   const cellPad = variant === 'resumen' ? '8px 14px' : '11px 12px';
+  const fit = mode === 'fit';
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const probeRef = useRef<HTMLDivElement>(null);
-  // Start small so the row list contributes minimal intrinsic height — otherwise, on
-  // the first layout pass, this column's own (unclamped) content would dominate the
-  // grid row's auto height instead of stretching to match the sibling column.
-  const [visibleCount, setVisibleCount] = useState(autoFit ? 1 : rows.length);
+  // `capacity` arranca en 1 en modo fit para que la lista aporte la mínima altura
+  // intrínseca posible: si no, en el primer layout el alto sin recortar de esta
+  // columna domina la fila del grid en vez de estirarse a la par de la vecina.
+  const [fitInfo, setFitInfo] = useState({ capacity: fit ? 1 : 0, rowH: 0 });
 
   useLayoutEffect(() => {
-    if (!autoFit) return;
     const el = wrapRef.current;
     if (!el) return;
     const measure = () => {
-      const rowH = probeRef.current?.getBoundingClientRect().height;
+      const rowH = probeRef.current?.getBoundingClientRect().height ?? 0;
       const available = el.clientHeight;
       if (!rowH || !available) return;
-      const count = Math.max(1, Math.min(rows.length, Math.floor(available / rowH)));
-      setVisibleCount((prev) => (prev === count ? prev : count));
+      const capacity = Math.max(1, Math.floor(available / rowH));
+      setFitInfo((prev) => (prev.capacity === capacity && prev.rowH === rowH ? prev : { capacity, rowH }));
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [autoFit, rows.length]);
+  }, [rows.length]);
 
-  const displayRows = autoFit ? rows.slice(0, visibleCount) : rows;
-  // Rows grow from their natural height to fill any leftover space evenly, so the
-  // fitted rows always span the full container with no dead space at the bottom.
-  const rowFlex: CSSProperties['flex'] = autoFit ? '1 0 auto' : 'none';
+  const displayRows = fit ? rows.slice(0, fitInfo.capacity) : rows;
+  // Cuando hay menos filas de las que entran, el resto se completa con filas
+  // fantasma: la tabla conserva su estructura con 1 resultado o con 15, y nunca
+  // queda un hueco liso abajo.
+  const ghosts = rows.length ? Math.max(0, fitInfo.capacity - displayRows.length) : 0;
+  // Las filas crecen desde su alto natural para repartirse el sobrante, así el
+  // conjunto llena el contenedor exacto sin dejar espacio muerto.
+  const rowFlex: CSSProperties['flex'] = fit ? '1 0 auto' : 'none';
 
   const renderRow = (r: VehicleRow) => (
     <Btn
@@ -113,13 +123,21 @@ export function VehicleTable({ cols, rows, variant, autoFit = false }: { cols: C
           </Btn>
         ))}
       </div>
-      <div ref={autoFit ? wrapRef : undefined} style={{ display: 'flex', flexDirection: 'column', position: 'relative', ...(autoFit ? { flex: 1, minHeight: 0, overflow: 'hidden' } : {}) }}>
-        {autoFit && rows[0] && (
+      <div ref={wrapRef} style={{ display: 'flex', flexDirection: 'column', position: 'relative', flex: 1, minHeight: 0, overflowY: fit ? 'hidden' : 'auto' }}>
+        {/* Sonda oculta: mide el alto natural de una fila sin verse afectada por
+            el estirado de las filas reales. */}
+        {rows[0] && (
           <div ref={probeRef} aria-hidden style={{ position: 'absolute', top: 0, left: 0, right: 0, visibility: 'hidden', pointerEvents: 'none' }}>
             {renderRow(rows[0])}
           </div>
         )}
         {displayRows.map(renderRow)}
+        {Array.from({ length: ghosts }, (_, i) => (
+          <div key={'ghost' + i} aria-hidden style={{ flex: '1 0 auto', height: fitInfo.rowH, borderBottom: '1px solid #f4efe4' }} />
+        ))}
+        {!rows.length && (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, fontSize: 13, color: '#6b665c' }}>Ningún vehículo coincide con estos filtros</div>
+        )}
       </div>
     </>
   );

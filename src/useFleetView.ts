@@ -135,16 +135,6 @@ export interface MovRow {
   amtFg: string;
 }
 
-export interface PageDot {
-  gap: boolean;
-  btn: boolean;
-  n: string;
-  bg?: string;
-  fg?: string;
-  bd?: string;
-  pick: () => void;
-}
-
 export interface DetailDoc {
   label: string;
   txt: string;
@@ -270,14 +260,6 @@ export interface View {
   movTypeChips: Chip[];
   movCatChips: Chip[];
   movRows: MovRow[];
-  pageLbl: string;
-  pageDots: PageDot[];
-  prevPage: () => void;
-  nextPage: () => void;
-  prevBd: string;
-  prevFg: string;
-  nextBd: string;
-  nextFg: string;
   exportar: () => void;
 
   hasDetail: boolean;
@@ -567,9 +549,6 @@ export function useFleetView(
 
   const movsSorted = movs.filter(inR).sort((a, b) => +b.date - +a.date);
   const movsFiltered = movsSorted.filter((m) => (st.movType === 'todos' || m.type === st.movType) && (st.movCat === 'todas' || (m.type === 'egreso' && m.cat === st.movCat)));
-  const nPages = Math.max(1, Math.ceil(movsFiltered.length / 10));
-  const page = Math.min(st.movPage, nPages - 1);
-  const pageMovs = movsFiltered.slice(page * 10, page * 10 + 10);
 
   const nav = st.nav;
   const TITLES: Record<string, [string, string]> = {
@@ -771,12 +750,12 @@ export function useFleetView(
         ['d90', '90 días'],
         ['custom', 'Rango'],
       ] as [UIState['period'], string][]
-    ).map(([k, label]) => ({ label, ...CH(st.period === k), pick: () => update({ period: k, movPage: 0 }) })),
+    ).map(([k, label]) => ({ label, ...CH(st.period === k), pick: () => update({ period: k }) })),
     isCustom: st.period === 'custom',
     cFrom: st.cFrom,
     cTo: st.cTo,
-    onFrom: (e) => update({ cFrom: e.target.value, movPage: 0 }),
-    onTo: (e) => update({ cTo: e.target.value, movPage: 0 }),
+    onFrom: (e) => update({ cFrom: e.target.value }),
+    onTo: (e) => update({ cTo: e.target.value }),
     montosLbl: st.hide ? 'Mostrar montos' : 'Ocultar montos',
     toggleMontos: () => update((s2) => ({ hide: !s2.hide })),
 
@@ -917,32 +896,13 @@ export function useFleetView(
         ['ingreso', 'Ingresos'],
         ['egreso', 'Egresos'],
       ] as [UIState['movType'], string][]
-    ).map(([k, label]) => ({ label, ...CH(st.movType === k), pick: () => update({ movType: k, movCat: k === 'ingreso' ? 'todas' : st.movCat, movPage: 0 }) })),
+    ).map(([k, label]) => ({ label, ...CH(st.movType === k), pick: () => update({ movType: k, movCat: k === 'ingreso' ? 'todas' : st.movCat }) })),
     movCatChips: [['todas', 'Todas las categorías'], ...CATS.map((c) => [c, c] as [string, string])].map(([k, label]) => ({
       label,
       ...CH(st.movCat === k),
-      pick: () => update({ movCat: k, movType: k === 'todas' ? st.movType : 'egreso', movPage: 0 }),
+      pick: () => update({ movCat: k, movType: k === 'todas' ? st.movType : 'egreso' }),
     })),
-    pageLbl: movsFiltered.length ? 'Mostrando ' + (page * 10 + 1) + '–' + Math.min(movsFiltered.length, page * 10 + 10) + ' de ' + movsFiltered.length : 'Sin movimientos con estos filtros',
-    pageDots: (() => {
-      const idx: number[] = [];
-      for (let i = 0; i < nPages; i++) {
-        if (i === 0 || i === nPages - 1 || Math.abs(i - page) <= 1) idx.push(i);
-      }
-      const out: PageDot[] = [];
-      idx.forEach((i, j) => {
-        if (j > 0 && i - idx[j - 1] > 1) out.push({ gap: true, btn: false, n: '', pick: () => {} });
-        out.push({ gap: false, btn: true, n: String(i + 1), ...CH(i === page), pick: () => update({ movPage: i }) });
-      });
-      return out;
-    })(),
-    prevPage: () => update((s2) => ({ movPage: Math.max(0, Math.min(s2.movPage, nPages - 1) - 1) })),
-    nextPage: () => update((s2) => ({ movPage: Math.min(nPages - 1, Math.min(s2.movPage, nPages - 1) + 1) })),
-    prevBd: page > 0 ? '#e0d6c4' : '#f0ebe0',
-    prevFg: page > 0 ? '#3d3a34' : '#b3aa99',
-    nextBd: page < nPages - 1 ? '#e0d6c4' : '#f0ebe0',
-    nextFg: page < nPages - 1 ? '#3d3a34' : '#b3aa99',
-    movRows: pageMovs.map((m) => {
+    movRows: movsFiltered.map((m) => {
       const c = cars.find((c2) => c2.id === m.carId)!;
       const inc = m.type === 'ingreso';
       return {
