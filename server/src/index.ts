@@ -34,6 +34,19 @@ if (adminCreado) app.log.info({ usuario: adminCreado }, 'usuario inicial creado'
 
 await app.register(fastifyCookie);
 
+// Un cuerpo vacío anunciado como JSON no es un error: fetch manda el
+// Content-Type aunque el pedido no lleve datos (DELETE, logout). Con el parser
+// por defecto, Fastify contesta 400 antes de que la ruta llegue a ejecutarse.
+app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+  const texto = typeof body === 'string' ? body : body.toString('utf8');
+  if (texto.trim() === '') return done(null, undefined);
+  try {
+    done(null, JSON.parse(texto));
+  } catch {
+    done(Object.assign(new Error('JSON inválido'), { statusCode: 400 }), undefined);
+  }
+});
+
 /* ------------------------------ sesión ------------------------------ */
 
 /** Rutas que se pueden pedir sin sesión. Todo lo demás bajo /api la exige. */

@@ -19,7 +19,11 @@ const toMov = (m: MovDto): Mov => ({ ...m, date: parseDate(m.date) });
 export class SinSesion extends Error {}
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', ...init });
+  // El Content-Type solo va cuando hay cuerpo: si se anuncia JSON y el cuerpo
+  // llega vacío (DELETE, logout), Fastify rechaza el pedido con un 400 antes de
+  // que la ruta llegue a ejecutarse.
+  const headers = init?.body ? { 'Content-Type': 'application/json' } : undefined;
+  const res = await fetch(url, { credentials: 'same-origin', ...init, headers: { ...headers, ...init?.headers } });
   if (!res.ok) {
     const cuerpo = await res.json().catch(() => null);
     const msg = (cuerpo as { error?: string } | null)?.error ?? `Error ${res.status}`;
