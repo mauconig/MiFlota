@@ -211,6 +211,8 @@ export interface DetailView {
   net: string;
   netFg: string;
   cuotaFmt: string;
+  gpsTag: string;
+  gpsFg: string;
   cobradas: string;
   pendientes: string;
   svcLbl: string;
@@ -332,7 +334,7 @@ function CH(on: boolean) {
 }
 
 function blankCar(): NewCarForm {
-  return { plate: '', model: '', year: '2018', driver: '', cuota: '', lastService: isoLocal(TODAY), serviceCada: '6', serviceUnidad: 'meses' };
+  return { plate: '', model: '', year: '2018', driver: '', cuota: '', gpsTag: '', lastService: isoLocal(TODAY), serviceCada: '6', serviceUnidad: 'meses' };
 }
 
 function blankDrv(): NewDriverForm {
@@ -412,6 +414,7 @@ export function useFleetView(
       year: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, year: e.target.value } })),
       driver: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, driver: e.target.value } })),
       cuota: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, cuota: e.target.value } })),
+      gpsTag: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, gpsTag: e.target.value } })),
       lastService: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, lastService: e.target.value } })),
       serviceCada: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, serviceCada: e.target.value } })),
     }),
@@ -460,6 +463,7 @@ export function useFleetView(
         year: numFromInput(n.year) || 2018,
         driver: n.driver.trim() || 'Sin chofer',
         cuota: numFromInput(n.cuota),
+        gpsTag: n.gpsTag.trim(),
         lastServiceDate: n.lastService || isoLocal(TODAY),
         serviceCada: cada,
         serviceUnidad: n.serviceUnidad,
@@ -637,6 +641,8 @@ export function useFleetView(
         net: '',
         netFg: '',
         cuotaFmt: '',
+        gpsTag: '',
+        gpsFg: '',
         cobradas: '',
         pendientes: '',
         svcLbl: '',
@@ -683,6 +689,8 @@ export function useFleetView(
       net: fmt(cs.net, st.hide),
       netFg: statusColor(cs.net, UMBRAL_VERDE),
       cuotaFmt: c.cuota ? fmt(c.cuota, st.hide) : '—',
+      gpsTag: c.gpsTag || 'Sin GPS',
+      gpsFg: c.gpsTag ? '#3d3a34' : '#a09a8d',
       cobradas: cuotasCobradas + ' cuotas cobradas',
       pendientes: cuotasPend.length ? cuotasPend.length + ' sin cobrar · ' + fmtShort(cuotasPend.reduce((a, m) => a + m.amount, 0), st.hide) : 'Todo cobrado',
       svcLbl: (dLeft < 0 ? 'Service vencido hace ' + durLbl(dLeft) : dLeft === 0 ? 'El service vence hoy' : 'Próximo service en ' + durLbl(dLeft)) + ' · ' + dLblFull(svcNextDate(c)),

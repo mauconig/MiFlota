@@ -9,6 +9,8 @@ export interface Car {
   driver: string;
   cuota: number;
   estado: Estado;
+  /** Identificador del equipo de rastreo instalado. Vacío = sin GPS. */
+  gpsTag: string;
   /** Cada cuánto toca el service, en la unidad de `serviceUnidad`. */
   serviceCada: number;
   serviceUnidad: ServiceUnidad;
@@ -44,6 +46,7 @@ export interface NewCarForm {
   year: string;
   driver: string;
   cuota: string;
+  gpsTag: string;
   /** ISO `YYYY-MM-DD`, tal como lo emite un <input type="date">. */
   lastService: string;
   serviceCada: string;

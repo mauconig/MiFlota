@@ -1,6 +1,6 @@
 import type { View } from '../useFleetView';
 import { Btn } from './Btn';
-import { BrandIcon, CloseIcon } from '../icons';
+import { BrandIcon, CloseIcon, GpsIcon } from '../icons';
 import { cardTight } from '../styles';
 
 export function DetailDrawer({ v }: { v: View }) {
@@ -33,7 +33,14 @@ export function DetailDrawer({ v }: { v: View }) {
           </span>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.01em' }}>{d.plate}</div>
-            <div style={{ fontSize: 12, color: '#6b665c', marginTop: 2 }}>{d.model}</div>
+            <div style={{ fontSize: 12, color: '#6b665c', marginTop: 2, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+              <span>{d.model}</span>
+              <span style={{ width: 3, height: 3, borderRadius: 2, background: '#c9c2b4', flex: 'none' }} />
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: d.gpsFg }}>
+                <GpsIcon size={12} />
+                {d.gpsTag}
+              </span>
+            </div>
           </div>
           <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', padding: '6px 11px', borderRadius: 12, background: d.estadoBg, color: d.estadoFg, flex: 'none' }}>{d.estado}</span>
           <Btn

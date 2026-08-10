@@ -76,6 +76,7 @@ export interface NuevoCarPayload {
   year: number;
   driver: string;
   cuota: number;
+  gpsTag: string;
   lastServiceDate: string;
   serviceCada: number;
   serviceUnidad: 'dias' | 'meses';

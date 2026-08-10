@@ -36,6 +36,10 @@ export function CarModal({ v }: { v: View }) {
             <input inputMode="numeric" value={v.ncar.cuota} onChange={v.ch.cuota} placeholder="190000" style={fieldInput} />
           </label>
           <label style={fieldLabel}>
+            <span style={fieldLabelText}>GPS tag</span>
+            <input value={v.ncar.gpsTag} onChange={v.ch.gpsTag} placeholder="Opcional" maxLength={40} style={fieldInput} />
+          </label>
+          <label style={fieldLabel}>
             <span style={fieldLabelText}>Último service</span>
             <input type="date" value={v.ncar.lastService} onChange={v.ch.lastService} max={v.hoyISO} style={fieldInput} />
           </label>

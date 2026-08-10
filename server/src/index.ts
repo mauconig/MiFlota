@@ -121,6 +121,7 @@ interface CarPatch {
   driver?: string;
   cuota?: number;
   estado?: string;
+  gpsTag?: string;
   serviceCada?: number;
   serviceUnidad?: string;
   lastServiceDate?: string;
@@ -134,6 +135,7 @@ const CAMPOS: Record<keyof CarPatch, { col: string; ok: (v: unknown) => boolean 
   driver: { col: 'driver', ok: (v) => typeof v === 'string' && v.trim().length > 0 && v.length <= 80 },
   cuota: { col: 'cuota', ok: (v) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 100_000_000 },
   estado: { col: 'estado', ok: (v) => typeof v === 'string' && ESTADOS.has(v) },
+  gpsTag: { col: 'gps_tag', ok: (v) => typeof v === 'string' && v.length <= 40 },
   serviceCada: { col: 'service_cada', ok: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 3650 },
   serviceUnidad: { col: 'service_unidad', ok: (v) => v === 'dias' || v === 'meses' },
   lastServiceDate: { col: 'last_service_date', ok: (v) => typeof v === 'string' && FECHA.test(v) },
@@ -169,6 +171,7 @@ interface NuevoCar {
   year: number;
   driver: string;
   cuota: number;
+  gpsTag?: string;
   lastServiceDate?: string;
   serviceCada?: number;
   serviceUnidad?: string;
@@ -201,6 +204,7 @@ app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
     driver: String(b.driver ?? '').trim() || 'Sin chofer',
     cuota: Number.isInteger(b.cuota) && b.cuota >= 0 ? b.cuota : 0,
     estado: 'activo',
+    gps_tag: String(b.gpsTag ?? '').trim().slice(0, 40),
     service_cada: Number.isInteger(b.serviceCada) && b.serviceCada! >= 1 && b.serviceCada! <= 3650 ? b.serviceCada! : 6,
     service_unidad: b.serviceUnidad === 'dias' ? 'dias' : 'meses',
     last_service_date: typeof b.lastServiceDate === 'string' && FECHA.test(b.lastServiceDate) && b.lastServiceDate <= hoy ? b.lastServiceDate : hoy,
@@ -208,8 +212,8 @@ app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
     seguro_date: enMeses(12),
   };
   db.prepare(`
-    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, service_cada, service_unidad, last_service_date, vtv_date, seguro_date)
-    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @service_cada, @service_unidad, @last_service_date, @vtv_date, @seguro_date)
+    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, gps_tag, service_cada, service_unidad, last_service_date, vtv_date, seguro_date)
+    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @gps_tag, @service_cada, @service_unidad, @last_service_date, @vtv_date, @seguro_date)
   `).run(car);
 
   return reply.code(201).send(carToJson(selCar.get(car.id, u.id) as CarRow));
