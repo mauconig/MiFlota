@@ -334,7 +334,7 @@ function CH(on: boolean) {
 }
 
 function blankCar(): NewCarForm {
-  return { plate: '', model: '', year: '2018', driver: '', cuota: '', gpsTag: '', lastService: isoLocal(TODAY), serviceCada: '6', serviceUnidad: 'meses' };
+  return { plate: '', model: '', year: '2018', gpsTag: '', lastService: isoLocal(TODAY), serviceCada: '6', serviceUnidad: 'meses' };
 }
 
 function blankDrv(): NewDriverForm {
@@ -412,8 +412,6 @@ export function useFleetView(
       plate: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, plate: e.target.value } })),
       model: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, model: e.target.value } })),
       year: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, year: e.target.value } })),
-      driver: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, driver: e.target.value } })),
-      cuota: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, cuota: e.target.value } })),
       gpsTag: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, gpsTag: e.target.value } })),
       lastService: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, lastService: e.target.value } })),
       serviceCada: (e: React.ChangeEvent<HTMLInputElement>) => update((s) => ({ ncar: { ...s.ncar, serviceCada: e.target.value } })),
@@ -461,8 +459,6 @@ export function useFleetView(
         plate,
         model: n.model.trim(),
         year: numFromInput(n.year) || 2018,
-        driver: n.driver.trim() || 'Sin chofer',
-        cuota: numFromInput(n.cuota),
         gpsTag: n.gpsTag.trim(),
         lastServiceDate: n.lastService || isoLocal(TODAY),
         serviceCada: cada,
@@ -470,7 +466,7 @@ export function useFleetView(
       })
       .then(() => {
         update({ modal: null, ncar: blankCar(), nav: 'flota' });
-        toast('Vehículo agregado · ' + plate);
+        toast('Vehículo agregado · ' + plate + ' · asignale un chofer para cobrarle cuota');
       })
       .catch((e: Error) => toast('No se pudo agregar: ' + e.message));
   };
@@ -487,8 +483,12 @@ export function useFleetView(
       return;
     }
     const cuota = numFromInput(d.cuota);
+    if (!cuota) {
+      toast('Ingresá la cuota diaria del chofer');
+      return;
+    }
     const car = cars.find((c) => c.id === d.carId)!;
-    patchCar(d.carId, { driver: name, cuota: cuota || car.cuota });
+    patchCar(d.carId, { driver: name, cuota });
     update({ modal: null, ndrv: blankDrv(), nav: 'choferes' });
     toast('Chofer asignado · ' + name + ' · ' + car.plate);
   };
@@ -776,7 +776,7 @@ export function useFleetView(
       },
       editDriver: () => update({ modal: 'drv', ndrv: { name: c.driver === 'Sin chofer' ? '' : c.driver, carId: c.id, cuota: c.cuota ? String(c.cuota) : '' } }),
       clearDriver: () => {
-        patchCar(c.id, { driver: 'Sin chofer' });
+        patchCar(c.id, { driver: 'Sin chofer', cuota: 0 });
         toast('Chofer desvinculado de ' + c.plate);
       },
     };
@@ -862,7 +862,7 @@ export function useFleetView(
       verVehiculo: () => update({ driverId: null, detailId: c.id }),
       editar: () => update({ driverId: null, modal: 'drv', ndrv: { name: c.driver, carId: c.id, cuota: c.cuota ? String(c.cuota) : '' } }),
       quitar: () => {
-        patchCar(c.id, { driver: 'Sin chofer' });
+        patchCar(c.id, { driver: 'Sin chofer', cuota: 0 });
         update({ driverId: null });
         toast('Chofer desvinculado de ' + c.plate);
       },

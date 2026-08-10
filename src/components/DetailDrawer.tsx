@@ -74,7 +74,7 @@ export function DetailDrawer({ v }: { v: View }) {
               <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#6b665c' }}>Chofer</div>
               <div style={{ fontSize: 15, fontWeight: 700, marginTop: 3 }}>{d.driver}</div>
               <div style={{ fontSize: 12, color: '#6b665c', marginTop: 2 }}>
-                Cuota diaria {d.cuotaFmt} · {d.cobradas}
+                {d.hasDriver ? `Cuota diaria ${d.cuotaFmt} · ${d.cobradas}` : 'Sin chofer no se genera cuota'}
               </div>
             </div>
             <Btn
@@ -82,7 +82,7 @@ export function DetailDrawer({ v }: { v: View }) {
               style={{ border: '1px solid #e0d6c4', background: '#fffdf8', color: '#3d3a34', borderRadius: 12, minHeight: 38, padding: '0 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', flex: 'none' }}
               hoverStyle={{ background: '#f7f1e5' }}
             >
-              Cambiar
+              {d.hasDriver ? 'Cambiar' : 'Asignar'}
             </Btn>
             {d.hasDriver && (
               <Btn

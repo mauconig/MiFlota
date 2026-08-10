@@ -44,8 +44,6 @@ export interface NewCarForm {
   plate: string;
   model: string;
   year: string;
-  driver: string;
-  cuota: string;
   gpsTag: string;
   /** ISO `YYYY-MM-DD`, tal como lo emite un <input type="date">. */
   lastService: string;

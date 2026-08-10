@@ -96,6 +96,9 @@ function migrarOwner(db: Database.Database) {
   // El intervalo de service deja de ser siempre en meses: pasa a valor + unidad.
   // Las filas viejas eran meses por definición, así que se copian tal cual.
   if (!cols('cars').includes('gps_tag')) db.exec("ALTER TABLE cars ADD COLUMN gps_tag TEXT NOT NULL DEFAULT ''");
+  // La cuota es lo que paga el chofer: un vehículo sin chofer no puede tener una.
+  // Normaliza las filas que quedaron así cuando la cuota se cargaba en el alta.
+  db.exec("UPDATE cars SET cuota = 0 WHERE driver = 'Sin chofer' AND cuota > 0");
   if (!cols('cars').includes('service_cada')) {
     db.exec("ALTER TABLE cars ADD COLUMN service_cada INTEGER NOT NULL DEFAULT 6");
     db.exec("ALTER TABLE cars ADD COLUMN service_unidad TEXT NOT NULL DEFAULT 'meses'");

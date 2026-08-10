@@ -161,6 +161,18 @@ app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (re
   }
   if (!sets.length) return reply.code(400).send({ error: 'Nada para actualizar' });
 
+  // Sin chofer no hay cuota. Se resuelve acá y no solo en el cliente para que
+  // la regla valga también para cualquier otra vía de escritura.
+  const driverFinal = req.body?.driver ?? actual.driver;
+  const cuotaFinal = req.body?.cuota ?? actual.cuota;
+  if (driverFinal === 'Sin chofer' && cuotaFinal > 0) {
+    if (req.body?.cuota !== undefined && req.body?.driver === undefined) {
+      return reply.code(400).send({ error: 'No se puede fijar una cuota en un vehículo sin chofer' });
+    }
+    sets.push('cuota = ?');
+    vals.push(0);
+  }
+
   db.prepare(`UPDATE cars SET ${sets.join(', ')} WHERE id = ? AND owner_id = ?`).run(...vals, req.params.id, u.id);
   return carToJson(selCar.get(req.params.id, u.id) as CarRow);
 });
@@ -169,8 +181,6 @@ interface NuevoCar {
   plate: string;
   model: string;
   year: number;
-  driver: string;
-  cuota: number;
   gpsTag?: string;
   lastServiceDate?: string;
   serviceCada?: number;
@@ -201,8 +211,10 @@ app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
     plate,
     model,
     year: Number.isInteger(b.year) && b.year > 1950 && b.year < 2100 ? b.year : 2018,
-    driver: String(b.driver ?? '').trim() || 'Sin chofer',
-    cuota: Number.isInteger(b.cuota) && b.cuota >= 0 ? b.cuota : 0,
+    // Un vehículo nace sin chofer y, por lo tanto, sin cuota: la cuota es lo
+    // que paga el chofer, así que se define recién al asignarle uno.
+    driver: 'Sin chofer',
+    cuota: 0,
     estado: 'activo',
     gps_tag: String(b.gpsTag ?? '').trim().slice(0, 40),
     service_cada: Number.isInteger(b.serviceCada) && b.serviceCada! >= 1 && b.serviceCada! <= 3650 ? b.serviceCada! : 6,

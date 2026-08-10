@@ -28,46 +28,37 @@ export function CarModal({ v }: { v: View }) {
             <input inputMode="numeric" value={v.ncar.year} onChange={v.ch.year} placeholder="2018" style={fieldInput} />
           </label>
           <label style={fieldLabel}>
-            <span style={fieldLabelText}>Chofer</span>
-            <input value={v.ncar.driver} onChange={v.ch.driver} placeholder="Sin chofer" style={fieldInput} />
-          </label>
-          <label style={fieldLabel}>
-            <span style={fieldLabelText}>Cuota diaria</span>
-            <input inputMode="numeric" value={v.ncar.cuota} onChange={v.ch.cuota} placeholder="190000" style={fieldInput} />
+            <span style={fieldLabelText}>Último service</span>
+            <input type="date" value={v.ncar.lastService} onChange={v.ch.lastService} max={v.hoyISO} style={fieldInput} />
           </label>
           <label style={fieldLabel}>
             <span style={fieldLabelText}>GPS tag</span>
             <input value={v.ncar.gpsTag} onChange={v.ch.gpsTag} placeholder="Opcional" maxLength={40} style={fieldInput} />
           </label>
-          <label style={fieldLabel}>
-            <span style={fieldLabelText}>Último service</span>
-            <input type="date" value={v.ncar.lastService} onChange={v.ch.lastService} max={v.hoyISO} style={fieldInput} />
-          </label>
-          <div style={{ ...fieldLabel, gridColumn: 'span 2' }}>
+          <div style={fieldLabel}>
             <span style={fieldLabelText}>Service cada</span>
-            <div style={{ display: 'flex', flexDirection: 'row', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'row', gap: 7, minWidth: 0 }}>
               <input
                 inputMode="numeric"
                 value={v.ncar.serviceCada}
                 onChange={v.ch.serviceCada}
                 placeholder="6"
                 aria-label="Cantidad"
-                style={{ ...fieldInput, width: 96, flex: 'none' }}
+                style={{ ...fieldInput, width: 62, flex: 'none', padding: '0 10px', textAlign: 'center' }}
               />
-              <div style={{ display: 'flex', flexDirection: 'row', gap: 7, alignItems: 'center' }}>
-                {v.ncarUnidadOpts.map((u) => (
-                  <Btn
-                    key={u.label}
-                    onClick={u.pick}
-                    style={{ border: `1px solid ${u.bd}`, background: u.bg, color: u.fg, borderRadius: 12, minHeight: 44, padding: '0 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
-                  >
-                    {u.label}
-                  </Btn>
-                ))}
-              </div>
+              {v.ncarUnidadOpts.map((u) => (
+                <Btn
+                  key={u.label}
+                  onClick={u.pick}
+                  style={{ border: `1px solid ${u.bd}`, background: u.bg, color: u.fg, borderRadius: 14, minHeight: 44, flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+                >
+                  {u.label}
+                </Btn>
+              ))}
             </div>
           </div>
         </div>
+        <p style={{ margin: 0, fontSize: 12, color: '#6b665c' }}>La cuota se define al asignarle un chofer.</p>
         <div style={modalFooter}>
           <Btn onClick={v.closeModal} style={btnSecondary} hoverStyle={btnSecondaryHover}>
             Cancelar

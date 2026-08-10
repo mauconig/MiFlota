@@ -74,8 +74,6 @@ export interface NuevoCarPayload {
   plate: string;
   model: string;
   year: number;
-  driver: string;
-  cuota: number;
   gpsTag: string;
   lastServiceDate: string;
   serviceCada: number;
