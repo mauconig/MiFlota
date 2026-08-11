@@ -302,6 +302,7 @@ export interface View {
   alertCount: number;
   alertsSummary: string;
   alertsFull: AlertFull[];
+  alertKindChips: Chip[];
 
   pendSummary: string;
   pendFull: PendFull[];
@@ -1107,7 +1108,7 @@ export function useFleetView(
       const avisos = alertList.length + (alertList.length === 1 ? ' aviso' : ' avisos');
       return vencidos ? avisos + ' · ' + vencidos + (vencidos === 1 ? ' vencido' : ' vencidos') : avisos;
     })(),
-    alertsFull: alertList.slice(0, 15).map((a) => ({
+    alertsFull: (st.alertKind === 'todas' ? alertList : alertList.filter((a) => a.kind === st.alertKind)).slice(0, 15).map((a) => ({
       plate: a.car.plate,
       model: a.car.model + ' · ' + a.car.year,
       text: a.text,
@@ -1115,6 +1116,11 @@ export function useFleetView(
       dot: a.sev === 2 ? COLORS.neg : COLORS.warn,
       tagBg: KTAG[a.kind][0],
       tagFg: KTAG[a.kind][1],
+    })),
+    alertKindChips: (['todas', ...Object.keys(KTAG)] as string[]).map((k) => ({
+      label: k === 'todas' ? 'Todas' : k,
+      ...CH(st.alertKind === k),
+      pick: () => update({ alertKind: k }),
     })),
 
     pendSummary: !pendMovs.length ? 'Todo cobrado' : pendMovs.length + (pendMovs.length === 1 ? ' cuota sin cobrar' : ' cuotas sin cobrar'),

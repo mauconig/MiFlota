@@ -1,9 +1,10 @@
 import type { View } from '../useFleetView';
+import { ChipRow } from '../components/ChipRow';
 import { Screen, ScrollArea, Vacio } from '../components/Screen';
 import { card } from '../styles';
 
 export function Alertas({ v }: { v: View }) {
-  if (!v.alertsFull.length)
+  if (!v.alertCount)
     return (
       <Screen label="Alertas" style={{ ...card, overflow: 'hidden' }}>
         <Vacio titulo="Nada que atender" detalle="Acá van a aparecer los services por vencer, los seguros por renovar y los vehículos en taller." />
@@ -12,6 +13,10 @@ export function Alertas({ v }: { v: View }) {
 
   return (
     <Screen label="Alertas" style={{ ...card, overflow: 'hidden' }}>
+      <div style={{ padding: '12px 20px', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 7, flexWrap: 'wrap', borderBottom: '1px solid #f0ebe0', flex: 'none' }}>
+        <ChipRow chips={v.alertKindChips} />
+      </div>
+      {!v.alertsFull.length && <div style={{ padding: '30px 0', fontSize: 13, color: '#6b665c', textAlign: 'center' }}>Sin alertas de este tipo</div>}
       <ScrollArea style={{ padding: '8px 20px' }}>
         {v.alertsFull.map((a, i) => (
           <div key={i} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #f4efe4' }}>

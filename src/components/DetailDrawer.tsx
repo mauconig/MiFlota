@@ -104,10 +104,11 @@ export function DetailDrawer({ v }: { v: View }) {
           </div>
         </div>
 
-        {/* Izquierda: la gestión del vehículo. Derecha: la plata. Las columnas
-            arrancan arriba, así que la más corta termina antes en vez de
-            estirar sus tarjetas para emparejar la altura. */}
-        <div className="detalle-cols">
+        {/* Izquierda: la gestión del vehículo. Derecha: la plata. `minHeight: 0`
+            en toda la cadena deja que la columna derecha se achique cuando el
+            modal toca el tope de `maxHeight`, así el scroll queda adentro de
+            "Últimos movimientos" en vez de en el modal entero. */}
+        <div className="detalle-cols" style={{ flex: '1 1 auto', minHeight: 0 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
             <div style={{ ...cardTight, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -330,8 +331,8 @@ export function DetailDrawer({ v }: { v: View }) {
               </div>
             </div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-            <div style={{ ...cardTight, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, minHeight: 0 }}>
+            <div style={{ ...cardTight, padding: 16, display: 'flex', flexDirection: 'column', gap: 12, flex: 'none' }}>
               <span style={{ fontSize: 15, fontWeight: 700 }}>Mes a mes</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {d.months.map((m, i) => (
@@ -351,9 +352,9 @@ export function DetailDrawer({ v }: { v: View }) {
               </div>
             </div>
 
-            <div style={{ ...cardTight, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <span style={{ fontSize: 15, fontWeight: 700 }}>Últimos movimientos</span>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div style={{ ...cardTight, padding: 16, display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minHeight: 0 }}>
+              <span style={{ fontSize: 15, fontWeight: 700, flex: 'none' }}>Últimos movimientos</span>
+              <div className="scroll-sin-barra" style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto' }}>
                 {d.movs.map((m, i) => (
                   <div key={i} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 11, padding: '9px 0', borderBottom: '1px solid #f4efe4' }}>
                     <span

@@ -60,17 +60,30 @@ select.field-select {
 }
 
 /* Las dos columnas de la ficha del vehículo. Se apilan cuando la ventana no
-   da el ancho: dos columnas apretadas se leen peor que una sola. */
+   da el ancho: dos columnas apretadas se leen peor que una sola. `stretch`
+   (el valor por defecto) deja que ambas lleguen a la altura disponible, así
+   la tarjeta de "Últimos movimientos" sabe cuánto lugar tiene y puede
+   scrollear puertas adentro en vez de estirar el modal entero. */
 .detalle-cols {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-  align-items: start;
+  min-height: 0;
 }
 @media (max-width: 1060px) {
   .detalle-cols {
     grid-template-columns: 1fr;
   }
+}
+
+/* Sigue scrolleando con rueda/touch/drag; solo se le esconde la barra, que
+   en una lista tan chica no aporta nada y compite con el borde de la tarjeta. */
+.scroll-sin-barra {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scroll-sin-barra::-webkit-scrollbar {
+  display: none;
 }
 
 ::selection {

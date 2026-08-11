@@ -33,6 +33,7 @@ const initialState: UIState = {
   cTo: '2026-08-28',
   movType: 'todos',
   movCat: 'todas',
+  alertKind: 'todas',
   modal: null,
   ncar: blankCar(),
   ndrv: blankDrv(),
