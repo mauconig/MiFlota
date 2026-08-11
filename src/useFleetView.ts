@@ -59,6 +59,7 @@ export interface ColItem {
 
 export interface VehicleRow {
   id: string;
+  pos: number;
   plate: string;
   rawModel: string;
   model: string;
@@ -659,11 +660,12 @@ export function useFleetView(
   const catTotal = Object.values(tot.byCat).reduce((a, b) => a + b, 0) || 1;
   const catMax = Math.max(...CATS.map((c) => tot.byCat[c] || 0), 1);
 
-  const mkRow = (x: (typeof perCar)[number]): VehicleRow => {
+  const mkRow = (x: (typeof perCar)[number], i: number): VehicleRow => {
     const t = FTAG[x.c.estado];
     const dLeft = svcDaysLeft(x.c);
     return {
       id: x.c.id,
+      pos: i + 1,
       plate: x.c.plate,
       rawModel: x.c.model,
       model: x.c.model + ' · ' + x.c.year,

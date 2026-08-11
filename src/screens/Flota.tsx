@@ -43,7 +43,7 @@ export function Flota({ v }: { v: View }) {
       <div style={{ padding: '12px 20px', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 7, flexWrap: 'wrap', borderBottom: '1px solid #f0ebe0', flex: 'none' }}>
         <ChipRow chips={v.brandFilters} wrap size="sm" />
       </div>
-      <VehicleTable cols={v.colsF} rows={v.flotaRows} variant="flota" mode="scroll" />
+      <VehicleTable cols={v.colsF} rows={v.flotaRows} variant="flota" />
     </Screen>
   );
 }
