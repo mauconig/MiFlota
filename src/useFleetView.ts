@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useRef } from 'react';
-import type { Car, Mov, UIState, NewCarForm, NewDriverForm } from './types';
-import type { NuevoCarPayload } from './api';
+import type { Car, Mov, Pago, UIState, NewCarForm, NewDriverForm } from './types';
+import type { NuevoCarPayload, NuevoPagoPayload } from './api';
+import type { Aplicacion } from './cobranza';
+import { imputar } from './cobranza';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, dLbl, dLblFull, daysBetween, durLbl, fmt, fmtShort, initials, isoLocal, miles, statusColor, numFromInput } from './format';
 
@@ -127,6 +129,43 @@ export interface PendFull {
   debeFg: string;
 }
 
+/** Una fila del libro de pagos. */
+export interface PagoFull {
+  id: number;
+  initials: string;
+  driver: string;
+  /** Auto en el que andaba, o "—" si el pago no quedó atado a ninguno. */
+  carLbl: string;
+  dateLbl: string;
+  monto: string;
+  /** "Pago" o "Ajuste": un ajuste cancela deuda pero no es plata que entró. */
+  tag: string;
+  tagBg: string;
+  tagFg: string;
+  nota: string;
+  borrar: () => void;
+}
+
+export interface PagoFormView {
+  driver: string;
+  setDriver: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+  /** Choferes de la flota, con lo que debe cada uno al lado. */
+  opciones: { id: string; label: string }[];
+  fecha: string;
+  setFecha: (iso: string) => void;
+  hoy: string;
+  monto: string;
+  setMonto: (v: string) => void;
+  tipoOpts: Chip[];
+  nota: string;
+  setNota: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  /** Qué va a pasar con esta plata, resuelto antes de guardar. */
+  destino: string;
+  guardando: boolean;
+  guardar: () => void;
+  cerrar: () => void;
+}
+
 export interface TopCarItem {
   pos: string;
   plate: string;
@@ -161,6 +200,9 @@ export interface DriverDetailView {
   cumplimiento: string;
   cumplimientoPct: string;
   cumplimientoFg: string;
+  /** Plata suya todavía sin imputar: pagó de más o por adelantado. Vacío si no
+      tiene, que es el caso normal. */
+  aFavor: string;
   plate: string;
   rawModel: string;
   model: string;
@@ -324,6 +366,14 @@ export interface View {
   pendQ: string;
   setPendQ: (e: React.ChangeEvent<HTMLInputElement>) => void;
 
+  cobrosTab: 'cuotas' | 'pagos';
+  cobrosTabChips: Chip[];
+  pagosFull: PagoFull[];
+  pagosSub: string;
+  abrirPago: () => void;
+  /** Null mientras el modal de pago está cerrado. */
+  pagoForm: PagoFormView | null;
+
   topCars: TopCarItem[];
 
   choferes: ChoferItem[];
@@ -486,9 +536,6 @@ const PTAG: Record<string, [string, string]> = {
   Pendiente: ['#fdf3e2', '#a8730f'],
 };
 
-/** Lo que entró por un cobro. Un movimiento viejo sin `cobrado` se toma como
- *  cobrado entero, que es lo que significaba antes de que existiera la columna. */
-const cobradoDe = (m: Mov) => m.cobrado ?? m.amount;
 
 /** Chofer al que corresponde un cobro. Si el auto cambió de chofer después de
  *  generado, el cobro se queda con quien lo generó, no con quien maneja el
@@ -496,25 +543,33 @@ const cobradoDe = (m: Mov) => m.cobrado ?? m.amount;
  *  valor por defecto para movimientos anteriores a este campo. */
 const paidBy = (m: Mov, c: Car) => m.driver || c.driver;
 
-function stats(movs: Mov[], f: (m: Mov) => boolean) {
-  // `ing` es plata que entró de verdad; `fact` es lo emitido. La diferencia es
-  // la deuda de los choferes, y por eso la ganancia neta se calcula con `ing`:
-  // una cuota impaga no es ganancia.
-  let ing = 0;
+/**
+ * `fact` y `egr` salen de los movimientos —lo emitido y lo gastado—, pero `ing`
+ * sale de las aplicaciones de pagos: es plata que entró, y lo que decide en qué
+ * período cae es la fecha del pago, no la de la cuota que cancela. Por eso los
+ * dos filtros son distintos y no se pueden unificar.
+ *
+ * Un ajuste (condonación) baja la deuda pero no es caja, así que no suma acá.
+ */
+function stats(movs: Mov[], apls: Aplicacion[], fm: (m: Mov) => boolean, fa: (a: Aplicacion) => boolean) {
   let fact = 0;
   let egr = 0;
   const byCat: Record<string, number> = {};
   movs.forEach((m) => {
-    if (!f(m)) return;
+    if (!fm(m)) return;
     if (m.type === 'ingreso') {
-      ing += cobradoDe(m);
       fact += m.amount;
     } else {
       egr += m.amount;
       byCat[m.cat!] = (byCat[m.cat!] || 0) + m.amount;
     }
   });
-  return { ing, fact, deuda: fact - ing, egr, net: ing - egr, byCat };
+  let ing = 0;
+  apls.forEach((a) => {
+    if (a.tipo === 'pago' && fa(a)) ing += a.monto;
+  });
+  // Una cuota impaga no es ganancia: por eso el neto se calcula con lo cobrado.
+  return { ing, fact, egr, net: ing - egr, byCat };
 }
 
 /** Último instante del día. Los movimientos se parsean al mediodía (ver
@@ -545,6 +600,7 @@ function range(state: UIState) {
 export function useFleetView(
   cars: Car[],
   movs: Mov[],
+  pagos: Pago[],
   state: UIState,
   update: (patch: Partial<UIState> | ((s: UIState) => Partial<UIState>)) => void,
   persist: {
@@ -552,6 +608,8 @@ export function useFleetView(
     addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
     deleteCar: (id: string) => Promise<{ plate: string; movs: number }>;
     mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: File | null }) => Promise<void>;
+    addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
+    deletePago: (id: number) => Promise<void>;
   },
 ): View {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -677,6 +735,37 @@ export function useFleetView(
     toast('Chofer asignado · ' + name + ' · ' + car.plate);
   };
 
+  const savePago = () => {
+    const f = state.npago;
+    if (!f || f.guardando) return;
+    if (!f.driver) return toast('Elegí de qué chofer es el pago');
+    const monto = numFromInput(f.monto);
+    if (!monto) return toast('Ingresá cuánto pagó');
+    if (f.fecha > isoLocal(TODAY)) return toast('El pago no puede tener fecha futura');
+
+    // A qué cuotas se imputa lo decide el servidor recién en la próxima lectura,
+    // así que no hay nada que aplicar en optimista: se marca guardando y se espera.
+    update((s) => ({ npago: s.npago && { ...s.npago, guardando: true } }));
+    persist
+      .addPago({
+        driver: f.driver,
+        // El auto es contexto, no destino: se guarda el que maneja hoy.
+        carId: cars.find((c) => c.driver === f.driver)?.id ?? null,
+        fecha: f.fecha,
+        monto,
+        tipo: f.tipo,
+        nota: f.nota.trim() || undefined,
+      })
+      .then(() => {
+        update({ npago: null });
+        toast((f.tipo === 'ajuste' ? 'Ajuste registrado · ' : 'Pago registrado · ') + f.driver + ' · ' + fmt(monto));
+      })
+      .catch((e: Error) => {
+        update((s) => ({ npago: s.npago && { ...s.npago, guardando: false } }));
+        toast('No se pudo registrar: ' + e.message);
+      });
+  };
+
   const st = state;
   const r = range(st);
   const inR = (m: Mov) => m.date >= r.start && m.date <= r.end;
@@ -688,13 +777,28 @@ export function useFleetView(
   const prevEnd = finDia(addD(r.start, -1));
   const prevStart = iniDia(addD(prevEnd, -(days - 1)));
   const inPrev = (m: Mov) => m.date >= prevStart && m.date <= prevEnd;
-  const tot = stats(movs, inR);
-  const prev = stats(movs, inPrev);
+
+  // Imputación de todos los pagos sobre todas las cuotas, sin recortar por
+  // período: un pago de agosto puede estar cancelando una cuota de junio, así
+  // que recortar antes de imputar daría deudas que no existen.
+  const carDe = new Map(cars.map((c) => [c.id, c]));
+  const cuotas = movs.filter((m) => m.type === 'ingreso');
+  const { aplicaciones, cobrado, saldoAFavor } = imputar(cuotas, pagos, (m) => {
+    const c = carDe.get(m.carId);
+    return c ? paidBy(m, c) : (m.driver ?? 'Sin chofer');
+  });
+  const cobradoDe = (m: Mov) => cobrado.get(m.id) ?? 0;
+  const deudaDe = (m: Mov) => m.amount - cobradoDe(m);
+  /** Cuánto de un pago cayó dentro del período mirado. */
+  const inRA = (a: Aplicacion) => a.fecha >= r.start && a.fecha <= r.end;
+  const inPrevA = (a: Aplicacion) => a.fecha >= prevStart && a.fecha <= prevEnd;
+
+  const tot = stats(movs, aplicaciones, inR, inRA);
+  const prev = stats(movs, aplicaciones, inPrev, inPrevA);
   const active = cars.filter((c) => c.estado !== 'baja');
   // La pantalla de Cobros lista todos los cobros del período, no solo los que
   // faltan: ver los ya cobrados es lo que da contexto a lo que falta.
-  const cobroMovs = movs.filter((m) => m.type === 'ingreso' && inR(m)).sort((a, b) => +b.date - +a.date);
-  const deudaDe = (m: Mov) => m.amount - cobradoDe(m);
+  const cobroMovs = cuotas.filter(inR).sort((a, b) => +b.date - +a.date);
   const pendMovs = cobroMovs.filter((m) => deudaDe(m) > 0);
   const pendTotal = pendMovs.reduce((a, m) => a + deudaDe(m), 0);
   // Lo que la pantalla de Cobros muestra después de aplicar chip y búsqueda. El
@@ -705,6 +809,27 @@ export function useFleetView(
     .filter(({ m, debe }) => (st.pendKind === 'todas' ? true : st.pendKind === (debe === 0 ? 'Cobrado' : cobradoDe(m) > 0 ? 'Parcial' : 'Pendiente')))
     .filter(({ m, c }) => matches(st.pendQ, paidBy(m, c), c.plate, c.model, c.gpsTag));
   const cobrosVistaDeuda = cobrosVista.reduce((a, x) => a + x.debe, 0);
+
+  const choferDeCuota = (m: Mov) => {
+    const c = carDe.get(m.carId);
+    return c ? paidBy(m, c) : (m.driver ?? 'Sin chofer');
+  };
+  // La deuda de un chofer es sobre todo su historial, no sobre el período: un
+  // saldo es una foto de hoy, no un flujo del mes. Filtrarla por período haría
+  // desaparecer lo que debe de junio con solo mirar agosto.
+  const deudaPorChofer = new Map<string, number>();
+  cuotas.forEach((m) => {
+    const falta = deudaDe(m);
+    if (falta <= 0) return;
+    const d = choferDeCuota(m);
+    if (d === 'Sin chofer') return;
+    deudaPorChofer.set(d, (deudaPorChofer.get(d) ?? 0) + falta);
+  });
+
+  const pagosVista = pagos
+    .filter((p) => p.fecha >= r.start && p.fecha <= r.end)
+    .filter((p) => matches(st.pendQ, p.driver, carDe.get(p.carId ?? '')?.plate, carDe.get(p.carId ?? '')?.model, carDe.get(p.carId ?? '')?.gpsTag))
+    .sort((a, b) => +b.fecha - +a.fecha || b.id - a.id);
 
   const alertList: { car: Car; kind: string; sev: number; text: string }[] = [];
   active.forEach((c) => {
@@ -728,7 +853,7 @@ export function useFleetView(
   });
   alertList.sort((a, b) => b.sev - a.sev);
 
-  const perCar = cars.map((c) => ({ c, ...stats(movs, (m) => m.carId === c.id && inR(m)) }));
+  const perCar = cars.map((c) => ({ c, ...stats(movs, aplicaciones, (m) => m.carId === c.id && inR(m), (a) => a.carId === c.id && inRA(a)) }));
   const maxNet = Math.max(...perCar.map((x) => Math.abs(x.net)), 1);
   const filtered = perCar.filter((x) => (st.filter === 'todos' ? true : x.c.estado === st.filter) && matches(st.carQ, x.c.plate, x.c.model, x.c.driver, x.c.gpsTag));
   const keyF: (x: (typeof perCar)[number]) => string | number =
@@ -804,7 +929,11 @@ export function useFleetView(
       matches(st.movQ, m.desc, m.cat, c && paidBy(m, c), c?.model, c?.plate, c?.gpsTag)
     );
   });
-  const movTot = stats(movsFiltered, () => true);
+  // Acá los ingresos son lo cobrado de las cuotas listadas, no la caja del
+  // período: el panel resume la lista que se está viendo, y esa lista son
+  // movimientos, no pagos.
+  const idsFiltrados = new Set(movsFiltered.map((m) => m.id));
+  const movTot = stats(movsFiltered, aplicaciones, () => true, (a) => idsFiltrados.has(a.movId));
   const movCatTotal = Object.values(movTot.byCat).reduce((a, b) => a + b, 0) || 1;
   const movCatMax = Math.max(...CATS.map((c) => movTot.byCat[c] || 0), 1);
 
@@ -868,7 +997,7 @@ export function useFleetView(
         borrar: () => {},
       };
     }
-    const cs = stats(movs, (m) => m.carId === c.id && inR(m));
+    const cs = stats(movs, aplicaciones, (m) => m.carId === c.id && inR(m), (a) => a.carId === c.id && inRA(a));
     const dLeft = svcDaysLeft(c);
     const svcTotalDias = Math.max(1, daysBetween(c.lastServiceDate, svcNextDate(c)));
     const MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -876,14 +1005,18 @@ export function useFleetView(
     for (let k = 5; k >= 0; k--) {
       const d = new Date(2026, 7 - k, 1);
       const m0 = d.getMonth();
-      const s2 = stats(movs, (m) => m.carId === c.id && m.date.getMonth() === m0 && m.date.getFullYear() === 2026);
+      const enMes = (f: Date) => f.getMonth() === m0 && f.getFullYear() === 2026;
+      const s2 = stats(movs, aplicaciones, (m) => m.carId === c.id && enMes(m.date), (a) => a.carId === c.id && enMes(a.fecha));
       months.push({ label: MES[m0], ing: s2.ing, egr: s2.egr, net: s2.net });
     }
     const mMax = Math.max(...months.map((m) => Math.max(m.ing, m.egr)), 1);
     // El resumen del chofer es de quien maneja el auto hoy: si cambió de
     // chofer, las cuotas de quien lo manejaba antes no cuentan acá.
-    const cuotasCobradas = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && m.estado === 'pagado' && paidBy(m, c) === c.driver && inR(m)).length;
-    const cuotasPend = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && m.estado !== 'pagado' && paidBy(m, c) === c.driver && inR(m));
+    // Si una cuota está saldada se decide por lo imputado, nunca por el `estado`
+    // que trae la fila: ese campo no se entera de un pago posterior.
+    const suyas = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && paidBy(m, c) === c.driver && inR(m));
+    const cuotasCobradas = suyas.filter((m) => deudaDe(m) === 0).length;
+    const cuotasPend = suyas.filter((m) => deudaDe(m) > 0);
 
     // El intervalo de service se edita en borrador y se confirma con "Guardar":
     // a diferencia del resto de la ficha, escribir un número de a un dígito
@@ -1042,6 +1175,7 @@ export function useFleetView(
         estadoFg: '',
         cuota: '',
         cuotasLbl: '',
+        aFavor: '',
         pagos: [],
         sinPagos: true,
         verVehiculo: () => {},
@@ -1049,7 +1183,9 @@ export function useFleetView(
         quitar: () => {},
       };
     const c = x.c;
-    const cuotas = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && inR(m));
+    // Solo las cuotas que le tocan a él: si el auto cambió de chofer, las del
+    // anterior son de su ficha, no de esta.
+    const cuotas = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && paidBy(m, c) === c.driver && inR(m));
     const impagas = cuotas.filter((m) => m.amount - cobradoDe(m) > 0);
     const facturado = cuotas.reduce((a, m) => a + m.amount, 0);
     const adeudado = cuotas.reduce((a, m) => a + (m.amount - cobradoDe(m)), 0);
@@ -1070,6 +1206,7 @@ export function useFleetView(
       cumplimiento: cumpl + '%',
       cumplimientoPct: Math.max(2, Math.min(100, cumpl)) + '%',
       cumplimientoFg: cumpl >= 95 ? COLORS.pos : cumpl >= 80 ? COLORS.warn : COLORS.neg,
+      aFavor: saldoAFavor.get(c.driver) ? fmt(saldoAFavor.get(c.driver)!, st.hide) : '',
       plate: c.plate,
       rawModel: c.model,
       model: c.model + ' · ' + c.year,
@@ -1273,8 +1410,10 @@ export function useFleetView(
           tagBg: PTAG[tag][0],
           tagFg: PTAG[tag][1],
           // Un parcial dice explícitamente cuánto entró de cuánto: "270k de
-          // 540k" no se puede leer mal, un "270k" suelto sí.
-          amt: tag === 'Parcial' ? fmtShort(cob, st.hide) + ' de ' + fmtShort(m.amount, st.hide) : fmtShort(m.amount, st.hide),
+          // 540k" no se puede leer mal, un "270k" suelto sí. Y en una pendiente
+          // la columna va vacía: no entró nada, poner el monto facturado abajo
+          // de "Cobrado" se lee como que sí.
+          amt: tag === 'Cobrado' ? fmtShort(m.amount, st.hide) : tag === 'Parcial' ? fmtShort(cob, st.hide) + ' de ' + fmtShort(m.amount, st.hide) : '—',
           debe: debe ? fmtShort(debe, st.hide) : '',
           debeFg: debe ? COLORS.neg : '#6b665c',
         };
@@ -1287,6 +1426,84 @@ export function useFleetView(
     pendKind: st.pendKind,
     pendQ: st.pendQ,
     setPendQ: (e) => update({ pendQ: e.target.value }),
+
+    cobrosTab: st.cobrosTab,
+    cobrosTabChips: (['cuotas', 'pagos'] as const).map((k) => ({
+      label: k === 'cuotas' ? 'Cuotas' : 'Pagos',
+      ...CH(st.cobrosTab === k),
+      pick: () => update({ cobrosTab: k }),
+    })),
+    pagosFull: pagosVista.map((p) => {
+      const c = p.carId ? carDe.get(p.carId) : undefined;
+      const ajuste = p.tipo === 'ajuste';
+      return {
+        id: p.id,
+        initials: initials(p.driver),
+        driver: p.driver,
+        carLbl: c ? c.plate + ' · ' + c.model + ' · ' + (c.gpsTag || 'Sin GPS') : '—',
+        dateLbl: dLbl(p.fecha),
+        monto: fmtShort(p.monto, st.hide),
+        tag: ajuste ? 'Ajuste' : 'Pago',
+        tagBg: ajuste ? '#f4f0e8' : '#eef4f0',
+        tagFg: ajuste ? '#6b665c' : '#2e7d5b',
+        nota: p.nota ?? '',
+        borrar: () => {
+          persist
+            .deletePago(p.id)
+            .then(() => toast('Pago eliminado · ' + p.driver + ' · ' + fmt(p.monto)))
+            .catch((e: Error) => toast('No se pudo eliminar: ' + e.message));
+        },
+      };
+    }),
+    pagosSub: (() => {
+      const n = pagosVista.length;
+      const caja = pagosVista.filter((p) => p.tipo === 'pago').reduce((a, p) => a + p.monto, 0);
+      if (!n) return 'Sin pagos en el período';
+      return n + (n === 1 ? ' pago · ' : ' pagos · ') + fmt(caja, st.hide) + ' de caja';
+    })(),
+    abrirPago: () => update({ npago: { driver: '', fecha: isoLocal(TODAY), monto: '', tipo: 'pago', nota: '', guardando: false } }),
+    pagoForm: (() => {
+      const f = st.npago;
+      if (!f) return null;
+      const setF = (patch: Partial<NonNullable<UIState['npago']>>) => update((s) => ({ npago: s.npago && { ...s.npago, ...patch } }));
+      // Los que deben van primero: son a los que les vas a estar cargando pagos.
+      const nombres = [...new Set([...deudaPorChofer.keys(), ...cars.filter((c) => c.driver !== 'Sin chofer').map((c) => c.driver)])].sort(
+        (a, b) => (deudaPorChofer.get(b) ?? 0) - (deudaPorChofer.get(a) ?? 0) || a.localeCompare(b),
+      );
+      const debe = deudaPorChofer.get(f.driver) ?? 0;
+      const monto = numFromInput(f.monto);
+      return {
+        driver: f.driver,
+        setDriver: (e) => setF({ driver: e.target.value }),
+        opciones: nombres.map((n) => ({ id: n, label: n + (deudaPorChofer.get(n) ? ' — debe ' + fmtShort(deudaPorChofer.get(n)!) : ' — al día') })),
+        fecha: f.fecha,
+        setFecha: (iso) => setF({ fecha: iso }),
+        hoy: isoLocal(TODAY),
+        monto: f.monto,
+        setMonto: (v) => setF({ monto: v }),
+        tipoOpts: (['pago', 'ajuste'] as const).map((k) => ({
+          label: k === 'pago' ? 'Pago' : 'Ajuste',
+          ...CH(f.tipo === k),
+          pick: () => setF({ tipo: k }),
+        })),
+        nota: f.nota,
+        setNota: (e) => setF({ nota: e.target.value }),
+        // Se adelanta lo que va a pasar, porque la imputación es automática y
+        // sin esto el monto se carga a ciegas.
+        destino: !f.driver
+          ? 'Elegí un chofer para ver a qué se imputa'
+          : !monto
+            ? debe
+              ? 'Debe ' + fmt(debe) + ' · se cancela de lo más viejo primero'
+              : 'No debe nada · lo que cargues queda a favor'
+            : monto >= debe
+              ? (debe ? 'Cancela los ' + fmt(debe) + ' que debe' : 'No debe nada') + (monto > debe ? ' · quedan ' + fmt(monto - debe) + ' a favor' : ' y queda al día')
+              : 'Cancela ' + fmt(monto) + ' de los ' + fmt(debe) + ' que debe · le quedan ' + fmt(debe - monto),
+        guardando: f.guardando,
+        guardar: savePago,
+        cerrar: () => update({ npago: null }),
+      };
+    })(),
 
     topCars: [...perCar]
       .filter((x) => x.c.estado !== 'baja')
@@ -1302,7 +1519,7 @@ export function useFleetView(
         // auto (el chofer anterior tiene los suyos en su propia tarjeta, si
         // todavía maneja alguno).
         const propios = (m: Mov) => m.carId === x.c.id && paidBy(m, x.c) === x.c.driver;
-        const dStats = stats(movs, (m) => propios(m) && inR(m));
+        const dStats = stats(movs, aplicaciones, (m) => propios(m) && inR(m), (a) => a.driver === x.c.driver && a.carId === x.c.id && inRA(a));
         const pend = pendMovs.filter(propios).reduce((a, m) => a + deudaDe(m), 0);
         const ok = pend === 0;
         return {

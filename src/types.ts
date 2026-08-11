@@ -34,11 +34,10 @@ export interface Mov {
   id: number;
   carId: string;
   type: 'ingreso' | 'egreso';
-  /** Lo facturado: en un ingreso, la cuota emitida, se haya cobrado o no. */
+  /** Lo facturado: en un ingreso, la cuota emitida, se haya cobrado o no.
+      Cuánto se cobró de ella no se guarda: sale de imputar los pagos
+      (ver `imputar` en cobranza.ts). */
   amount: number;
-  /** Lo que efectivamente entró. Ausente en los egresos, que no se cobran.
-      `amount - cobrado` es lo que el chofer todavía debe. */
-  cobrado?: number;
   date: Date;
   desc: string;
   cat?: string;
@@ -50,6 +49,27 @@ export interface Mov {
   driver?: string;
   /** Adjunto del gasto. El archivo se pide por `/api/comprobantes/:id`. */
   comprobante?: { id: string; nombre: string; tipo: string };
+}
+
+/** `pago` es plata que entró; `ajuste` cancela deuda sin caja (condonación).
+    Los dos bajan lo que el chofer debe, pero solo el primero es ingreso. */
+export type PagoTipo = 'pago' | 'ajuste';
+
+/**
+ * Plata a favor del chofer, con su fecha real. No apunta a una cuota concreta:
+ * se imputa a lo que debe, de lo más viejo a lo más nuevo, al momento de leer.
+ */
+export interface Pago {
+  id: number;
+  /** Auto en el que andaba al pagar. Referencia nomás: la deuda es del chofer
+      y lo sigue aunque cambie de vehículo. */
+  carId: string | null;
+  driver: string;
+  fecha: Date;
+  monto: number;
+  tipo: PagoTipo;
+  medio?: string;
+  nota?: string;
 }
 
 export type Nav = 'resumen' | 'flota' | 'choferes' | 'alertas' | 'reportes' | 'cobros';
@@ -108,6 +128,10 @@ export interface UIState {
   svcEdit: { carId: string; cada: string; unidad: ServiceUnidad } | null;
   /** Entrada a taller a medio cargar. Null = el modal está cerrado. */
   taller: { carId: string; razon: string; monto: string; archivo: File | null; guardando: boolean } | null;
+  /** Qué mira la pantalla de Cobros: las cuotas emitidas o el libro de pagos. */
+  cobrosTab: 'cuotas' | 'pagos';
+  /** Pago a medio cargar. Null = el modal está cerrado. */
+  npago: { driver: string; fecha: string; monto: string; tipo: PagoTipo; nota: string; guardando: boolean } | null;
   /** Acción destructiva esperando confirmación. */
   confirm: { tipo: 'borrarAuto' | 'quitarChofer'; carId: string } | null;
   /** Id del vehículo cuyo chofer se está viendo en detalle. */

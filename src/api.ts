@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Car, Mov } from './types';
+import type { Car, Mov, Pago } from './types';
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`. Se parsean a mediodía UTC para que
  *  ningún huso horario corra el día al construir el Date. */
@@ -12,9 +12,11 @@ const isoDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padS
 
 type CarDto = Omit<Car, 'lastServiceDate' | 'seguroDate'> & { lastServiceDate: string; seguroDate: string };
 type MovDto = Omit<Mov, 'date'> & { date: string };
+type PagoDto = Omit<Pago, 'fecha'> & { fecha: string };
 
 const toCar = (c: CarDto): Car => ({ ...c, lastServiceDate: parseDate(c.lastServiceDate), seguroDate: parseDate(c.seguroDate) });
 const toMov = (m: MovDto): Mov => ({ ...m, date: parseDate(m.date) });
+const toPago = (p: PagoDto): Pago => ({ ...p, fecha: parseDate(p.fecha) });
 
 export class SinSesion extends Error {}
 
@@ -89,15 +91,27 @@ export interface NuevoCarPayload {
   seguroCada: number;
 }
 
+export interface NuevoPagoPayload {
+  driver: string;
+  carId: string | null;
+  fecha: string;
+  monto: number;
+  tipo: 'pago' | 'ajuste';
+  nota?: string;
+}
+
 export interface FleetStore {
   cars: Car[];
   movs: Mov[];
+  pagos: Pago[];
   cargando: boolean;
   error: string;
   patchCar: (id: string, patch: Partial<Car>) => void;
   addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
   deleteCar: (id: string) => Promise<{ plate: string; movs: number }>;
   mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: File | null }) => Promise<void>;
+  addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
+  deletePago: (id: number) => Promise<void>;
 }
 
 /**
@@ -108,13 +122,15 @@ export interface FleetStore {
 export function useFleetStore(onError: (msg: string) => void, onSinSesion: () => void): FleetStore {
   const [cars, setCars] = useState<Car[]>([]);
   const [movs, setMovs] = useState<Mov[]>([]);
+  const [pagos, setPagos] = useState<Pago[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
 
   const recargar = useCallback(async () => {
-    const s = await req<{ cars: CarDto[]; movs: MovDto[] }>('/api/state');
+    const s = await req<{ cars: CarDto[]; movs: MovDto[]; pagos: PagoDto[] }>('/api/state');
     setCars(s.cars.map(toCar));
     setMovs(s.movs.map(toMov));
+    setPagos(s.pagos.map(toPago));
   }, []);
 
   useEffect(() => {
@@ -176,5 +192,19 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     setMovs((ms) => [toMov(r.mov), ...ms]);
   }, []);
 
-  return { cars, movs, cargando, error, patchCar, addCar, deleteCar, mandarATaller };
+  // Un pago no se aplica en optimista: cuánto cancela de cada cuota lo decide
+  // la imputación sobre el conjunto, así que hasta que el servidor no lo
+  // confirma no hay forma de saber qué mostrar.
+  const addPago = useCallback(async (nuevo: NuevoPagoPayload) => {
+    const creado = toPago(await req<PagoDto>('/api/pagos', { method: 'POST', body: JSON.stringify(nuevo) }));
+    setPagos((ps) => [creado, ...ps]);
+    return creado;
+  }, []);
+
+  const deletePago = useCallback(async (id: number) => {
+    await req(`/api/pagos/${id}`, { method: 'DELETE' });
+    setPagos((ps) => ps.filter((p) => p.id !== id));
+  }, []);
+
+  return { cars, movs, pagos, cargando, error, patchCar, addCar, deleteCar, mandarATaller, addPago, deletePago };
 }

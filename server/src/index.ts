@@ -7,8 +7,8 @@ import { rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { CarRow, MovRow } from './db.js';
-import { COMPROBANTES_DIR, DB_PATH, carToJson, movToJson, openDb } from './db.js';
+import type { CarRow, MovRow, PagoRow } from './db.js';
+import { COMPROBANTES_DIR, DB_PATH, carToJson, movToJson, openDb, pagoToJson } from './db.js';
 import {
   COOKIE,
   bloqueado,
@@ -26,6 +26,12 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = process.env.MIFLOTA_PUBLIC ?? join(HERE, '..', 'public');
 const PORT = Number(process.env.PORT ?? 3000);
+
+/** Qué día es hoy para el servidor. La flota de demostración está fijada a una
+ *  fecha (ver `TODAY` en el cliente), y sin poder alinear las dos el servidor
+ *  rechazaría por "futuro" todo lo que se cargue desde esa app. En producción
+ *  no se define y manda el reloj real. */
+const hoyISO = () => process.env.MIFLOTA_HOY ?? new Date().toISOString().slice(0, 10);
 
 const db = openDb();
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
@@ -116,6 +122,7 @@ app.get('/api/me', async (req) => {
 // impide que un usuario toque los vehículos de otro.
 const selCars = db.prepare('SELECT * FROM cars WHERE owner_id = ? ORDER BY rowid');
 const selMovs = db.prepare('SELECT * FROM movs WHERE owner_id = ? ORDER BY date DESC, id DESC');
+const selPagos = db.prepare('SELECT * FROM pagos WHERE owner_id = ? ORDER BY fecha DESC, id DESC');
 const selCar = db.prepare('SELECT * FROM cars WHERE id = ? AND owner_id = ?');
 
 /** El preHandler ya rechazó las peticiones sin sesión, así que acá siempre hay usuario. */
@@ -123,13 +130,14 @@ const quien = (req: { cookies: Record<string, string | undefined> }) => usuarioD
 
 app.get('/api/health', async () => ({ ok: true, db: DB_PATH }));
 
-/** Un solo GET con todo: la vista deriva absolutamente todo de estas dos listas,
+/** Un solo GET con todo: la vista deriva absolutamente todo de estas listas,
  *  así que partirlo en endpoints por pantalla solo agregaría viajes de red. */
 app.get('/api/state', async (req) => {
   const u = quien(req);
   return {
     cars: (selCars.all(u.id) as CarRow[]).map(carToJson),
     movs: (selMovs.all(u.id) as MovRow[]).map(movToJson),
+    pagos: (selPagos.all(u.id) as PagoRow[]).map(pagoToJson),
   };
 });
 
@@ -384,6 +392,75 @@ app.get<{ Params: { id: string } }>('/api/comprobantes/:id', async (req, reply) 
     .header('Content-Security-Policy', "default-src 'none'; sandbox")
     .header('Cache-Control', 'private, max-age=3600')
     .send(createReadStream(join(COMPROBANTES_DIR, fila.comprobante)));
+});
+
+/* ---------------------------- cobranza ---------------------------- */
+
+interface NuevoPago {
+  driver?: string;
+  carId?: string | null;
+  fecha?: string;
+  monto?: number;
+  tipo?: string;
+  medio?: string;
+  nota?: string;
+}
+
+/** Un pago se acepta solo para un chofer que la flota conoce, actual o pasado.
+ *  Sin esto un nombre mal tipeado crea un saldo a favor fantasma que nunca se
+ *  imputa a nada y desaparece de la vista del dueño. */
+const conoceChofer = db.prepare(`
+  SELECT 1 FROM cars WHERE owner_id = ? AND driver = ?
+  UNION ALL
+  SELECT 1 FROM movs WHERE owner_id = ? AND driver = ?
+  LIMIT 1
+`);
+
+app.post<{ Body: NuevoPago }>('/api/pagos', async (req, reply) => {
+  const u = quien(req);
+  const b = req.body ?? ({} as NuevoPago);
+
+  const driver = String(b.driver ?? '').trim();
+  if (!driver || driver === 'Sin chofer') return reply.code(400).send({ error: 'Indicá de qué chofer es el pago' });
+  if (!conoceChofer.get(u.id, driver, u.id, driver)) return reply.code(404).send({ error: 'Ese chofer no es de tu flota' });
+
+  const monto = Number(b.monto);
+  if (!Number.isInteger(monto) || monto <= 0 || monto > 1_000_000_000) return reply.code(400).send({ error: 'El monto tiene que ser un número mayor a cero' });
+
+  const hoy = hoyISO();
+  const fecha = String(b.fecha ?? hoy);
+  if (!FECHA.test(fecha)) return reply.code(400).send({ error: 'Fecha inválida' });
+  // Una fecha futura siempre es un error de tipeo, y adelanta caja que todavía
+  // no existe: el saldo a favor ya cubre el caso de pagar por adelantado.
+  if (fecha > hoy) return reply.code(400).send({ error: 'No se puede registrar un pago con fecha futura' });
+
+  const tipo = b.tipo === 'ajuste' ? 'ajuste' : 'pago';
+
+  // El auto es referencia, no destino: la imputación va por chofer. Si viene uno
+  // ajeno se rechaza igual, para no guardar punteros a flotas de otros.
+  let carId: string | null = null;
+  if (b.carId) {
+    if (!selCar.get(b.carId, u.id)) return reply.code(404).send({ error: 'Vehículo inexistente' });
+    carId = b.carId;
+  }
+
+  const info = db
+    .prepare('INSERT INTO pagos (owner_id, car_id, driver, fecha, monto, tipo, medio, nota) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(u.id, carId, driver, fecha, monto, tipo, String(b.medio ?? '').trim().slice(0, 40) || null, String(b.nota ?? '').trim().slice(0, 200) || null);
+
+  req.log.info({ driver, monto, tipo, fecha }, 'pago registrado');
+  return reply.code(201).send(pagoToJson(db.prepare('SELECT * FROM pagos WHERE id = ?').get(info.lastInsertRowid) as PagoRow));
+});
+
+/** Borrar es la única corrección posible: un pago no se edita, porque cambiarle
+ *  el monto reescribiría en silencio a qué cuotas quedó imputado. */
+app.delete<{ Params: { id: string } }>('/api/pagos/:id', async (req, reply) => {
+  const u = quien(req);
+  const fila = db.prepare('SELECT * FROM pagos WHERE id = ? AND owner_id = ?').get(Number(req.params.id), u.id) as PagoRow | undefined;
+  if (!fila) return reply.code(404).send({ error: 'Pago inexistente' });
+  db.prepare('DELETE FROM pagos WHERE id = ? AND owner_id = ?').run(fila.id, u.id);
+  req.log.info({ id: fila.id, driver: fila.driver, monto: fila.monto }, 'pago eliminado');
+  return { ok: true, monto: fila.monto, driver: fila.driver };
 });
 
 /* --------------------------- SPA estática --------------------------- */

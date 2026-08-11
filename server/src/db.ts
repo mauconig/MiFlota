@@ -32,10 +32,10 @@ export interface MovRow {
   id: number;
   car_id: string;
   type: string;
-  /** Lo facturado. En un ingreso es la cuota emitida, se haya cobrado o no. */
+  /** Lo facturado. En un ingreso es la cuota emitida, se haya cobrado o no.
+   *  Cuánto se cobró de ella no vive acá: sale de imputar los pagos (ver
+   *  `pagos` y la imputación FIFO del cliente). */
   amount: number;
-  /** Lo que efectivamente entró. Null en los egresos, que no se cobran. */
-  cobrado: number | null;
   date: string;
   descripcion: string;
   cat: string | null;
@@ -48,6 +48,28 @@ export interface MovRow {
   /** Nombre original, solo para mostrar y para la descarga. */
   comprobante_nombre: string | null;
   comprobante_tipo: string | null;
+}
+
+/**
+ * Un asiento a favor del chofer. No se ata a una cuota concreta: se imputa a lo
+ * que debe, de lo más viejo a lo más nuevo, en el momento de leer. Así un pago
+ * conserva su fecha real —que es la que manda para la caja— sin que eso mueva
+ * la fecha de la cuota que cancela.
+ */
+export interface PagoRow {
+  id: number;
+  owner_id: number;
+  /** Auto en el que andaba el chofer al pagar. Solo referencia: la imputación
+   *  es por chofer, porque la deuda lo sigue a él aunque cambie de vehículo. */
+  car_id: string | null;
+  driver: string;
+  fecha: string;
+  monto: number;
+  /** `pago` entró plata de verdad; `ajuste` cancela deuda sin caja (una
+   *  condonación). Mezclarlos infla los ingresos, por eso van separados. */
+  tipo: string;
+  medio: string | null;
+  nota: string | null;
 }
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`: ordenan lexicográficamente en SQL y
@@ -87,7 +109,6 @@ export function openDb() {
       car_id      TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
       type        TEXT NOT NULL CHECK (type IN ('ingreso','egreso')),
       amount      INTEGER NOT NULL,
-      cobrado     INTEGER,
       date        TEXT NOT NULL,
       descripcion TEXT NOT NULL,
       cat         TEXT,
@@ -98,8 +119,22 @@ export function openDb() {
       comprobante_tipo   TEXT
     );
 
-    CREATE INDEX IF NOT EXISTS idx_movs_car   ON movs(car_id);
-    CREATE INDEX IF NOT EXISTS idx_movs_date  ON movs(date);
+    CREATE TABLE IF NOT EXISTS pagos (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner_id INTEGER NOT NULL DEFAULT 0,
+      car_id   TEXT REFERENCES cars(id) ON DELETE SET NULL,
+      driver   TEXT NOT NULL,
+      fecha    TEXT NOT NULL,
+      monto    INTEGER NOT NULL CHECK (monto > 0),
+      tipo     TEXT NOT NULL DEFAULT 'pago' CHECK (tipo IN ('pago','ajuste')),
+      medio    TEXT,
+      nota     TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_movs_car    ON movs(car_id);
+    CREATE INDEX IF NOT EXISTS idx_movs_date   ON movs(date);
+    CREATE INDEX IF NOT EXISTS idx_pagos_owner ON pagos(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_pagos_drv   ON pagos(driver);
   `);
 
   // Los índices sobre owner_id se crean dentro de la migración, no acá: en una
@@ -182,6 +217,29 @@ function migrarOwner(db: Database.Database) {
   // chofer actual del auto sigue siendo el valor por defecto para esas, así
   // que la migración no necesita rellenarlas.
   if (!cols('movs').includes('driver')) db.exec('ALTER TABLE movs ADD COLUMN driver TEXT');
+  // `cobrado` guardaba en el cargo cuánta plata había entrado, pero no cuándo:
+  // mientras el pago caía el mismo día que la cuota daba igual, y en cuanto el
+  // chofer paga una deuda vieja la caja se imputa al mes equivocado. Pasa a ser
+  // un libro de pagos con fecha propia, y cuánto se cobró de cada cuota se
+  // deriva imputando esos pagos de lo más viejo a lo más nuevo.
+  if (cols('movs').includes('cobrado')) {
+    // `immediate` toma el lock de escritura antes de leer, y la condición se
+    // vuelve a evaluar adentro: si dos procesos arrancan a la vez —pasa con un
+    // reinicio que se solapa— el segundo espera, ve la columna ya borrada y no
+    // duplica los pagos.
+    db.transaction(() => {
+      if (!cols('movs').includes('cobrado')) return;
+      db.exec(`
+        INSERT INTO pagos (owner_id, car_id, driver, fecha, monto, tipo, nota)
+        SELECT m.owner_id, m.car_id, COALESCE(m.driver, c.driver, 'Sin chofer'),
+               m.date, m.cobrado, 'pago', 'Migrado del registro anterior'
+          FROM movs m
+          LEFT JOIN cars c ON c.id = m.car_id
+         WHERE m.type = 'ingreso' AND COALESCE(m.cobrado, 0) > 0
+      `);
+      db.exec('ALTER TABLE movs DROP COLUMN cobrado');
+    }).immediate();
+  }
 }
 
 /** Reasigna toda la flota huérfana (owner_id = 0) a un usuario. */
@@ -206,8 +264,14 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
     VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @gps_tag, @service_cada, @service_unidad, @last_service_date, @seguro_date, @seguro_costo, @seguro_periodo, @seguro_cada)
   `);
   const insMov = db.prepare(`
-    INSERT INTO movs (owner_id, car_id, type, amount, cobrado, date, descripcion, cat, estado, driver)
-    VALUES (@owner_id, @car_id, @type, @amount, @cobrado, @date, @descripcion, @cat, @estado, @driver)
+    INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, driver)
+    VALUES (@owner_id, @car_id, @type, @amount, @date, @descripcion, @cat, @estado, @driver)
+  `);
+  // Lo que el generador marca como cobrado entra como pago con la fecha de la
+  // cuota: es la flota de demostración, donde cada cuota se pagó en el día.
+  const insPago = db.prepare(`
+    INSERT INTO pagos (owner_id, car_id, driver, fecha, monto, tipo)
+    VALUES (@owner_id, @car_id, @driver, @fecha, @monto, 'pago')
   `);
 
   db.transaction(() => {
@@ -237,13 +301,21 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
         car_id: idDe(m.carId),
         type: m.type,
         amount: m.amount,
-        cobrado: m.cobrado ?? null,
         date: iso(m.date),
         descripcion: m.desc,
         cat: m.cat ?? null,
         estado: m.estado ?? null,
         driver: m.driver ?? null,
       });
+      if (m.cobrado) {
+        insPago.run({
+          owner_id: ownerId,
+          car_id: idDe(m.carId),
+          driver: m.driver ?? 'Sin chofer',
+          fecha: iso(m.date),
+          monto: m.cobrado,
+        });
+      }
     }
   })();
 
@@ -279,13 +351,23 @@ export function movToJson(r: MovRow) {
     amount: r.amount,
     date: r.date,
     desc: r.descripcion,
-    // `amount` es lo facturado y `cobrado` lo que entró; la resta es la deuda.
-    // Solo va en los ingresos: un egreso no se "cobra".
-    ...(r.cobrado === null ? {} : { cobrado: r.cobrado }),
     ...(r.cat ? { cat: r.cat } : {}),
     ...(r.estado ? { estado: r.estado } : {}),
     ...(r.driver ? { driver: r.driver } : {}),
     // El cliente nunca ve la ruta del archivo, solo si hay uno y cómo se llama.
     ...(r.comprobante ? { comprobante: { id: r.comprobante, nombre: r.comprobante_nombre ?? 'comprobante', tipo: r.comprobante_tipo ?? '' } } : {}),
+  };
+}
+
+export function pagoToJson(r: PagoRow) {
+  return {
+    id: r.id,
+    carId: r.car_id,
+    driver: r.driver,
+    fecha: r.fecha,
+    monto: r.monto,
+    tipo: r.tipo,
+    ...(r.medio ? { medio: r.medio } : {}),
+    ...(r.nota ? { nota: r.nota } : {}),
   };
 }

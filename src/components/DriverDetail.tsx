@@ -50,10 +50,19 @@ export function DriverDetail({ v }: { v: View }) {
             <div style={kpiLabel}>Cobrado</div>
             <div style={{ fontSize: 16, fontWeight: 700, marginTop: 5, color: '#2e7d5b' }}>{d.cobrado}</div>
           </div>
-          <div style={{ ...cardTight, padding: '13px 14px', minWidth: 0 }}>
-            <div style={kpiLabel}>Pendiente</div>
-            <div style={{ fontSize: 16, fontWeight: 700, marginTop: 5, color: d.pendienteFg }}>{d.pendiente}</div>
-          </div>
+          {/* Con saldo a favor la casilla cambia de sentido: no debe nada y
+              además hay plata suya sin imputar, que se va a comer la próxima cuota. */}
+          {d.aFavor ? (
+            <div style={{ ...cardTight, padding: '13px 14px', minWidth: 0 }}>
+              <div style={kpiLabel}>A favor</div>
+              <div style={{ fontSize: 16, fontWeight: 700, marginTop: 5, color: '#2e7d5b' }}>{d.aFavor}</div>
+            </div>
+          ) : (
+            <div style={{ ...cardTight, padding: '13px 14px', minWidth: 0 }}>
+              <div style={kpiLabel}>Pendiente</div>
+              <div style={{ fontSize: 16, fontWeight: 700, marginTop: 5, color: d.pendienteFg }}>{d.pendiente}</div>
+            </div>
+          )}
           <div style={{ ...cardTight, padding: '13px 14px', minWidth: 0 }}>
             <div style={kpiLabel}>Cuota diaria</div>
             <div style={{ fontSize: 16, fontWeight: 700, marginTop: 5 }}>{d.cuota}</div>

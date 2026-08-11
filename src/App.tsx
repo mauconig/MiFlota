@@ -18,6 +18,7 @@ import { Confirm } from './components/Confirm';
 import { TallerModal } from './components/TallerModal';
 import { CarModal } from './components/CarModal';
 import { DriverModal } from './components/DriverModal';
+import { PagoModal } from './components/PagoModal';
 import { Toast } from './components/Toast';
 
 const initialState: UIState = {
@@ -45,6 +46,8 @@ const initialState: UIState = {
   detailId: null,
   svcEdit: null,
   taller: null,
+  cobrosTab: 'cuotas',
+  npago: null,
   driverId: null,
   confirm: null,
 };
@@ -75,7 +78,7 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
   }, []);
 
   const store = useFleetStore(avisar, onSalir);
-  const v = useFleetView(store.cars, store.movs, state, update, store);
+  const v = useFleetView(store.cars, store.movs, store.pagos, state, update, store);
 
   if (store.cargando || store.error) return <Arranque error={store.error} />;
 
@@ -112,6 +115,7 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
       <TallerModal v={v} />
       <CarModal v={v} />
       <DriverModal v={v} />
+      <PagoModal v={v} />
       <Toast v={v} />
     </div>
   );
