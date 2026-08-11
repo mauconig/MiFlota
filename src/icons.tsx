@@ -23,11 +23,17 @@ export function brandOf(model: string): string[] {
 }
 
 export function BrandIcon({ model, size = 21 }: { model: string; size?: number }) {
+  const key = String(model).split(' ')[0];
+  // El emblema de Toyota va girado 180° sobre su propio centro; el de
+  // respaldo para marcas sin ícono usa el mismo dibujo, así que gira igual.
+  const isToyota = !(key in BRANDS) || key === 'Toyota';
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round">
-      {brandOf(model).map((d, i) => (
-        <path key={i} d={d} />
-      ))}
+      <g transform={isToyota ? 'rotate(180 12 12)' : undefined}>
+        {brandOf(model).map((d, i) => (
+          <path key={i} d={d} />
+        ))}
+      </g>
     </svg>
   );
 }
