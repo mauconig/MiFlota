@@ -86,6 +86,11 @@ export interface UIState {
   movCat: string;
   alertKind: string;
   pendKind: string;
+  carQ: string;
+  chQ: string;
+  alertQ: string;
+  pendQ: string;
+  movQ: string;
   modal: ModalKind;
   ncar: NewCarForm;
   ndrv: NewDriverForm;

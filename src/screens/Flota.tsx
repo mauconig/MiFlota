@@ -1,6 +1,7 @@
 import type { View } from '../useFleetView';
 import { Btn } from '../components/Btn';
 import { ChipRow } from '../components/ChipRow';
+import { SearchBar } from '../components/SearchBar';
 import { VehicleTable } from '../components/VehicleTable';
 import { Screen } from '../components/Screen';
 import { PlusIcon } from '../icons';
@@ -41,6 +42,7 @@ export function Flota({ v }: { v: View }) {
         </div>
       </div>
       <div style={{ padding: '12px 20px', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 7, flexWrap: 'wrap', borderBottom: '1px solid #f0ebe0', flex: 'none' }}>
+        <SearchBar value={v.carQ} onChange={v.setCarQ} placeholder="Buscar vehículo…" />
         <ChipRow chips={v.brandFilters} wrap size="sm" />
       </div>
       <VehicleTable cols={v.colsF} rows={v.flotaRows} variant="flota" />

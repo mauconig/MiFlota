@@ -1,5 +1,6 @@
 import type { View } from '../useFleetView';
 import { Btn } from '../components/Btn';
+import { SearchBar } from '../components/SearchBar';
 import { Screen, ScrollArea, Vacio } from '../components/Screen';
 import { PlusIcon } from '../icons';
 import { card } from '../styles';
@@ -9,6 +10,7 @@ export function Choferes({ v }: { v: View }) {
     <Screen label="Choferes" style={{ gap: 12 }}>
       <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14, flex: 'none' }}>
         <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: '#6b665c' }}>{v.choferesSub}</span>
+        <SearchBar value={v.chQ} onChange={v.setChQ} placeholder="Buscar chofer…" />
         <Btn
           onClick={v.openDrvModal}
           style={{
@@ -33,7 +35,12 @@ export function Choferes({ v }: { v: View }) {
           Agregar chofer
         </Btn>
       </div>
-      {!v.choferes.length && <Vacio titulo="Todavía no hay choferes" detalle="Se crean asignando un chofer a un vehículo, con el botón de arriba o desde la ficha del vehículo." />}
+      {!v.choferes.length &&
+        (v.chQ ? (
+          <Vacio titulo="Ningún chofer coincide" detalle="Probá con otro nombre o chapa." />
+        ) : (
+          <Vacio titulo="Todavía no hay choferes" detalle="Se crean asignando un chofer a un vehículo, con el botón de arriba o desde la ficha del vehículo." />
+        ))}
       <ScrollArea style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, alignContent: 'start' }}>
         {v.choferes.map((d, i) => (
           <Btn

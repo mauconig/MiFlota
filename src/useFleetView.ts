@@ -293,6 +293,8 @@ export interface View {
   rows: VehicleRow[];
   flotaRows: VehicleRow[];
   openCarModal: () => void;
+  carQ: string;
+  setCarQ: (e: React.ChangeEvent<HTMLInputElement>) => void;
 
   periodShort: string;
   egrTotal: string;
@@ -304,22 +306,30 @@ export interface View {
   alertsSummary: string;
   alertsFull: AlertFull[];
   alertKindChips: Chip[];
+  alertQ: string;
+  setAlertQ: (e: React.ChangeEvent<HTMLInputElement>) => void;
 
   pendCount: number;
   pendSummary: string;
   pendFull: PendFull[];
   pendKindChips: Chip[];
+  pendQ: string;
+  setPendQ: (e: React.ChangeEvent<HTMLInputElement>) => void;
 
   topCars: TopCarItem[];
 
   choferes: ChoferItem[];
   choferesSub: string;
   openDrvModal: () => void;
+  chQ: string;
+  setChQ: (e: React.ChangeEvent<HTMLInputElement>) => void;
 
   movsSub: string;
   movTypeChips: Chip[];
   movCatChips: Chip[];
   movRows: MovRow[];
+  movQ: string;
+  setMovQ: (e: React.ChangeEvent<HTMLInputElement>) => void;
   exportar: () => void;
 
   hasDetail: boolean;
@@ -381,6 +391,13 @@ export interface View {
 
 function CH(on: boolean) {
   return { on, bg: on ? COLORS.ink : COLORS.paper, fg: on ? COLORS.paper : '#3d3a34', bd: on ? COLORS.ink : '#e0d6c4' };
+}
+
+/** Búsqueda de texto libre: sin distinguir mayúsculas, contra cualquiera de los campos. */
+function matches(q: string, ...fields: (string | undefined)[]): boolean {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return true;
+  return fields.some((f) => f?.toLowerCase().includes(needle));
 }
 
 function blankCar(): NewCarForm {
@@ -630,7 +647,12 @@ export function useFleetView(
   const brandOfCar = (c: Car) => String(c.model).split(' ')[0];
   const brands = [...new Set(cars.map(brandOfCar))].sort();
   const brandSel = st.brand || 'todas';
-  const filtered = perCar.filter((x) => (st.filter === 'todos' ? true : x.c.estado === st.filter) && (brandSel === 'todas' || brandOfCar(x.c) === brandSel));
+  const filtered = perCar.filter(
+    (x) =>
+      (st.filter === 'todos' ? true : x.c.estado === st.filter) &&
+      (brandSel === 'todas' || brandOfCar(x.c) === brandSel) &&
+      matches(st.carQ, x.c.plate, x.c.model, x.c.driver),
+  );
   const keyF: (x: (typeof perCar)[number]) => string | number =
     ({
       plate: (x: any) => x.c.plate,
@@ -694,7 +716,9 @@ export function useFleetView(
   };
 
   const movsSorted = movs.filter(inR).sort((a, b) => +b.date - +a.date);
-  const movsFiltered = movsSorted.filter((m) => (st.movType === 'todos' || m.type === st.movType) && (st.movCat === 'todas' || (m.type === 'egreso' && m.cat === st.movCat)));
+  const movsFiltered = movsSorted.filter(
+    (m) => (st.movType === 'todos' || m.type === st.movType) && (st.movCat === 'todas' || (m.type === 'egreso' && m.cat === st.movCat)) && matches(st.movQ, m.desc, m.cat),
+  );
 
   const nav = st.nav;
   const TITLES: Record<string, [string, string]> = {
@@ -1084,6 +1108,8 @@ export function useFleetView(
     ]),
     rows: sorted.map(mkRow),
     flotaRows: sorted.map(mkRow),
+    carQ: st.carQ,
+    setCarQ: (e) => update({ carQ: e.target.value }),
     hoyISO: isoLocal(TODAY),
     openCarModal: () => update({ modal: 'car', ncar: blankCar() }),
     ncarUnidadOpts: (['dias', 'meses'] as const).map((u) => ({
@@ -1117,27 +1143,33 @@ export function useFleetView(
       const avisos = alertList.length + (alertList.length === 1 ? ' aviso' : ' avisos');
       return vencidos ? avisos + ' · ' + vencidos + (vencidos === 1 ? ' vencido' : ' vencidos') : avisos;
     })(),
-    alertsFull: (st.alertKind === 'todas' ? alertList : alertList.filter((a) => a.kind === st.alertKind)).slice(0, 15).map((a) => ({
-      plate: a.car.plate,
-      model: a.car.model + ' · ' + a.car.year,
-      text: a.text,
-      kind: a.kind,
-      dot: a.sev === 2 ? COLORS.neg : COLORS.warn,
-      tagBg: KTAG[a.kind][0],
-      tagFg: KTAG[a.kind][1],
-    })),
+    alertsFull: (st.alertKind === 'todas' ? alertList : alertList.filter((a) => a.kind === st.alertKind))
+      .filter((a) => matches(st.alertQ, a.car.plate, a.car.model, a.car.driver, a.text))
+      .slice(0, 15)
+      .map((a) => ({
+        plate: a.car.plate,
+        model: a.car.model + ' · ' + a.car.year,
+        text: a.text,
+        kind: a.kind,
+        dot: a.sev === 2 ? COLORS.neg : COLORS.warn,
+        tagBg: KTAG[a.kind][0],
+        tagFg: KTAG[a.kind][1],
+      })),
     alertKindChips: (['todas', ...Object.keys(KTAG)] as string[]).map((k) => ({
       label: k === 'todas' ? 'Todas' : k,
       ...CH(st.alertKind === k),
       pick: () => update({ alertKind: k }),
     })),
+    alertQ: st.alertQ,
+    setAlertQ: (e) => update({ alertQ: e.target.value }),
 
     pendCount: pendMovs.length,
     pendSummary: !pendMovs.length ? 'Todo cobrado' : pendMovs.length + (pendMovs.length === 1 ? ' cuota sin cobrar' : ' cuotas sin cobrar'),
     pendFull: (st.pendKind === 'todas' ? pendMovs : pendMovs.filter((m) => (m.estado === 'parcial' ? 'Parcial' : 'Pendiente') === st.pendKind))
+      .map((m) => ({ m, c: cars.find((c2) => c2.id === m.carId)! }))
+      .filter(({ c }) => matches(st.pendQ, c.driver, c.plate))
       .slice(0, 15)
-      .map((m) => {
-        const c = cars.find((c2) => c2.id === m.carId)!;
+      .map(({ m, c }) => {
         const tag = m.estado === 'parcial' ? 'Parcial' : 'Pendiente';
         return {
           initials: initials(c.driver),
@@ -1156,6 +1188,8 @@ export function useFleetView(
       ...CH(st.pendKind === k),
       pick: () => update({ pendKind: k }),
     })),
+    pendQ: st.pendQ,
+    setPendQ: (e) => update({ pendQ: e.target.value }),
 
     topCars: [...perCar]
       .filter((x) => x.c.estado !== 'baja')
@@ -1164,7 +1198,7 @@ export function useFleetView(
       .map((x, i) => ({ pos: String(i + 1), plate: x.c.plate, driver: x.c.driver, net: fmtShort(x.net, st.hide) })),
 
     choferes: perCar
-      .filter((x) => x.c.driver !== 'Sin chofer')
+      .filter((x) => x.c.driver !== 'Sin chofer' && matches(st.chQ, x.c.driver, x.c.plate, x.c.model))
       .map((x) => {
         const pend = pendMovs.filter((m) => m.carId === x.c.id).reduce((a, m) => a + m.amount, 0);
         const ok = pend === 0;
@@ -1189,6 +1223,8 @@ export function useFleetView(
       if (!deben) return asignados.length + ' choferes · todos al día';
       return deben + ' con saldo pendiente · ' + (asignados.length - deben) + ' al día';
     })(),
+    chQ: st.chQ,
+    setChQ: (e) => update({ chQ: e.target.value }),
     openDrvModal: () => update({ modal: 'drv', ndrv: blankDrv() }),
 
     movsSub: movsFiltered.length + ' movimientos en ' + r.short + (st.movType !== 'todos' || st.movCat !== 'todas' ? ' con los filtros aplicados' : ''),
@@ -1218,6 +1254,8 @@ export function useFleetView(
         amtFg: inc ? '#2e7d5b' : '#c0553f',
       };
     }),
+    movQ: st.movQ,
+    setMovQ: (e) => update({ movQ: e.target.value }),
     exportar: () => toast('Exportación CSV — disponible en la versión final'),
 
     hasDetail: !!st.detailId,

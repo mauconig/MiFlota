@@ -1,5 +1,6 @@
 import type { View } from '../useFleetView';
 import { ChipRow } from '../components/ChipRow';
+import { SearchBar } from '../components/SearchBar';
 import { Screen, ScrollArea, Vacio } from '../components/Screen';
 import { card } from '../styles';
 
@@ -14,6 +15,7 @@ export function Alertas({ v }: { v: View }) {
   return (
     <Screen label="Alertas" style={{ ...card, overflow: 'hidden' }}>
       <div style={{ padding: '12px 20px', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 7, flexWrap: 'wrap', borderBottom: '1px solid #f0ebe0', flex: 'none' }}>
+        <SearchBar value={v.alertQ} onChange={v.setAlertQ} placeholder="Buscar alerta…" />
         <ChipRow chips={v.alertKindChips} />
       </div>
       {!v.alertsFull.length && <div style={{ padding: '30px 0', fontSize: 13, color: '#6b665c', textAlign: 'center' }}>Sin alertas de este tipo</div>}

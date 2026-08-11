@@ -1,6 +1,7 @@
 import type { View } from '../useFleetView';
 import { Btn } from '../components/Btn';
 import { ChipRow } from '../components/ChipRow';
+import { SearchBar } from '../components/SearchBar';
 import { Screen, ScrollArea } from '../components/Screen';
 import { card, sectionTitle } from '../styles';
 
@@ -22,6 +23,7 @@ export function Reportes({ v }: { v: View }) {
           </Btn>
         </div>
         <div style={{ padding: '12px 20px', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 7, borderBottom: '1px solid #f0ebe0', flexWrap: 'wrap', flex: 'none' }}>
+          <SearchBar value={v.movQ} onChange={v.setMovQ} placeholder="Buscar movimiento…" />
           <ChipRow chips={v.movTypeChips} />
           <span style={{ width: 1, height: 20, background: '#ece4d6', margin: '0 4px' }} />
           <ChipRow chips={v.movCatChips} wrap />

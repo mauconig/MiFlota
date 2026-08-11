@@ -1,6 +1,7 @@
 import type { View } from '../useFleetView';
 import { Btn } from '../components/Btn';
 import { ChipRow } from '../components/ChipRow';
+import { SearchBar } from '../components/SearchBar';
 import { VehicleTable } from '../components/VehicleTable';
 import { GastosChart } from '../components/GastosChart';
 import { AlertBanner } from '../components/AlertBanner';
@@ -30,6 +31,7 @@ export function Resumen({ v }: { v: View }) {
                 <div style={{ fontSize: 12, color: '#6b665c', marginTop: 2 }}>{v.tableSub}</div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'row', gap: 7, flex: 'none', alignItems: 'center' }}>
+                <SearchBar value={v.carQ} onChange={v.setCarQ} placeholder="Buscar vehículo…" />
                 <ChipRow chips={v.fleetFilters} />
                 <Btn onClick={v.goFlota} style={{ ...linkBtn, minHeight: 34, padding: '0 6px' }} hoverStyle={linkBtnHover}>
                   Ver todo →
