@@ -1,4 +1,5 @@
 import type { View } from '../useFleetView';
+import { Btn } from '../components/Btn';
 import { ChipRow } from '../components/ChipRow';
 import { SearchBar } from '../components/SearchBar';
 import { Screen, ScrollArea, Vacio } from '../components/Screen';
@@ -21,7 +22,12 @@ export function Alertas({ v }: { v: View }) {
       {!v.alertsFull.length && <div style={{ padding: '30px 0', fontSize: 13, color: '#6b665c', textAlign: 'center' }}>Sin alertas de este tipo</div>}
       <ScrollArea style={{ padding: '8px 20px' }}>
         {v.alertsFull.map((a, i) => (
-          <div key={i} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #f4efe4' }}>
+          <Btn
+            key={i}
+            onClick={a.open}
+            style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14, width: '100%', padding: '14px 0', border: 'none', background: 'none', borderBottom: '1px solid #f4efe4', textAlign: 'left', color: 'inherit', cursor: 'pointer', font: 'inherit' }}
+            hoverStyle={{ background: '#fbf7ee' }}
+          >
             <span style={{ width: 9, height: 9, borderRadius: 5, background: a.dot, flex: 'none' }} />
             <span style={{ width: 185, flex: 'none' }}>
               <span style={{ display: 'block', fontSize: 14, fontWeight: 700, whiteSpace: 'nowrap' }}>{a.plate}</span>
@@ -31,7 +37,7 @@ export function Alertas({ v }: { v: View }) {
             </span>
             <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: '#3d3a34' }}>{a.text}</span>
             <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', padding: '5px 10px', borderRadius: 11, background: a.tagBg, color: a.tagFg, flex: 'none' }}>{a.kind}</span>
-          </div>
+          </Btn>
         ))}
       </ScrollArea>
     </Screen>

@@ -129,7 +129,12 @@ export function Cobros({ v }: { v: View }) {
             ))}
           <ScrollArea style={{ padding: '4px 20px' }}>
             {v.cobrosFull.map((p, i) => (
-              <div key={i} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 13, padding: '11px 0', borderBottom: '1px solid #f4efe4' }}>
+              <Btn
+                key={i}
+                onClick={p.open}
+                style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 13, width: '100%', padding: '11px 0', border: 'none', background: 'none', borderBottom: '1px solid #f4efe4', textAlign: 'left', color: 'inherit', cursor: 'pointer', font: 'inherit' }}
+                hoverStyle={{ background: '#fbf7ee' }}
+              >
                 <span style={avatar}>{p.initials}</span>
                 <span style={{ width: 190, flex: 'none' }}>
                   <span style={{ display: 'block', fontSize: 14, fontWeight: 700 }}>{p.driver}</span>
@@ -142,7 +147,7 @@ export function Cobros({ v }: { v: View }) {
                 </span>
                 <span style={{ width: 122, flex: 'none', textAlign: 'right', fontSize: 13, fontWeight: 700, color: p.amt === '—' ? '#6b665c' : '#2e7d5b' }}>{p.amt}</span>
                 <span style={{ width: 84, flex: 'none', textAlign: 'right', fontSize: 14, fontWeight: 700, color: p.debeFg }}>{p.debe || '—'}</span>
-              </div>
+              </Btn>
             ))}
           </ScrollArea>
         </>

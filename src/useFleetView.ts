@@ -111,6 +111,7 @@ export interface AlertFull {
   dot: string;
   tagBg: string;
   tagFg: string;
+  open: () => void;
 }
 
 export interface PendFull {
@@ -127,6 +128,7 @@ export interface PendFull {
   /** Lo que falta cobrar. Vacío si no debe nada. */
   debe: string;
   debeFg: string;
+  open: () => void;
 }
 
 /** Una fila del libro de pagos. */
@@ -1379,6 +1381,7 @@ export function useFleetView(
         dot: a.sev === 2 ? COLORS.neg : COLORS.warn,
         tagBg: KTAG[a.kind][0],
         tagFg: KTAG[a.kind][1],
+        open: () => update({ detailId: a.car.id }),
       })),
     alertKindChips: (['todas', ...Object.keys(KTAG)] as string[]).map((k) => ({
       label: k === 'todas' ? 'Todas' : k,
@@ -1418,6 +1421,10 @@ export function useFleetView(
           amt: tag === 'Cobrado' ? fmtShort(m.amount, st.hide) : tag === 'Parcial' ? fmtShort(cob, st.hide) + ' de ' + fmtShort(m.amount, st.hide) : '—',
           debe: debe ? fmtShort(debe, st.hide) : '',
           debeFg: debe ? COLORS.neg : '#6b665c',
+          // La ficha es del chofer actual del auto: si el auto cambió de manos
+          // y esta fila es de un cobro viejo, abre la ficha de quien lo maneja
+          // hoy, no la de `drv`, porque no existe una ficha por ex-chofer.
+          open: () => update({ driverId: c.id }),
         };
       }),
     pendKindChips: (['todas', ...Object.keys(PTAG)] as string[]).map((k) => ({
