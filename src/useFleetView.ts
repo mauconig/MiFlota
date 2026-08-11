@@ -285,11 +285,9 @@ export interface View {
   goReportes: () => void;
   goCobros: () => void;
 
-  tableSub: string;
   fleetFilters: Chip[];
   cols: ColItem[];
   colsF: ColItem[];
-  brandFilters: Chip[];
   rows: VehicleRow[];
   flotaRows: VehicleRow[];
   openCarModal: () => void;
@@ -644,15 +642,7 @@ export function useFleetView(
 
   const perCar = cars.map((c) => ({ c, ...stats(movs, (m) => m.carId === c.id && inR(m)) }));
   const maxNet = Math.max(...perCar.map((x) => Math.abs(x.net)), 1);
-  const brandOfCar = (c: Car) => String(c.model).split(' ')[0];
-  const brands = [...new Set(cars.map(brandOfCar))].sort();
-  const brandSel = st.brand || 'todas';
-  const filtered = perCar.filter(
-    (x) =>
-      (st.filter === 'todos' ? true : x.c.estado === st.filter) &&
-      (brandSel === 'todas' || brandOfCar(x.c) === brandSel) &&
-      matches(st.carQ, x.c.plate, x.c.model, x.c.driver),
-  );
+  const filtered = perCar.filter((x) => (st.filter === 'todos' ? true : x.c.estado === st.filter) && matches(st.carQ, x.c.plate, x.c.model, x.c.driver));
   const keyF: (x: (typeof perCar)[number]) => string | number =
     ({
       plate: (x: any) => x.c.plate,
@@ -716,9 +706,14 @@ export function useFleetView(
   };
 
   const movsSorted = movs.filter(inR).sort((a, b) => +b.date - +a.date);
-  const movsFiltered = movsSorted.filter(
-    (m) => (st.movType === 'todos' || m.type === st.movType) && (st.movCat === 'todas' || (m.type === 'egreso' && m.cat === st.movCat)) && matches(st.movQ, m.desc, m.cat),
-  );
+  const movsFiltered = movsSorted.filter((m) => {
+    const c = cars.find((c2) => c2.id === m.carId);
+    return (
+      (st.movType === 'todos' || m.type === st.movType) &&
+      (st.movCat === 'todas' || (m.type === 'egreso' && m.cat === st.movCat)) &&
+      matches(st.movQ, m.desc, m.cat, c?.driver, c?.model, c?.plate)
+    );
+  });
 
   const nav = st.nav;
   const TITLES: Record<string, [string, string]> = {
@@ -1068,12 +1063,6 @@ export function useFleetView(
     goReportes: () => go('reportes'),
     goCobros: () => go('cobros'),
 
-    tableSub:
-      sorted.length +
-      ' de ' +
-      cars.length +
-      ' vehículos · ordenado por ' +
-      (({ plate: 'chapa', model: 'modelo', driver: 'chofer', cuota: 'cuota', svc: 'service', ing: 'ingresos', egr: 'egresos', net: 'neto', estado: 'estado' } as Record<string, string>)[st.sortK] || 'neto'),
     fleetFilters: (
       [
         ['todos', 'Todos'],
@@ -1091,11 +1080,6 @@ export function useFleetView(
       ['net', 'Neto', 'right'],
       ['estado', 'Estado', 'right'],
     ]),
-    brandFilters: [['todas', 'Todas las marcas'], ...brands.map((b) => [b, b] as [string, string])].map(([k, label]) => ({
-      label,
-      ...CH(brandSel === k),
-      pick: () => update({ brand: k }),
-    })),
     colsF: mkCols([
       ['model', 'Vehículo', 'left'],
       ['driver', 'Chofer', 'left'],
@@ -1167,7 +1151,7 @@ export function useFleetView(
     pendSummary: !pendMovs.length ? 'Todo cobrado' : pendMovs.length + (pendMovs.length === 1 ? ' cuota sin cobrar' : ' cuotas sin cobrar'),
     pendFull: (st.pendKind === 'todas' ? pendMovs : pendMovs.filter((m) => (m.estado === 'parcial' ? 'Parcial' : 'Pendiente') === st.pendKind))
       .map((m) => ({ m, c: cars.find((c2) => c2.id === m.carId)! }))
-      .filter(({ c }) => matches(st.pendQ, c.driver, c.plate))
+      .filter(({ c }) => matches(st.pendQ, c.driver, c.plate, c.model))
       .slice(0, 15)
       .map(({ m, c }) => {
         const tag = m.estado === 'parcial' ? 'Parcial' : 'Pendiente';

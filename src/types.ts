@@ -74,7 +74,6 @@ export interface NewDriverForm {
 export interface UIState {
   period: Period;
   filter: FleetFilter;
-  brand: string;
   sortK: string;
   sortDir: 1 | -1;
   hide: boolean;

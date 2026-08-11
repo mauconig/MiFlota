@@ -23,7 +23,6 @@ import { Toast } from './components/Toast';
 const initialState: UIState = {
   period: 'mes',
   filter: 'todos',
-  brand: 'todas',
   sortK: 'net',
   sortDir: -1,
   hide: false,

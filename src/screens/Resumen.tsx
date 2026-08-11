@@ -25,18 +25,12 @@ export function Resumen({ v }: { v: View }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 9, minHeight: 0, flex: 1 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9, minWidth: 0, minHeight: 0 }}>
           <div style={{ ...card, overflow: 'hidden', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-            <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14, borderBottom: '1px solid #f0ebe0', flex: 'none' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={sectionTitle}>Rendimiento por vehículo</div>
-                <div style={{ fontSize: 12, color: '#6b665c', marginTop: 2 }}>{v.tableSub}</div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'row', gap: 7, flex: 'none', alignItems: 'center' }}>
-                <SearchBar value={v.carQ} onChange={v.setCarQ} placeholder="Buscar vehículo…" />
-                <ChipRow chips={v.fleetFilters} />
-                <Btn onClick={v.goFlota} style={{ ...linkBtn, minHeight: 34, padding: '0 6px' }} hoverStyle={linkBtnHover}>
-                  Ver todo →
-                </Btn>
-              </div>
+            <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 7, borderBottom: '1px solid #f0ebe0', flex: 'none' }}>
+              <SearchBar value={v.carQ} onChange={v.setCarQ} placeholder="Buscar vehículo…" />
+              <ChipRow chips={v.fleetFilters} />
+              <Btn onClick={v.goFlota} style={{ ...linkBtn, minHeight: 34, padding: '0 6px', marginLeft: 'auto' }} hoverStyle={linkBtnHover}>
+                Ver todo →
+              </Btn>
             </div>
             <VehicleTable cols={v.cols} rows={v.rows} variant="resumen" />
           </div>
