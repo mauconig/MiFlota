@@ -131,6 +131,15 @@ export function openDb() {
       nota     TEXT
     );
 
+    -- Banderas de migraciones que corren una sola vez en la vida de la base.
+    -- No usar la ausencia/presencia de una columna como guard cuando la propia
+    -- migración la borra: en el siguiente arranque la columna vuelve a estar
+    -- ausente y el bloque entero se repite (pasó con 'cobrado', ver abajo).
+    CREATE TABLE IF NOT EXISTS meta (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_movs_car    ON movs(car_id);
     CREATE INDEX IF NOT EXISTS idx_movs_date   ON movs(date);
     CREATE INDEX IF NOT EXISTS idx_pagos_owner ON pagos(owner_id);
@@ -198,46 +207,55 @@ function migrarOwner(db: Database.Database) {
          AND (id GLOB 'u*c*' OR id GLOB 'c[0-9]' OR id GLOB 'c[0-9][0-9]')
     `);
   }
-  // Antes `amount` significaba dos cosas distintas según el estado: en un cobro
-  // pagado era la plata que entró, en uno pendiente la que se esperaba, y en uno
-  // parcial la mitad que se pagó. Así no se podía decir cuánto debía un chofer.
-  // Ahora `amount` es siempre lo facturado y `cobrado` lo que efectivamente
-  // entró, que es la resta que da la deuda.
-  if (!cols('movs').includes('cobrado')) {
-    db.exec('ALTER TABLE movs ADD COLUMN cobrado INTEGER');
-    db.exec("UPDATE movs SET cobrado = amount WHERE type = 'ingreso' AND estado = 'pagado'");
-    db.exec("UPDATE movs SET cobrado = 0      WHERE type = 'ingreso' AND estado = 'pendiente'");
-    // El parcial guardaba solo lo pagado. Todos salieron del generador, que los
-    // arma como la mitad de la cuota (`cuota * 3 * 0.5`), así que el doble
-    // reconstruye exacto lo facturado. Se usa eso y no la cuota actual del
-    // vehículo, que pudo haberse editado después de emitido el cobro.
-    db.exec("UPDATE movs SET cobrado = amount, amount = amount * 2 WHERE type = 'ingreso' AND estado = 'parcial'");
-  }
   // Chofer al que corresponde cada cobro. Null en las filas viejas: el
   // chofer actual del auto sigue siendo el valor por defecto para esas, así
   // que la migración no necesita rellenarlas.
   if (!cols('movs').includes('driver')) db.exec('ALTER TABLE movs ADD COLUMN driver TEXT');
-  // `cobrado` guardaba en el cargo cuánta plata había entrado, pero no cuándo:
-  // mientras el pago caía el mismo día que la cuota daba igual, y en cuanto el
-  // chofer paga una deuda vieja la caja se imputa al mes equivocado. Pasa a ser
-  // un libro de pagos con fecha propia, y cuánto se cobró de cada cuota se
-  // deriva imputando esos pagos de lo más viejo a lo más nuevo.
-  if (cols('movs').includes('cobrado')) {
+
+  // Antes `amount` significaba dos cosas distintas según el estado: en un cobro
+  // pagado era la plata que entró, en uno pendiente la que se esperaba, y en uno
+  // parcial la mitad que se pagó. Ahora `amount` es siempre lo facturado y lo
+  // efectivamente cobrado vive en `pagos`, un libro con fecha propia (para que
+  // un pago de una deuda vieja se impute al mes que corresponde, no a hoy).
+  //
+  // Esto tiene que correr una única vez en la vida de la base. El guard no
+  // puede apoyarse en si `cobrado` existe: esta misma migración la agrega y
+  // después la borra, así que en el siguiente arranque volvía a estar
+  // ausente y el bloque entero se repetía, duplicando pagos y volviendo a
+  // doblar `amount` en cada cuota parcial. La bandera vive en `meta`, que
+  // nada más vuelve a tocar.
+  const yaMigroCobrado = () => !!db.prepare("SELECT 1 FROM meta WHERE key = 'cobrado_migrado'").get();
+  if (!yaMigroCobrado()) {
     // `immediate` toma el lock de escritura antes de leer, y la condición se
     // vuelve a evaluar adentro: si dos procesos arrancan a la vez —pasa con un
-    // reinicio que se solapa— el segundo espera, ve la columna ya borrada y no
-    // duplica los pagos.
+    // reinicio que se solapa— el segundo espera y ve la bandera ya puesta.
     db.transaction(() => {
-      if (!cols('movs').includes('cobrado')) return;
-      db.exec(`
-        INSERT INTO pagos (owner_id, car_id, driver, fecha, monto, tipo, nota)
-        SELECT m.owner_id, m.car_id, COALESCE(m.driver, c.driver, 'Sin chofer'),
-               m.date, m.cobrado, 'pago', 'Migrado del registro anterior'
-          FROM movs m
-          LEFT JOIN cars c ON c.id = m.car_id
-         WHERE m.type = 'ingreso' AND COALESCE(m.cobrado, 0) > 0
-      `);
-      db.exec('ALTER TABLE movs DROP COLUMN cobrado');
+      if (yaMigroCobrado()) return;
+      // Una base que ya pasó por la versión rota de esta migración (antes de
+      // este fix) puede tener `cobrado` ausente y pagos ya migrados: no hay
+      // nada que derivar de nuevo, solo falta dejar la bandera puesta.
+      const yaTienePagosMigrados = db.prepare("SELECT 1 FROM pagos WHERE nota = 'Migrado del registro anterior' LIMIT 1").get();
+      if (!yaTienePagosMigrados) {
+        if (!cols('movs').includes('cobrado')) db.exec('ALTER TABLE movs ADD COLUMN cobrado INTEGER');
+        db.exec("UPDATE movs SET cobrado = amount WHERE type = 'ingreso' AND estado = 'pagado'");
+        db.exec("UPDATE movs SET cobrado = 0      WHERE type = 'ingreso' AND estado = 'pendiente'");
+        // El parcial guardaba solo lo pagado. Todos salieron del generador, que
+        // los arma como la mitad de la cuota (`cuota * 3 * 0.5`), así que el
+        // doble reconstruye exacto lo facturado. Se usa eso y no la cuota
+        // actual del vehículo, que pudo haberse editado después de emitido
+        // el cobro.
+        db.exec("UPDATE movs SET cobrado = amount, amount = amount * 2 WHERE type = 'ingreso' AND estado = 'parcial'");
+        db.exec(`
+          INSERT INTO pagos (owner_id, car_id, driver, fecha, monto, tipo, nota)
+          SELECT m.owner_id, m.car_id, COALESCE(m.driver, c.driver, 'Sin chofer'),
+                 m.date, m.cobrado, 'pago', 'Migrado del registro anterior'
+            FROM movs m
+            LEFT JOIN cars c ON c.id = m.car_id
+           WHERE m.type = 'ingreso' AND COALESCE(m.cobrado, 0) > 0
+        `);
+      }
+      if (cols('movs').includes('cobrado')) db.exec('ALTER TABLE movs DROP COLUMN cobrado');
+      db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('cobrado_migrado', '1')").run();
     }).immediate();
   }
 }

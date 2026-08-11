@@ -85,7 +85,7 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '236px 1fr', height: '100vh', width: '100%', background: '#f4f0e8', position: 'relative', overflow: 'hidden' }}>
-      <Sidebar navItems={v.navItems} diasCierre={v.diasCierre} nombre={sesion.nombre} totalVehiculos={store.cars.length} onSalir={onSalir} />
+      <Sidebar navItems={v.navItems} cierreMsg={v.cierreMsg} nombre={sesion.nombre} totalVehiculos={store.cars.length} onSalir={onSalir} />
 
       <main style={{ padding: '14px 22px 16px', display: 'flex', flexDirection: 'column', gap: 9, minWidth: 0, height: '100%', overflowY: 'auto' }}>
         <Header

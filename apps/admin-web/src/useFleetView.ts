@@ -313,7 +313,7 @@ export interface View {
   kicker: string;
   pageTitle: string;
   headerSub: string;
-  diasCierre: number;
+  cierreMsg: string;
   sResumen: boolean;
   sFlota: boolean;
   sChoferes: boolean;
@@ -1246,11 +1246,22 @@ export function useFleetView(
     };
   })();
 
+  // Días que quedan del mes en curso, contra `TODAY` y no la fecha real: en la
+  // demo `TODAY` está fijo, así que el cartel de cierre tiene que moverse con
+  // ella o queda pisado apenas cambie el reloj real.
+  const finMes = new Date(TODAY.getFullYear(), TODAY.getMonth() + 1, 0);
+  const diasCierre = Math.max(0, daysBetween(TODAY, finMes));
+  const mesActual = new Intl.DateTimeFormat('es', { month: 'long' }).format(TODAY);
+  const cierreMsg =
+    diasCierre === 0
+      ? 'Cierra hoy.'
+      : 'Faltan ' + diasCierre + (diasCierre === 1 ? ' día' : ' días') + ' para cerrar ' + mesActual + '.';
+
   return {
     kicker: TITLES[nav][1],
     pageTitle: TITLES[nav][0],
     headerSub: SUBS[nav],
-    diasCierre: 3,
+    cierreMsg,
     sResumen: nav === 'resumen',
     sFlota: nav === 'flota',
     sChoferes: nav === 'choferes',

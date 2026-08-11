@@ -5,13 +5,13 @@ import { initials } from '../format';
 
 export function Sidebar({
   navItems,
-  diasCierre,
+  cierreMsg,
   nombre,
   totalVehiculos,
   onSalir,
 }: {
   navItems: NavItem[];
-  diasCierre: number;
+  cierreMsg: string;
   nombre: string;
   totalVehiculos: number;
   onSalir: () => void;
@@ -61,7 +61,7 @@ export function Sidebar({
       <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ border: '1px solid #333024', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#bdb6a4' }}>Cierre del mes</span>
-          <span style={{ fontSize: 13, color: '#e4dece', lineHeight: 1.45 }}>Faltan {diasCierre} días para cerrar agosto.</span>
+          <span style={{ fontSize: 13, color: '#e4dece', lineHeight: 1.45 }}>{cierreMsg}</span>
         </div>
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10, padding: '0 4px' }}>
           <span style={{ width: 34, height: 34, borderRadius: 17, background: '#e8a13a', color: '#16150f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flex: 'none' }}>
