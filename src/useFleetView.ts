@@ -305,8 +305,10 @@ export interface View {
   alertsFull: AlertFull[];
   alertKindChips: Chip[];
 
+  pendCount: number;
   pendSummary: string;
   pendFull: PendFull[];
+  pendKindChips: Chip[];
 
   topCars: TopCarItem[];
 
@@ -414,6 +416,11 @@ const KTAG: Record<string, [string, string]> = {
   Service: ['#fdf3e2', '#a8730f'],
   Seguro: ['#eef1f6', '#4a6d99'],
   Taller: ['#f3eefa', '#6b52a1'],
+};
+
+const PTAG: Record<string, [string, string]> = {
+  Pendiente: ['#fdf3e2', '#a8730f'],
+  Parcial: ['#eef1f6', '#4a6d99'],
 };
 
 function stats(movs: Mov[], f: (m: Mov) => boolean) {
@@ -1125,21 +1132,30 @@ export function useFleetView(
       pick: () => update({ alertKind: k }),
     })),
 
+    pendCount: pendMovs.length,
     pendSummary: !pendMovs.length ? 'Todo cobrado' : pendMovs.length + (pendMovs.length === 1 ? ' cuota sin cobrar' : ' cuotas sin cobrar'),
-    pendFull: pendMovs.slice(0, 15).map((m) => {
-      const c = cars.find((c2) => c2.id === m.carId)!;
-      return {
-        initials: initials(c.driver),
-        driver: c.driver,
-        plate: c.plate + ' · ' + c.model,
-        desc: m.desc,
-        dateLbl: dLbl(m.date),
-        tag: m.estado === 'parcial' ? 'Parcial' : 'Pendiente',
-        tagBg: m.estado === 'parcial' ? '#eef1f6' : '#fdf3e2',
-        tagFg: m.estado === 'parcial' ? '#4a6d99' : '#a8730f',
-        amt: fmtShort(m.amount, st.hide),
-      };
-    }),
+    pendFull: (st.pendKind === 'todas' ? pendMovs : pendMovs.filter((m) => (m.estado === 'parcial' ? 'Parcial' : 'Pendiente') === st.pendKind))
+      .slice(0, 15)
+      .map((m) => {
+        const c = cars.find((c2) => c2.id === m.carId)!;
+        const tag = m.estado === 'parcial' ? 'Parcial' : 'Pendiente';
+        return {
+          initials: initials(c.driver),
+          driver: c.driver,
+          plate: c.plate + ' · ' + c.model,
+          desc: m.desc,
+          dateLbl: dLbl(m.date),
+          tag,
+          tagBg: PTAG[tag][0],
+          tagFg: PTAG[tag][1],
+          amt: fmtShort(m.amount, st.hide),
+        };
+      }),
+    pendKindChips: (['todas', ...Object.keys(PTAG)] as string[]).map((k) => ({
+      label: k === 'todas' ? 'Todas' : k,
+      ...CH(st.pendKind === k),
+      pick: () => update({ pendKind: k }),
+    })),
 
     topCars: [...perCar]
       .filter((x) => x.c.estado !== 'baja')

@@ -34,6 +34,7 @@ const initialState: UIState = {
   movType: 'todos',
   movCat: 'todas',
   alertKind: 'todas',
+  pendKind: 'todas',
   modal: null,
   ncar: blankCar(),
   ndrv: blankDrv(),
