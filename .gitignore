@@ -24,9 +24,9 @@ dist-ssr
 *.sw?
 
 # Backend
-server/node_modules
-server/dist
-server/.tmp
+apps/api/node_modules
+apps/api/dist
+apps/api/.tmp
 *.db
 *.db-wal
 *.db-shm

@@ -1,7 +1,7 @@
 node_modules
-server/node_modules
+apps/*/node_modules
 dist
-server/dist
+apps/*/dist
 .git
 .scratch
 *.db
