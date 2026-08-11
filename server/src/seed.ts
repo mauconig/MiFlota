@@ -16,6 +16,8 @@ export interface SeedCar {
   driver: string;
   cuota: number;
   estado: Estado;
+  /** Identificador del rastreador GPS instalado. Vacío en las bajas. */
+  gpsTag: string;
   serviceCadaMeses: number;
   lastServiceDate: Date;
   seguroDate: Date;
@@ -26,7 +28,9 @@ export interface SeedMov {
   id: number;
   carId: string;
   type: 'ingreso' | 'egreso';
+  /** Lo facturado. Los egresos no llevan `cobrado`. */
   amount: number;
+  cobrado?: number;
   date: Date;
   desc: string;
   cat?: string;
@@ -72,9 +76,20 @@ const BASE: [string, string, number, string, number, Estado][] = [
 const TALLERD = ['Cambio de aceite y filtros', 'Pastillas de freno', 'Reparación suspensión', 'Correa de distribución', 'Neumáticos nuevos'];
 const DOCD = ['Habilitación municipal', 'Cédula verde', 'Patente'];
 
+/** Los rastreadores se identifican por color; cuando dos autos comparten
+ *  color, una letra los desempata. El primero de cada color va sin letra:
+ *  'Gris', 'Gris A', 'Gris B'. */
+const GPS_COLORS = ['Gris', 'Negro', 'Azul', 'Rojo', 'Blanco', 'Verde'];
+function gpsLabel(i: number): string {
+  const color = GPS_COLORS[i % GPS_COLORS.length];
+  const n = Math.floor(i / GPS_COLORS.length);
+  return n === 0 ? color : color + ' ' + String.fromCharCode(65 + n - 1);
+}
+
 export function generateFleetData(): { cars: SeedCar[]; movs: SeedMov[] } {
   const R = makeRng(7);
 
+  let gpsIdx = 0;
   const cars: SeedCar[] = BASE.map((b, i) => {
     // Se consume igual que antes para no correr la secuencia del PRNG y que
     // la flota sembrada siga siendo idéntica a la original.
@@ -83,6 +98,7 @@ export function generateFleetData(): { cars: SeedCar[]; movs: SeedMov[] } {
     // del intervalo que usaba el esquema por km (94% / 32% / 61% de 6 meses),
     // para que sigan siendo los mismos autos los que aparecen por vencer.
     const gapDias = [172, 59, 112][i % 3] + Math.round(R() * 15);
+    const estado = b[5];
     return {
       id: 'c' + i,
       plate: b[0],
@@ -90,7 +106,8 @@ export function generateFleetData(): { cars: SeedCar[]; movs: SeedMov[] } {
       year: b[2],
       driver: b[3],
       cuota: b[4],
-      estado: b[5],
+      estado,
+      gpsTag: estado === 'baja' ? '' : gpsLabel(gpsIdx++),
       serviceCadaMeses: 6,
       lastServiceDate: addD(SEED_TODAY, -gapDias),
       // Los offsets son los que tenía la versión anterior en días restantes,
@@ -114,11 +131,14 @@ export function generateFleetData(): { cars: SeedCar[]; movs: SeedMov[] } {
       let estado: MovEstado = 'pagado';
       if (d <= 3 && R() < 0.35) estado = 'pendiente';
       else if (R() < 0.06) estado = 'parcial';
+      // Se factura siempre la cuota completa; lo que cambia es cuánto entró.
+      const facturado = c.cuota * 3;
       movs.push({
         id: id++,
         carId: c.id,
         type: 'ingreso',
-        amount: Math.round(c.cuota * 3 * (estado === 'parcial' ? 0.5 : 1)),
+        amount: facturado,
+        cobrado: estado === 'pagado' ? facturado : estado === 'parcial' ? Math.round(facturado * 0.5) : 0,
         date: addD(SEED_TODAY, -d),
         estado,
         desc: 'Cuota diaria × 3 días',

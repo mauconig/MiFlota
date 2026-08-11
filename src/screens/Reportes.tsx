@@ -32,6 +32,7 @@ export function Reportes({ v }: { v: View }) {
           {!v.movRows.length && <div style={{ padding: '30px 0', fontSize: 13, color: '#6b665c', textAlign: 'center' }}>Sin movimientos con estos filtros</div>}
           {v.movRows.map((m, i) => (
             <div key={i} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '11px 0', borderBottom: '1px solid #f4efe4' }}>
+              <span style={{ width: 26, flex: 'none', fontSize: 12, color: '#a9a293', textAlign: 'right' }}>{m.pos}</span>
               <span style={{ width: 52, flex: 'none', fontSize: 12, color: '#6b665c' }}>{m.dateLbl}</span>
               <span style={{ width: 34, height: 34, borderRadius: 11, background: m.iconBg, color: m.iconFg, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 15, fontWeight: 700 }}>
                 {m.sign}

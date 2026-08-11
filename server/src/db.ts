@@ -32,7 +32,10 @@ export interface MovRow {
   id: number;
   car_id: string;
   type: string;
+  /** Lo facturado. En un ingreso es la cuota emitida, se haya cobrado o no. */
   amount: number;
+  /** Lo que efectivamente entró. Null en los egresos, que no se cobran. */
+  cobrado: number | null;
   date: string;
   descripcion: string;
   cat: string | null;
@@ -81,6 +84,7 @@ export function openDb() {
       car_id      TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
       type        TEXT NOT NULL CHECK (type IN ('ingreso','egreso')),
       amount      INTEGER NOT NULL,
+      cobrado     INTEGER,
       date        TEXT NOT NULL,
       descripcion TEXT NOT NULL,
       cat         TEXT,
@@ -155,6 +159,21 @@ function migrarOwner(db: Database.Database) {
          AND (id GLOB 'u*c*' OR id GLOB 'c[0-9]' OR id GLOB 'c[0-9][0-9]')
     `);
   }
+  // Antes `amount` significaba dos cosas distintas según el estado: en un cobro
+  // pagado era la plata que entró, en uno pendiente la que se esperaba, y en uno
+  // parcial la mitad que se pagó. Así no se podía decir cuánto debía un chofer.
+  // Ahora `amount` es siempre lo facturado y `cobrado` lo que efectivamente
+  // entró, que es la resta que da la deuda.
+  if (!cols('movs').includes('cobrado')) {
+    db.exec('ALTER TABLE movs ADD COLUMN cobrado INTEGER');
+    db.exec("UPDATE movs SET cobrado = amount WHERE type = 'ingreso' AND estado = 'pagado'");
+    db.exec("UPDATE movs SET cobrado = 0      WHERE type = 'ingreso' AND estado = 'pendiente'");
+    // El parcial guardaba solo lo pagado. Todos salieron del generador, que los
+    // arma como la mitad de la cuota (`cuota * 3 * 0.5`), así que el doble
+    // reconstruye exacto lo facturado. Se usa eso y no la cuota actual del
+    // vehículo, que pudo haberse editado después de emitido el cobro.
+    db.exec("UPDATE movs SET cobrado = amount, amount = amount * 2 WHERE type = 'ingreso' AND estado = 'parcial'");
+  }
 }
 
 /** Reasigna toda la flota huérfana (owner_id = 0) a un usuario. */
@@ -179,8 +198,8 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
     VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @gps_tag, @service_cada, @service_unidad, @last_service_date, @seguro_date, @seguro_costo, @seguro_periodo, @seguro_cada)
   `);
   const insMov = db.prepare(`
-    INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado)
-    VALUES (@owner_id, @car_id, @type, @amount, @date, @descripcion, @cat, @estado)
+    INSERT INTO movs (owner_id, car_id, type, amount, cobrado, date, descripcion, cat, estado)
+    VALUES (@owner_id, @car_id, @type, @amount, @cobrado, @date, @descripcion, @cat, @estado)
   `);
 
   db.transaction(() => {
@@ -194,7 +213,7 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
         driver: c.driver,
         cuota: c.cuota,
         estado: c.estado,
-        gps_tag: '',
+        gps_tag: c.gpsTag,
         service_cada: c.serviceCadaMeses,
         service_unidad: 'meses',
         last_service_date: iso(c.lastServiceDate),
@@ -210,6 +229,7 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
         car_id: idDe(m.carId),
         type: m.type,
         amount: m.amount,
+        cobrado: m.cobrado ?? null,
         date: iso(m.date),
         descripcion: m.desc,
         cat: m.cat ?? null,
@@ -250,6 +270,9 @@ export function movToJson(r: MovRow) {
     amount: r.amount,
     date: r.date,
     desc: r.descripcion,
+    // `amount` es lo facturado y `cobrado` lo que entró; la resta es la deuda.
+    // Solo va en los ingresos: un egreso no se "cobra".
+    ...(r.cobrado === null ? {} : { cobrado: r.cobrado }),
     ...(r.cat ? { cat: r.cat } : {}),
     ...(r.estado ? { estado: r.estado } : {}),
     // El cliente nunca ve la ruta del archivo, solo si hay uno y cómo se llama.

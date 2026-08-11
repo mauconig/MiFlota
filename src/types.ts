@@ -34,7 +34,11 @@ export interface Mov {
   id: number;
   carId: string;
   type: 'ingreso' | 'egreso';
+  /** Lo facturado: en un ingreso, la cuota emitida, se haya cobrado o no. */
   amount: number;
+  /** Lo que efectivamente entró. Ausente en los egresos, que no se cobran.
+      `amount - cobrado` es lo que el chofer todavía debe. */
+  cobrado?: number;
   date: Date;
   desc: string;
   cat?: string;

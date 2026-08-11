@@ -72,6 +72,8 @@ export interface VehicleRow {
   net: string;
   netColor: string;
   netPct: string;
+  gpsTag: string;
+  gpsFg: string;
   tag: string;
   tagBg: string;
   tagFg: string;
@@ -117,7 +119,11 @@ export interface PendFull {
   tag: string;
   tagBg: string;
   tagFg: string;
+  /** Lo cobrado. En un parcial, "270k de 540k" para que no se lea a medias. */
   amt: string;
+  /** Lo que falta cobrar. Vacío si no debe nada. */
+  debe: string;
+  debeFg: string;
 }
 
 export interface TopCarItem {
@@ -170,6 +176,7 @@ export interface DriverDetailView {
 }
 
 export interface MovRow {
+  pos: number;
   dateLbl: string;
   sign: string;
   iconBg: string;
@@ -309,8 +316,10 @@ export interface View {
 
   pendCount: number;
   pendSummary: string;
-  pendFull: PendFull[];
+  cobrosSub: string;
+  cobrosFull: PendFull[];
   pendKindChips: Chip[];
+  pendKind: string;
   pendQ: string;
   setPendQ: (e: React.ChangeEvent<HTMLInputElement>) => void;
 
@@ -471,40 +480,59 @@ const KTAG: Record<string, [string, string]> = {
 };
 
 const PTAG: Record<string, [string, string]> = {
-  Pendiente: ['#fdf3e2', '#a8730f'],
+  Cobrado: ['#eef4f0', '#2e7d5b'],
   Parcial: ['#eef1f6', '#4a6d99'],
+  Pendiente: ['#fdf3e2', '#a8730f'],
 };
 
+/** Lo que entró por un cobro. Un movimiento viejo sin `cobrado` se toma como
+ *  cobrado entero, que es lo que significaba antes de que existiera la columna. */
+const cobradoDe = (m: Mov) => m.cobrado ?? m.amount;
+
 function stats(movs: Mov[], f: (m: Mov) => boolean) {
+  // `ing` es plata que entró de verdad; `fact` es lo emitido. La diferencia es
+  // la deuda de los choferes, y por eso la ganancia neta se calcula con `ing`:
+  // una cuota impaga no es ganancia.
   let ing = 0;
+  let fact = 0;
   let egr = 0;
   const byCat: Record<string, number> = {};
   movs.forEach((m) => {
     if (!f(m)) return;
-    if (m.type === 'ingreso') ing += m.amount;
-    else {
+    if (m.type === 'ingreso') {
+      ing += cobradoDe(m);
+      fact += m.amount;
+    } else {
       egr += m.amount;
       byCat[m.cat!] = (byCat[m.cat!] || 0) + m.amount;
     }
   });
-  return { ing, egr, net: ing - egr, byCat };
+  return { ing, fact, deuda: fact - ing, egr, net: ing - egr, byCat };
 }
+
+/** Último instante del día. Los movimientos se parsean al mediodía (ver
+ *  `parseDate` en api.ts), así que un rango que corta a las 00:00 de su último
+ *  día deja afuera todo lo de esa jornada: sin esto, lo cargado hoy no entra
+ *  en "Agosto" ni en "7 días". */
+const finDia = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59);
+/** Arranque del día, para el extremo opuesto del rango. */
+const iniDia = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
 function range(state: UIState) {
   const k = state.period;
-  if (k === 'semana') return { start: addD(TODAY, -6), end: TODAY, label: 'Últimos 7 días', short: '7 días' };
+  if (k === 'semana') return { start: addD(TODAY, -6), end: finDia(TODAY), label: 'Últimos 7 días', short: '7 días' };
   if (k === 'jul') return { start: new Date(2026, 6, 1), end: new Date(2026, 6, 31, 23, 59), label: 'Julio 2026', short: 'julio' };
-  if (k === 'd90') return { start: addD(TODAY, -89), end: TODAY, label: 'Últimos 90 días', short: '90 días' };
+  if (k === 'd90') return { start: addD(TODAY, -89), end: finDia(TODAY), label: 'Últimos 90 días', short: '90 días' };
   if (k === 'custom') {
     let start = new Date(state.cFrom + 'T00:00:00');
     let end = new Date(state.cTo + 'T23:59:59');
     if (isNaN(+start) || isNaN(+end) || end < start) {
       start = new Date(2026, 7, 1);
-      end = TODAY;
+      end = finDia(TODAY);
     }
     return { start, end, label: dLbl(start) + ' – ' + dLbl(end), short: 'el rango' };
   }
-  return { start: new Date(2026, 7, 1), end: TODAY, label: 'Agosto 2026', short: 'agosto' };
+  return { start: new Date(2026, 7, 1), end: finDia(TODAY), label: 'Agosto 2026', short: 'agosto' };
 }
 
 export function useFleetView(
@@ -645,15 +673,31 @@ export function useFleetView(
   const st = state;
   const r = range(st);
   const inR = (m: Mov) => m.date >= r.start && m.date <= r.end;
-  const days = Math.max(1, Math.round((+r.end - +r.start) / 864e5) + 1);
-  const prevEnd = addD(r.start, -1);
-  const prevStart = addD(prevEnd, -(days - 1));
+  // Días de calendario que abarca el rango: se mide de medianoche a medianoche
+  // para que el `finDia` del extremo no sume un día de más.
+  const days = Math.max(1, Math.round((+iniDia(r.end) - +iniDia(r.start)) / 864e5) + 1);
+  // El período anterior es el mismo largo, pegado antes, y cierra al final de
+  // su último día por la misma razón que `finDia`.
+  const prevEnd = finDia(addD(r.start, -1));
+  const prevStart = iniDia(addD(prevEnd, -(days - 1)));
   const inPrev = (m: Mov) => m.date >= prevStart && m.date <= prevEnd;
   const tot = stats(movs, inR);
   const prev = stats(movs, inPrev);
   const active = cars.filter((c) => c.estado !== 'baja');
-  const pendMovs = movs.filter((m) => m.type === 'ingreso' && m.estado !== 'pagado' && inR(m)).sort((a, b) => +b.date - +a.date);
-  const pendTotal = pendMovs.reduce((a, m) => a + m.amount, 0);
+  // La pantalla de Cobros lista todos los cobros del período, no solo los que
+  // faltan: ver los ya cobrados es lo que da contexto a lo que falta.
+  const cobroMovs = movs.filter((m) => m.type === 'ingreso' && inR(m)).sort((a, b) => +b.date - +a.date);
+  const deudaDe = (m: Mov) => m.amount - cobradoDe(m);
+  const pendMovs = cobroMovs.filter((m) => deudaDe(m) > 0);
+  const pendTotal = pendMovs.reduce((a, m) => a + deudaDe(m), 0);
+  // Lo que la pantalla de Cobros muestra después de aplicar chip y búsqueda. El
+  // resumen de arriba se calcula sobre esto y no sobre la flota entera: si estás
+  // filtrando por un chofer, lo que querés saber es cuánto debe ÉL.
+  const cobrosVista = cobroMovs
+    .map((m) => ({ m, c: cars.find((c2) => c2.id === m.carId)!, debe: deudaDe(m) }))
+    .filter(({ m, debe }) => (st.pendKind === 'todas' ? true : st.pendKind === (debe === 0 ? 'Cobrado' : cobradoDe(m) > 0 ? 'Parcial' : 'Pendiente')))
+    .filter(({ c }) => matches(st.pendQ, c.driver, c.plate, c.model));
+  const cobrosVistaDeuda = cobrosVista.reduce((a, x) => a + x.debe, 0);
 
   const alertList: { car: Car; kind: string; sev: number; text: string }[] = [];
   active.forEach((c) => {
@@ -734,6 +778,8 @@ export function useFleetView(
       net: fmtShort(x.net, st.hide),
       netColor: statusColor(x.net, UMBRAL_VERDE),
       netPct: Math.round((Math.abs(x.net) / maxNet) * 100) + '%',
+      gpsTag: x.c.gpsTag || 'Sin GPS',
+      gpsFg: x.c.gpsTag ? '#6b665c' : '#a09a8d',
       tag: t[0],
       tagBg: t[1],
       tagFg: t[2],
@@ -762,7 +808,7 @@ export function useFleetView(
     choferes: ['Choferes', 'Equipo'],
     alertas: ['Alertas', 'Mantenimiento'],
     reportes: ['Reportes', 'Movimientos'],
-    cobros: ['Cobros pendientes', 'Ingresos'],
+    cobros: ['Cobros', 'Ingresos'],
   };
   const SUBS: Record<string, string> = {
     resumen: active.length + ' vehículos activos · ' + (cars.length - active.length) + ' fuera de servicio · datos al ' + dLbl(TODAY),
@@ -770,7 +816,7 @@ export function useFleetView(
     choferes: active.filter((c) => c.driver !== 'Sin chofer').length + ' choferes asignados · cobros de ' + r.short,
     alertas: alertList.length + ' avisos de mantenimiento y documentos',
     reportes: movsSorted.length + ' movimientos en ' + r.short,
-    cobros: pendMovs.length + ' cuotas sin cobrar en ' + r.short + ' · ' + fmt(pendTotal, st.hide),
+    cobros: 'Cobrado ' + fmt(tot.ing, st.hide) + ' de ' + fmt(tot.fact, st.hide) + ' facturado en ' + r.short + (pendTotal ? ' · deben ' + fmt(pendTotal, st.hide) : ''),
   };
 
   const detail: DetailView = (() => {
@@ -856,7 +902,7 @@ export function useFleetView(
       gpsTag: c.gpsTag || 'Sin GPS',
       gpsFg: c.gpsTag ? '#3d3a34' : '#a09a8d',
       cobradas: cuotasCobradas + ' cuotas cobradas',
-      pendientes: cuotasPend.length ? cuotasPend.length + ' sin cobrar · ' + fmtShort(cuotasPend.reduce((a, m) => a + m.amount, 0), st.hide) : 'Todo cobrado',
+      pendientes: cuotasPend.length ? cuotasPend.length + ' sin cobrar · debe ' + fmtShort(cuotasPend.reduce((a, m) => a + (m.amount - cobradoDe(m)), 0), st.hide) : 'Todo cobrado',
       svcLbl: (dLeft < 0 ? 'Service vencido hace ' + durLbl(dLeft) : dLeft === 0 ? 'El service vence hoy' : 'Próximo service en ' + durLbl(dLeft)) + ' · ' + dLblFull(svcNextDate(c)),
       svcSub: 'Último service: ' + dLblFull(c.lastServiceDate),
       svcFg: dLeft < 0 ? COLORS.neg : dLeft <= SVC_AVISO_DIAS ? COLORS.warn : COLORS.pos,
@@ -936,12 +982,17 @@ export function useFleetView(
         .slice(0, 8)
         .map((m) => {
           const inc = m.type === 'ingreso';
+          const cob = cobradoDe(m);
+          const deuda = inc ? m.amount - cob : 0;
           return {
             dateLbl: dLbl(m.date),
             desc: m.desc,
-            sub: inc ? (m.estado === 'pagado' ? 'Cobrado' : m.estado === 'parcial' ? 'Pago parcial' : 'Pendiente') : m.cat!,
+            // En un cobro a medias el monto que se muestra es el que entró, y el
+            // subtítulo aclara cuánto falta: si no, un "+540k" con 270k cobrados
+            // se lee como si hubiera pagado todo.
+            sub: inc ? (deuda > 0 ? (cob > 0 ? 'Pagó ' + fmtShort(cob, st.hide) + ' de ' + fmtShort(m.amount, st.hide) + ' · debe ' + fmtShort(deuda, st.hide) : 'Sin cobrar · debe ' + fmtShort(deuda, st.hide)) : 'Cobrado') : m.cat!,
             comprobante: m.comprobante ? '/api/comprobantes/' + m.comprobante.id : '',
-            amt: (inc ? '+' : '−') + fmtShort(m.amount, st.hide),
+            amt: (inc ? '+' : '−') + fmtShort(inc ? cob : m.amount, st.hide),
             amtFg: inc ? COLORS.pos : COLORS.neg,
             iconBg: inc ? '#eef4f0' : '#fdeeea',
             iconFg: inc ? '#2e7d5b' : '#a8412f',
@@ -990,9 +1041,9 @@ export function useFleetView(
       };
     const c = x.c;
     const cuotas = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && inR(m));
-    const impagas = cuotas.filter((m) => m.estado !== 'pagado');
+    const impagas = cuotas.filter((m) => m.amount - cobradoDe(m) > 0);
     const facturado = cuotas.reduce((a, m) => a + m.amount, 0);
-    const adeudado = impagas.reduce((a, m) => a + m.amount, 0);
+    const adeudado = cuotas.reduce((a, m) => a + (m.amount - cobradoDe(m)), 0);
     // Qué porcentaje de lo que se le facturó en el período efectivamente entró.
     const cumpl = facturado ? Math.round(((facturado - adeudado) / facturado) * 100) : 100;
     const ok = adeudado === 0;
@@ -1022,14 +1073,16 @@ export function useFleetView(
         .sort((a, b) => +b.date - +a.date)
         .slice(0, 8)
         .map((m) => {
-          const pagado = m.estado === 'pagado';
+          const cob = cobradoDe(m);
+          const deuda = m.amount - cob;
+          const pagado = deuda === 0;
           return {
             dateLbl: dLbl(m.date),
             desc: m.desc,
-            sub: pagado ? 'Cobrado' : m.estado === 'parcial' ? 'Pago parcial' : 'Pendiente',
+            sub: pagado ? 'Cobrado' : cob > 0 ? 'Pagó ' + fmtShort(cob, st.hide) + ' de ' + fmtShort(m.amount, st.hide) + ' · debe ' + fmtShort(deuda, st.hide) : 'Sin cobrar · debe ' + fmtShort(deuda, st.hide),
             // Los cobros de cuota no llevan adjunto: el comprobante es del gasto.
             comprobante: '',
-            amt: '+' + fmtShort(m.amount, st.hide),
+            amt: '+' + fmtShort(cob, st.hide),
             amtFg: pagado ? COLORS.pos : COLORS.neg,
             iconBg: pagado ? '#eef4f0' : '#fdeeea',
             iconFg: pagado ? '#2e7d5b' : '#a8412f',
@@ -1169,7 +1222,6 @@ export function useFleetView(
     })(),
     alertsFull: (st.alertKind === 'todas' ? alertList : alertList.filter((a) => a.kind === st.alertKind))
       .filter((a) => matches(st.alertQ, a.car.plate, a.car.model, a.car.driver, a.text))
-      .slice(0, 15)
       .map((a) => ({
         plate: a.car.plate,
         model: a.car.model + ' · ' + a.car.year,
@@ -1189,12 +1241,17 @@ export function useFleetView(
 
     pendCount: pendMovs.length,
     pendSummary: !pendMovs.length ? 'Todo cobrado' : pendMovs.length + (pendMovs.length === 1 ? ' cuota sin cobrar' : ' cuotas sin cobrar'),
-    pendFull: (st.pendKind === 'todas' ? pendMovs : pendMovs.filter((m) => (m.estado === 'parcial' ? 'Parcial' : 'Pendiente') === st.pendKind))
-      .map((m) => ({ m, c: cars.find((c2) => c2.id === m.carId)! }))
-      .filter(({ c }) => matches(st.pendQ, c.driver, c.plate, c.model))
-      .slice(0, 15)
-      .map(({ m, c }) => {
-        const tag = m.estado === 'parcial' ? 'Parcial' : 'Pendiente';
+    cobrosSub: (() => {
+      const n = cobrosVista.length;
+      // Con un solo chofer en la vista el texto habla de él en singular, que es
+      // como se lee cuando buscás a alguien puntual.
+      const unico = new Set(cobrosVista.map((x) => x.c.driver));
+      const quien = unico.size === 1 ? [...unico][0] + ' debe ' : 'deben ';
+      return n + (n === 1 ? ' cobro · ' : ' cobros · ') + (cobrosVistaDeuda ? quien + fmt(cobrosVistaDeuda, st.hide) : 'sin deuda');
+    })(),
+    cobrosFull: cobrosVista.map(({ m, c, debe }) => {
+        const cob = cobradoDe(m);
+        const tag = debe === 0 ? 'Cobrado' : cob > 0 ? 'Parcial' : 'Pendiente';
         return {
           initials: initials(c.driver),
           driver: c.driver,
@@ -1204,14 +1261,19 @@ export function useFleetView(
           tag,
           tagBg: PTAG[tag][0],
           tagFg: PTAG[tag][1],
-          amt: fmtShort(m.amount, st.hide),
+          // Un parcial dice explícitamente cuánto entró de cuánto: "270k de
+          // 540k" no se puede leer mal, un "270k" suelto sí.
+          amt: tag === 'Parcial' ? fmtShort(cob, st.hide) + ' de ' + fmtShort(m.amount, st.hide) : fmtShort(m.amount, st.hide),
+          debe: debe ? fmtShort(debe, st.hide) : '',
+          debeFg: debe ? COLORS.neg : '#6b665c',
         };
       }),
     pendKindChips: (['todas', ...Object.keys(PTAG)] as string[]).map((k) => ({
-      label: k === 'todas' ? 'Todas' : k,
+      label: k === 'todas' ? 'Todos' : k,
       ...CH(st.pendKind === k),
       pick: () => update({ pendKind: k }),
     })),
+    pendKind: st.pendKind,
     pendQ: st.pendQ,
     setPendQ: (e) => update({ pendQ: e.target.value }),
 
@@ -1224,7 +1286,7 @@ export function useFleetView(
     choferes: perCar
       .filter((x) => x.c.driver !== 'Sin chofer' && matches(st.chQ, x.c.driver, x.c.plate, x.c.model))
       .map((x) => {
-        const pend = pendMovs.filter((m) => m.carId === x.c.id).reduce((a, m) => a + m.amount, 0);
+        const pend = pendMovs.filter((m) => m.carId === x.c.id).reduce((a, m) => a + deudaDe(m), 0);
         const ok = pend === 0;
         return {
           initials: initials(x.c.driver),
@@ -1264,17 +1326,20 @@ export function useFleetView(
       ...CH(st.movCat === k),
       pick: () => update({ movCat: k, movType: k === 'todas' ? st.movType : 'egreso' }),
     })),
-    movRows: movsFiltered.map((m) => {
+    movRows: movsFiltered.map((m, i) => {
       const c = cars.find((c2) => c2.id === m.carId)!;
       const inc = m.type === 'ingreso';
       return {
+        pos: i + 1,
         dateLbl: dLbl(m.date),
         sign: inc ? '↓' : '↑',
         iconBg: inc ? '#eef4f0' : '#fdeeea',
         iconFg: inc ? '#2e7d5b' : '#a8412f',
         desc: m.desc,
-        sub: c.plate + ' · ' + (inc ? c.driver : m.cat),
-        amt: (inc ? '+' : '−') + fmtShort(m.amount, st.hide),
+        // Una cuota a medias arrastra su deuda al subtítulo, así el listado
+        // general no queda mostrando plata que en realidad no entró.
+        sub: c.plate + ' · ' + (inc ? c.driver + (m.amount - cobradoDe(m) > 0 ? ' · debe ' + fmtShort(m.amount - cobradoDe(m), st.hide) : '') : m.cat),
+        amt: (inc ? '+' : '−') + fmtShort(inc ? cobradoDe(m) : m.amount, st.hide),
         amtFg: inc ? '#2e7d5b' : '#c0553f',
       };
     }),
@@ -1293,10 +1358,11 @@ export function useFleetView(
         await downloadXlsx(
           'movimientos-' + isoLocal(TODAY) + '.xlsx',
           'Movimientos',
-          ['Fecha', 'Tipo', 'Vehículo', 'Modelo', 'Año', 'Chofer', 'Descripción', 'Categoría', 'Estado', 'Comprobante', 'Monto'],
+          ['Fecha', 'Tipo', 'Vehículo', 'Modelo', 'Año', 'Chofer', 'Descripción', 'Categoría', 'Estado', 'Comprobante', 'Facturado', 'Monto', 'Debe'],
           movsFiltered.map((m) => {
             const c = cars.find((c2) => c2.id === m.carId);
             const inc = m.type === 'ingreso';
+            const cob = cobradoDe(m);
             return [
               isoLocal(m.date),
               inc ? 'Ingreso' : 'Egreso',
@@ -1311,9 +1377,15 @@ export function useFleetView(
               // estado de cobro. El guion marca "no aplica"; si toda la
               // exportación quedó así, `downloadXlsx` saca la columna entera.
               inc ? '—' : (m.cat ?? '—'),
-              inc ? (m.estado === 'pagado' ? 'Cobrado' : m.estado === 'parcial' ? 'Pago parcial' : 'Pendiente') : '—',
+              inc ? (m.amount - cob === 0 ? 'Cobrado' : cob > 0 ? 'Pago parcial' : 'Pendiente') : '—',
               m.comprobante ? m.comprobante.nombre : '—',
-              m.amount,
+              // "Monto" es la plata que se movió de verdad, en las dos
+              // direcciones. Facturado y Debe son propios del cobro, así que en
+              // un gasto no aplican (y si la exportación es toda de gastos,
+              // `downloadXlsx` borra esas dos columnas enteras).
+              inc ? m.amount : '—',
+              inc ? cob : m.amount,
+              inc ? m.amount - cob : '—',
             ];
           }),
         );
@@ -1355,7 +1427,7 @@ export function useFleetView(
       // Borrar el vehículo arrastra sus movimientos, así que el aviso dice
       // exactamente cuánta plata registrada desaparece de los reportes.
       const suyos = movs.filter((m) => m.carId === c.id);
-      const ing = suyos.filter((m) => m.type === 'ingreso').reduce((a, m) => a + m.amount, 0);
+      const ing = suyos.filter((m) => m.type === 'ingreso').reduce((a, m) => a + cobradoDe(m), 0);
       const egr = suyos.filter((m) => m.type === 'egreso').reduce((a, m) => a + m.amount, 0);
       return {
         confirmOpen: true,
