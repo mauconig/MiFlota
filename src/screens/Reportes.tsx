@@ -49,10 +49,10 @@ export function Reportes({ v }: { v: View }) {
       <div style={{ ...card, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0 }}>
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', flex: 'none' }}>
           <span style={sectionTitle}>Gastos por categoría</span>
-          <span style={{ fontSize: 12, color: '#6b665c' }}>{v.egrTotal}</span>
+          <span style={{ fontSize: 12, color: '#6b665c' }}>{v.movEgrTotal}</span>
         </div>
         <ScrollArea style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-          {v.cats.map((c) => (
+          {v.movCats.map((c) => (
             <div key={c.label} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <span style={{ width: 104, flex: 'none', fontSize: 13, color: '#3d3a34' }}>{c.label}</span>
               <span style={{ flex: 1, height: 10, borderRadius: 5, background: '#f4f0e8', overflow: 'hidden' }}>
@@ -66,15 +66,15 @@ export function Reportes({ v }: { v: View }) {
         <div style={{ borderTop: '1px solid #f0ebe0', paddingTop: 13, display: 'flex', flexDirection: 'column', gap: 9, flex: 'none' }}>
           <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', fontSize: 13 }}>
             <span style={{ color: '#6b665c' }}>Ingresos</span>
-            <span style={{ fontWeight: 700, color: '#2e7d5b' }}>{v.ingTotal}</span>
+            <span style={{ fontWeight: 700, color: '#2e7d5b' }}>{v.movIngTotal}</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', fontSize: 13 }}>
             <span style={{ color: '#6b665c' }}>Egresos</span>
-            <span style={{ fontWeight: 700, color: '#c0553f' }}>{v.egrTotal}</span>
+            <span style={{ fontWeight: 700, color: '#c0553f' }}>{v.movEgrTotal}</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', fontSize: 14 }}>
             <span style={{ fontWeight: 700 }}>Ganancia neta</span>
-            <span style={{ fontWeight: 700 }}>{v.netTotal}</span>
+            <span style={{ fontWeight: 700 }}>{v.movNetTotal}</span>
           </div>
         </div>
       </div>

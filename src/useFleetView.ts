@@ -328,6 +328,10 @@ export interface View {
   movRows: MovRow[];
   movQ: string;
   setMovQ: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  movCats: CatItem[];
+  movEgrTotal: string;
+  movIngTotal: string;
+  movNetTotal: string;
   exportar: () => void;
 
   hasDetail: boolean;
@@ -396,6 +400,26 @@ function matches(q: string, ...fields: (string | undefined)[]): boolean {
   const needle = q.trim().toLowerCase();
   if (!needle) return true;
   return fields.some((f) => f?.toLowerCase().includes(needle));
+}
+
+/** Envuelve en comillas solo si hace falta: una celda con coma, comilla o salto
+ *  de línea rompe el CSV si no lleva comillas, así que el resto queda liviano. */
+function csvCell(v: string | number): string {
+  const s = String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+/** El BOM al principio es lo que hace que Excel en Windows adivine UTF-8 solo:
+ *  sin él, "José" o "₲" salen con la codificación pisada. */
+function downloadCsv(filename: string, header: string[], rows: (string | number)[][]) {
+  const csv = [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function blankCar(): NewCarForm {
@@ -714,6 +738,9 @@ export function useFleetView(
       matches(st.movQ, m.desc, m.cat, c?.driver, c?.model, c?.plate)
     );
   });
+  const movTot = stats(movsFiltered, () => true);
+  const movCatTotal = Object.values(movTot.byCat).reduce((a, b) => a + b, 0) || 1;
+  const movCatMax = Math.max(...CATS.map((c) => movTot.byCat[c] || 0), 1);
 
   const nav = st.nav;
   const TITLES: Record<string, [string, string]> = {
@@ -1240,7 +1267,34 @@ export function useFleetView(
     }),
     movQ: st.movQ,
     setMovQ: (e) => update({ movQ: e.target.value }),
-    exportar: () => toast('Exportación CSV — disponible en la versión final'),
+    movCats: CATS.map((label) => {
+      const v = movTot.byCat[label] || 0;
+      return { label, amt: fmtShort(v, st.hide), color: CATCOLORS[label], pct: Math.round((v / movCatMax) * 100) + '%', share: Math.round((v / movCatTotal) * 100) + '%' };
+    }),
+    movEgrTotal: fmt(movTot.egr, st.hide),
+    movIngTotal: fmt(movTot.ing, st.hide),
+    movNetTotal: fmt(movTot.net, st.hide),
+    exportar: () => {
+      if (!movsFiltered.length) return toast('No hay movimientos para exportar con estos filtros');
+      downloadCsv(
+        'movimientos-' + isoLocal(TODAY) + '.csv',
+        ['Fecha', 'Tipo', 'Vehículo', 'Chofer', 'Descripción', 'Categoría', 'Estado', 'Monto'],
+        movsFiltered.map((m) => {
+          const c = cars.find((c2) => c2.id === m.carId);
+          return [
+            isoLocal(m.date),
+            m.type === 'ingreso' ? 'Ingreso' : 'Egreso',
+            c?.plate ?? '',
+            m.type === 'ingreso' ? (c?.driver ?? '') : '',
+            m.desc,
+            m.cat ?? '',
+            m.estado ?? '',
+            m.amount,
+          ];
+        }),
+      );
+      toast(movsFiltered.length + (movsFiltered.length === 1 ? ' movimiento exportado' : ' movimientos exportados'));
+    },
 
     hasDetail: !!st.detailId,
     detail,
