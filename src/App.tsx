@@ -35,6 +35,7 @@ const initialState: UIState = {
   movCat: 'todas',
   alertKind: 'todas',
   pendKind: 'todas',
+  chKind: 'todas',
   carQ: '',
   chQ: '',
   alertQ: '',

@@ -29,7 +29,7 @@ export function DriverDetail({ v }: { v: View }) {
           boxShadow: '0 24px 60px rgba(22,21,15,0.3)',
         }}
       >
-        <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 13 }}>
+        <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 13, flex: 'none' }}>
           <span style={{ width: 46, height: 46, borderRadius: 23, background: '#16150f', color: '#f7dfae', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700, flex: 'none' }}>
             {d.initials}
           </span>
@@ -45,7 +45,7 @@ export function DriverDetail({ v }: { v: View }) {
           </Btn>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, flex: 'none' }}>
           <div style={{ ...cardTight, padding: '13px 14px', minWidth: 0 }}>
             <div style={kpiLabel}>Cobrado</div>
             <div style={{ fontSize: 16, fontWeight: 700, marginTop: 5, color: '#2e7d5b' }}>{d.cobrado}</div>
@@ -69,7 +69,7 @@ export function DriverDetail({ v }: { v: View }) {
           </div>
         </div>
 
-        <div style={{ ...cardTight, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ ...cardTight, padding: 16, display: 'flex', flexDirection: 'column', gap: 10, flex: 'none' }}>
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'baseline', gap: 12 }}>
             <span style={{ flex: 1, fontSize: 15, fontWeight: 700 }}>Cumplimiento de cobro</span>
             <span style={{ fontSize: 12, color: '#6b665c' }}>{d.periodShort}</span>
@@ -83,7 +83,7 @@ export function DriverDetail({ v }: { v: View }) {
           </div>
         </div>
 
-        <div style={{ ...cardTight, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ ...cardTight, padding: 16, display: 'flex', flexDirection: 'column', gap: 12, flex: 'none' }}>
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <span style={{ flex: 1, fontSize: 15, fontWeight: 700 }}>Vehículo asignado</span>
             <Btn onClick={d.verVehiculo} style={{ border: 'none', background: 'none', color: '#b5791a', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0, flex: 'none' }} hoverStyle={{ color: '#8d5c10' }}>
@@ -102,12 +102,16 @@ export function DriverDetail({ v }: { v: View }) {
           </div>
         </div>
 
-        <div style={{ ...cardTight, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <span style={{ fontSize: 15, fontWeight: 700 }}>Últimas cuotas</span>
+        {/* Es la única sección con largo variable: puede haber una cuota o
+            veinte. `flex: 1` + `minHeight: 0` en toda la cadena hace que sea
+            esta card la que se achique cuando el modal toca `maxHeight`, así
+            el scroll queda adentro de la lista y no en el modal entero. */}
+        <div style={{ ...cardTight, padding: 16, display: 'flex', flexDirection: 'column', gap: 10, flex: '1 1 auto', minHeight: 0 }}>
+          <span style={{ fontSize: 15, fontWeight: 700, flex: 'none' }}>Últimas cuotas</span>
           {d.sinPagos ? (
             <span style={{ fontSize: 13, color: '#6b665c' }}>Sin cuotas registradas en {d.periodShort}</span>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div className="scroll-sin-barra" style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto' }}>
               {d.pagos.map((m, i) => (
                 <div key={i} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 11, padding: '9px 0', borderBottom: i === d.pagos.length - 1 ? 'none' : '1px solid #f4efe4' }}>
                   <span style={{ width: 30, height: 30, borderRadius: 10, background: m.iconBg, color: m.iconFg, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 13, fontWeight: 700 }}>{m.sign}</span>
@@ -123,7 +127,7 @@ export function DriverDetail({ v }: { v: View }) {
           )}
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'row', gap: 10, justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', flexDirection: 'row', gap: 10, justifyContent: 'flex-end', flex: 'none' }}>
           <Btn onClick={d.quitar} style={{ ...btnSecondary, color: '#a8412f', borderColor: '#f0d0c6' }} hoverStyle={{ background: '#fdeeea' }}>
             Quitar chofer
           </Btn>

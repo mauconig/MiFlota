@@ -378,6 +378,8 @@ export interface View {
 
   choferes: ChoferItem[];
   choferesSub: string;
+  chKind: string;
+  chKindChips: Chip[];
   openDrvModal: () => void;
   chQ: string;
   setChQ: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -1535,7 +1537,16 @@ export function useFleetView(
           tagFg: ok ? '#2e7d5b' : '#a8412f',
           open: () => update({ driverId: x.c.id }),
         };
-      }),
+      })
+      .filter((x) => (st.chKind === 'todas' ? true : st.chKind === 'aldia' ? x.tag === 'Al día' : x.tag === 'Debe')),
+    chKind: st.chKind,
+    chKindChips: (
+      [
+        ['todas', 'Todos'],
+        ['aldia', 'Al día'],
+        ['debe', 'Debe'],
+      ] as [string, string][]
+    ).map(([k, label]) => ({ label, ...CH(st.chKind === k), pick: () => update({ chKind: k }) })),
     choferesSub: (() => {
       const asignados = perCar.filter((x) => x.c.driver !== 'Sin chofer');
       const deben = asignados.filter((x) => pendMovs.some((m) => m.carId === x.c.id)).length;

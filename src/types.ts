@@ -114,6 +114,8 @@ export interface UIState {
   movCat: string;
   alertKind: string;
   pendKind: string;
+  /** 'todas' | 'aldia' | 'debe'. */
+  chKind: string;
   carQ: string;
   chQ: string;
   alertQ: string;

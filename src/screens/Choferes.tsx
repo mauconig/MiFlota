@@ -1,5 +1,6 @@
 import type { View } from '../useFleetView';
 import { Btn } from '../components/Btn';
+import { ChipRow } from '../components/ChipRow';
 import { SearchBar } from '../components/SearchBar';
 import { Screen, ScrollArea, Vacio } from '../components/Screen';
 import { PlusIcon } from '../icons';
@@ -8,8 +9,9 @@ import { card } from '../styles';
 export function Choferes({ v }: { v: View }) {
   return (
     <Screen label="Choferes" style={{ gap: 12 }}>
-      <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14, flex: 'none' }}>
+      <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14, flexWrap: 'wrap', flex: 'none' }}>
         <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: '#6b665c' }}>{v.choferesSub}</span>
+        <ChipRow chips={v.chKindChips} />
         <SearchBar value={v.chQ} onChange={v.setChQ} placeholder="Buscar chofer…" />
         <Btn
           onClick={v.openDrvModal}
@@ -36,8 +38,8 @@ export function Choferes({ v }: { v: View }) {
         </Btn>
       </div>
       {!v.choferes.length &&
-        (v.chQ ? (
-          <Vacio titulo="Ningún chofer coincide" detalle="Probá con otro nombre o chapa." />
+        (v.chQ || v.chKind !== 'todas' ? (
+          <Vacio titulo="Ningún chofer coincide" detalle="Probá con otro nombre, otra chapa o cambiando el filtro." />
         ) : (
           <Vacio titulo="Todavía no hay choferes" detalle="Se crean asignando un chofer a un vehículo, con el botón de arriba o desde la ficha del vehículo." />
         ))}
