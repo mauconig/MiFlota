@@ -402,18 +402,31 @@ function matches(q: string, ...fields: (string | undefined)[]): boolean {
   return fields.some((f) => f?.toLowerCase().includes(needle));
 }
 
-/** Envuelve en comillas solo si hace falta: una celda con coma, comilla o salto
- *  de línea rompe el CSV si no lleva comillas, así que el resto queda liviano. */
-function csvCell(v: string | number): string {
-  const s = String(v);
-  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
+/** Arma un .xlsx real con SheetJS y lo descarga. Solo se usan sus funciones de
+ *  escritura (`utils`/`write`): nunca se lee un archivo subido por el usuario,
+ *  así que las vulnerabilidades conocidas de la librería, que están en el
+ *  parser de lectura, no aplican a este uso.
+ *
+ *  El import es dinámico porque SheetJS pesa varios cientos de KB y solo hace
+ *  falta cuando alguien exporta: cargarlo en el bundle inicial le sumaría ese
+ *  peso a toda carga de la app, la usen o no. */
+async function downloadXlsx(filename: string, sheetName: string, headerIn: string[], rowsIn: (string | number)[][]) {
+  const XLSX = await import('xlsx');
+  // Una columna que quedó sin dato en *todas* las filas exportadas es ruido y
+  // se cae sola: exportar solo egresos deja "Estado" entero en guiones, y solo
+  // ingresos hace lo mismo con "Categoría". La que sí tiene datos se queda,
+  // guiones incluidos, porque ahí el guion distingue "no aplica" de "falta".
+  const sinDato = (v: string | number | undefined) => v === undefined || v === '' || v === '—';
+  const usada = headerIn.map((_, i) => !rowsIn.length || rowsIn.some((r) => !sinDato(r[i])));
+  const header = headerIn.filter((_, i) => usada[i]);
+  const rows = rowsIn.map((r) => r.filter((_, i) => usada[i]));
 
-/** El BOM al principio es lo que hace que Excel en Windows adivine UTF-8 solo:
- *  sin él, "José" o "₲" salen con la codificación pisada. */
-function downloadCsv(filename: string, header: string[], rows: (string | number)[][]) {
-  const csv = [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+  ws['!cols'] = header.map((_, i) => ({ wch: Math.max(10, ...rows.map((r) => String(r[i] ?? '').length), header[i].length) + 2 }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  const buf: ArrayBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -1274,26 +1287,40 @@ export function useFleetView(
     movEgrTotal: fmt(movTot.egr, st.hide),
     movIngTotal: fmt(movTot.ing, st.hide),
     movNetTotal: fmt(movTot.net, st.hide),
-    exportar: () => {
+    exportar: async () => {
       if (!movsFiltered.length) return toast('No hay movimientos para exportar con estos filtros');
-      downloadCsv(
-        'movimientos-' + isoLocal(TODAY) + '.csv',
-        ['Fecha', 'Tipo', 'Vehículo', 'Chofer', 'Descripción', 'Categoría', 'Estado', 'Monto'],
-        movsFiltered.map((m) => {
-          const c = cars.find((c2) => c2.id === m.carId);
-          return [
-            isoLocal(m.date),
-            m.type === 'ingreso' ? 'Ingreso' : 'Egreso',
-            c?.plate ?? '',
-            m.type === 'ingreso' ? (c?.driver ?? '') : '',
-            m.desc,
-            m.cat ?? '',
-            m.estado ?? '',
-            m.amount,
-          ];
-        }),
-      );
-      toast(movsFiltered.length + (movsFiltered.length === 1 ? ' movimiento exportado' : ' movimientos exportados'));
+      try {
+        await downloadXlsx(
+          'movimientos-' + isoLocal(TODAY) + '.xlsx',
+          'Movimientos',
+          ['Fecha', 'Tipo', 'Vehículo', 'Modelo', 'Año', 'Chofer', 'Descripción', 'Categoría', 'Estado', 'Comprobante', 'Monto'],
+          movsFiltered.map((m) => {
+            const c = cars.find((c2) => c2.id === m.carId);
+            const inc = m.type === 'ingreso';
+            return [
+              isoLocal(m.date),
+              inc ? 'Ingreso' : 'Egreso',
+              c?.plate ?? '',
+              c?.model ?? '',
+              c?.year ?? '',
+              // El chofer va en toda fila, no solo en los ingresos: un gasto del
+              // vehículo igual es del chofer que lo tiene asignado.
+              c?.driver ?? '',
+              m.desc,
+              // Un ingreso no tiene categoría de gasto y un egreso no tiene
+              // estado de cobro. El guion marca "no aplica"; si toda la
+              // exportación quedó así, `downloadXlsx` saca la columna entera.
+              inc ? '—' : (m.cat ?? '—'),
+              inc ? (m.estado === 'pagado' ? 'Cobrado' : m.estado === 'parcial' ? 'Pago parcial' : 'Pendiente') : '—',
+              m.comprobante ? m.comprobante.nombre : '—',
+              m.amount,
+            ];
+          }),
+        );
+        toast(movsFiltered.length + (movsFiltered.length === 1 ? ' movimiento exportado' : ' movimientos exportados'));
+      } catch {
+        toast('No se pudo generar el Excel — probá de nuevo');
+      }
     },
 
     hasDetail: !!st.detailId,
