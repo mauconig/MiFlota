@@ -35,6 +35,8 @@ export interface SeedMov {
   desc: string;
   cat?: string;
   estado?: MovEstado;
+  /** Chofer al que corresponde el cobro. Solo en ingresos. */
+  driver?: string;
 }
 
 /** Fecha de referencia de la flota de demostración. */
@@ -142,6 +144,7 @@ export function generateFleetData(): { cars: SeedCar[]; movs: SeedMov[] } {
         date: addD(SEED_TODAY, -d),
         estado,
         desc: 'Cuota diaria × 3 días',
+        driver: c.driver,
       });
     }
     const nE = 6 + Math.floor(R() * 5);

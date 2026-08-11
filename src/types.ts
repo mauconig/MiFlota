@@ -43,6 +43,11 @@ export interface Mov {
   desc: string;
   cat?: string;
   estado?: MovEstado;
+  /** Chofer al que corresponde este cobro. Ausente en los egresos, y en
+      ingresos viejos anteriores a este campo: ahí el chofer actual del auto
+      hace de valor por defecto. Si el auto cambia de chofer, los cobros ya
+      registrados no cambian de dueño — quedan con quien los generó. */
+  driver?: string;
   /** Adjunto del gasto. El archivo se pide por `/api/comprobantes/:id`. */
   comprobante?: { id: string; nombre: string; tipo: string };
 }

@@ -40,6 +40,9 @@ export interface MovRow {
   descripcion: string;
   cat: string | null;
   estado: string | null;
+  /** Chofer al que corresponde el cobro. Null = usar el chofer actual del
+   *  auto (movimientos viejos, o egresos que no llevan chofer). */
+  driver: string | null;
   /** Id del archivo en COMPROBANTES_DIR. Null = el movimiento no tiene adjunto. */
   comprobante: string | null;
   /** Nombre original, solo para mostrar y para la descarga. */
@@ -89,6 +92,7 @@ export function openDb() {
       descripcion TEXT NOT NULL,
       cat         TEXT,
       estado      TEXT CHECK (estado IN ('pagado','pendiente','parcial')),
+      driver      TEXT,
       comprobante        TEXT,
       comprobante_nombre TEXT,
       comprobante_tipo   TEXT
@@ -174,6 +178,10 @@ function migrarOwner(db: Database.Database) {
     // vehículo, que pudo haberse editado después de emitido el cobro.
     db.exec("UPDATE movs SET cobrado = amount, amount = amount * 2 WHERE type = 'ingreso' AND estado = 'parcial'");
   }
+  // Chofer al que corresponde cada cobro. Null en las filas viejas: el
+  // chofer actual del auto sigue siendo el valor por defecto para esas, así
+  // que la migración no necesita rellenarlas.
+  if (!cols('movs').includes('driver')) db.exec('ALTER TABLE movs ADD COLUMN driver TEXT');
 }
 
 /** Reasigna toda la flota huérfana (owner_id = 0) a un usuario. */
@@ -198,8 +206,8 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
     VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @gps_tag, @service_cada, @service_unidad, @last_service_date, @seguro_date, @seguro_costo, @seguro_periodo, @seguro_cada)
   `);
   const insMov = db.prepare(`
-    INSERT INTO movs (owner_id, car_id, type, amount, cobrado, date, descripcion, cat, estado)
-    VALUES (@owner_id, @car_id, @type, @amount, @cobrado, @date, @descripcion, @cat, @estado)
+    INSERT INTO movs (owner_id, car_id, type, amount, cobrado, date, descripcion, cat, estado, driver)
+    VALUES (@owner_id, @car_id, @type, @amount, @cobrado, @date, @descripcion, @cat, @estado, @driver)
   `);
 
   db.transaction(() => {
@@ -234,6 +242,7 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
         descripcion: m.desc,
         cat: m.cat ?? null,
         estado: m.estado ?? null,
+        driver: m.driver ?? null,
       });
     }
   })();
@@ -275,6 +284,7 @@ export function movToJson(r: MovRow) {
     ...(r.cobrado === null ? {} : { cobrado: r.cobrado }),
     ...(r.cat ? { cat: r.cat } : {}),
     ...(r.estado ? { estado: r.estado } : {}),
+    ...(r.driver ? { driver: r.driver } : {}),
     // El cliente nunca ve la ruta del archivo, solo si hay uno y cómo se llama.
     ...(r.comprobante ? { comprobante: { id: r.comprobante, nombre: r.comprobante_nombre ?? 'comprobante', tipo: r.comprobante_tipo ?? '' } } : {}),
   };

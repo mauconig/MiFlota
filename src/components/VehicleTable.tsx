@@ -40,9 +40,7 @@ export function VehicleTable({ cols, rows, variant }: { cols: ColItem[]; rows: V
           <span style={{ display: 'block', fontSize: 14, fontWeight: 700, letterSpacing: '0.01em', whiteSpace: 'nowrap' }}>{r.plate}</span>
           <span style={{ display: 'block', fontSize: 11, color: '#6b665c', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {r.model}
-            {variant === 'resumen' && (
-              <span style={{ color: r.gpsFg }}> · {r.gpsTag}</span>
-            )}
+            <span style={{ color: r.gpsFg }}> · {r.gpsTag}</span>
           </span>
         </span>
       </span>

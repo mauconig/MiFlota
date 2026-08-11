@@ -103,6 +103,7 @@ export interface CatItem {
 export interface AlertFull {
   plate: string;
   model: string;
+  gpsTag: string;
   text: string;
   kind: string;
   dot: string;
@@ -489,6 +490,12 @@ const PTAG: Record<string, [string, string]> = {
  *  cobrado entero, que es lo que significaba antes de que existiera la columna. */
 const cobradoDe = (m: Mov) => m.cobrado ?? m.amount;
 
+/** Chofer al que corresponde un cobro. Si el auto cambió de chofer después de
+ *  generado, el cobro se queda con quien lo generó, no con quien maneja el
+ *  auto hoy: por eso `m.driver` manda, y el chofer actual del auto es solo el
+ *  valor por defecto para movimientos anteriores a este campo. */
+const paidBy = (m: Mov, c: Car) => m.driver || c.driver;
+
 function stats(movs: Mov[], f: (m: Mov) => boolean) {
   // `ing` es plata que entró de verdad; `fact` es lo emitido. La diferencia es
   // la deuda de los choferes, y por eso la ganancia neta se calcula con `ing`:
@@ -696,7 +703,7 @@ export function useFleetView(
   const cobrosVista = cobroMovs
     .map((m) => ({ m, c: cars.find((c2) => c2.id === m.carId)!, debe: deudaDe(m) }))
     .filter(({ m, debe }) => (st.pendKind === 'todas' ? true : st.pendKind === (debe === 0 ? 'Cobrado' : cobradoDe(m) > 0 ? 'Parcial' : 'Pendiente')))
-    .filter(({ c }) => matches(st.pendQ, c.driver, c.plate, c.model));
+    .filter(({ m, c }) => matches(st.pendQ, paidBy(m, c), c.plate, c.model, c.gpsTag));
   const cobrosVistaDeuda = cobrosVista.reduce((a, x) => a + x.debe, 0);
 
   const alertList: { car: Car; kind: string; sev: number; text: string }[] = [];
@@ -723,7 +730,7 @@ export function useFleetView(
 
   const perCar = cars.map((c) => ({ c, ...stats(movs, (m) => m.carId === c.id && inR(m)) }));
   const maxNet = Math.max(...perCar.map((x) => Math.abs(x.net)), 1);
-  const filtered = perCar.filter((x) => (st.filter === 'todos' ? true : x.c.estado === st.filter) && matches(st.carQ, x.c.plate, x.c.model, x.c.driver));
+  const filtered = perCar.filter((x) => (st.filter === 'todos' ? true : x.c.estado === st.filter) && matches(st.carQ, x.c.plate, x.c.model, x.c.driver, x.c.gpsTag));
   const keyF: (x: (typeof perCar)[number]) => string | number =
     ({
       plate: (x: any) => x.c.plate,
@@ -794,7 +801,7 @@ export function useFleetView(
     return (
       (st.movType === 'todos' || m.type === st.movType) &&
       (st.movCat === 'todas' || (m.type === 'egreso' && m.cat === st.movCat)) &&
-      matches(st.movQ, m.desc, m.cat, c?.driver, c?.model, c?.plate)
+      matches(st.movQ, m.desc, m.cat, c && paidBy(m, c), c?.model, c?.plate, c?.gpsTag)
     );
   });
   const movTot = stats(movsFiltered, () => true);
@@ -873,8 +880,10 @@ export function useFleetView(
       months.push({ label: MES[m0], ing: s2.ing, egr: s2.egr, net: s2.net });
     }
     const mMax = Math.max(...months.map((m) => Math.max(m.ing, m.egr)), 1);
-    const cuotasCobradas = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && m.estado === 'pagado' && inR(m)).length;
-    const cuotasPend = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && m.estado !== 'pagado' && inR(m));
+    // El resumen del chofer es de quien maneja el auto hoy: si cambió de
+    // chofer, las cuotas de quien lo manejaba antes no cuentan acá.
+    const cuotasCobradas = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && m.estado === 'pagado' && paidBy(m, c) === c.driver && inR(m)).length;
+    const cuotasPend = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && m.estado !== 'pagado' && paidBy(m, c) === c.driver && inR(m));
 
     // El intervalo de service se edita en borrador y se confirma con "Guardar":
     // a diferencia del resto de la ficha, escribir un número de a un dígito
@@ -1221,10 +1230,11 @@ export function useFleetView(
       return vencidos ? avisos + ' · ' + vencidos + (vencidos === 1 ? ' vencido' : ' vencidos') : avisos;
     })(),
     alertsFull: (st.alertKind === 'todas' ? alertList : alertList.filter((a) => a.kind === st.alertKind))
-      .filter((a) => matches(st.alertQ, a.car.plate, a.car.model, a.car.driver, a.text))
+      .filter((a) => matches(st.alertQ, a.car.plate, a.car.model, a.car.driver, a.car.gpsTag, a.text))
       .map((a) => ({
         plate: a.car.plate,
         model: a.car.model + ' · ' + a.car.year,
+        gpsTag: a.car.gpsTag || 'Sin GPS',
         text: a.text,
         kind: a.kind,
         dot: a.sev === 2 ? COLORS.neg : COLORS.warn,
@@ -1245,17 +1255,18 @@ export function useFleetView(
       const n = cobrosVista.length;
       // Con un solo chofer en la vista el texto habla de él en singular, que es
       // como se lee cuando buscás a alguien puntual.
-      const unico = new Set(cobrosVista.map((x) => x.c.driver));
+      const unico = new Set(cobrosVista.map((x) => paidBy(x.m, x.c)));
       const quien = unico.size === 1 ? [...unico][0] + ' debe ' : 'deben ';
       return n + (n === 1 ? ' cobro · ' : ' cobros · ') + (cobrosVistaDeuda ? quien + fmt(cobrosVistaDeuda, st.hide) : 'sin deuda');
     })(),
     cobrosFull: cobrosVista.map(({ m, c, debe }) => {
         const cob = cobradoDe(m);
         const tag = debe === 0 ? 'Cobrado' : cob > 0 ? 'Parcial' : 'Pendiente';
+        const drv = paidBy(m, c);
         return {
-          initials: initials(c.driver),
-          driver: c.driver,
-          plate: c.plate + ' · ' + c.model,
+          initials: initials(drv),
+          driver: drv,
+          plate: c.plate + ' · ' + c.model + ' · ' + (c.gpsTag || 'Sin GPS'),
           desc: m.desc,
           dateLbl: dLbl(m.date),
           tag,
@@ -1284,16 +1295,22 @@ export function useFleetView(
       .map((x, i) => ({ pos: String(i + 1), plate: x.c.plate, driver: x.c.driver, net: fmtShort(x.net, st.hide) })),
 
     choferes: perCar
-      .filter((x) => x.c.driver !== 'Sin chofer' && matches(st.chQ, x.c.driver, x.c.plate, x.c.model))
+      .filter((x) => x.c.driver !== 'Sin chofer' && matches(st.chQ, x.c.driver, x.c.plate, x.c.model, x.c.gpsTag))
       .map((x) => {
-        const pend = pendMovs.filter((m) => m.carId === x.c.id).reduce((a, m) => a + deudaDe(m), 0);
+        // Si el auto cambió de chofer, esta tarjeta es del chofer actual: solo
+        // cuentan los cobros que le corresponden a él, no todo el historial del
+        // auto (el chofer anterior tiene los suyos en su propia tarjeta, si
+        // todavía maneja alguno).
+        const propios = (m: Mov) => m.carId === x.c.id && paidBy(m, x.c) === x.c.driver;
+        const dStats = stats(movs, (m) => propios(m) && inR(m));
+        const pend = pendMovs.filter(propios).reduce((a, m) => a + deudaDe(m), 0);
         const ok = pend === 0;
         return {
           initials: initials(x.c.driver),
           name: x.c.driver,
-          carLbl: x.c.plate + ' · ' + x.c.model,
+          carLbl: x.c.plate + ' · ' + x.c.model + ' · ' + (x.c.gpsTag || 'Sin GPS'),
           cuota: fmtShort(x.c.cuota, st.hide),
-          cobrado: fmtShort(x.ing, st.hide),
+          cobrado: fmtShort(dStats.ing, st.hide),
           pend: pend ? fmtShort(pend, st.hide) : '—',
           pendFg: pend ? '#c0553f' : '#6b665c',
           tag: ok ? 'Al día' : 'Debe',
@@ -1338,7 +1355,7 @@ export function useFleetView(
         desc: m.desc,
         // Una cuota a medias arrastra su deuda al subtítulo, así el listado
         // general no queda mostrando plata que en realidad no entró.
-        sub: c.plate + ' · ' + (inc ? c.driver + (m.amount - cobradoDe(m) > 0 ? ' · debe ' + fmtShort(m.amount - cobradoDe(m), st.hide) : '') : m.cat),
+        sub: c.plate + ' · ' + (c.gpsTag || 'Sin GPS') + ' · ' + (inc ? paidBy(m, c) + (m.amount - cobradoDe(m) > 0 ? ' · debe ' + fmtShort(m.amount - cobradoDe(m), st.hide) : '') : m.cat),
         amt: (inc ? '+' : '−') + fmtShort(inc ? cobradoDe(m) : m.amount, st.hide),
         amtFg: inc ? '#2e7d5b' : '#c0553f',
       };
