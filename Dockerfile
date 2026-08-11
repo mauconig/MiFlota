@@ -6,11 +6,15 @@
 # resolver, aunque acá no se construyan.
 FROM node:22-bookworm-slim AS front
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json ./
 COPY apps/admin-web/package.json apps/admin-web/package.json
 COPY apps/admin-mobile/package.json apps/admin-mobile/package.json
 COPY apps/driver/package.json apps/driver/package.json
-RUN npm ci
+# Sin package-lock.json a propósito: el que se versiona se genera en Windows,
+# y un install que lo respete no trae el binding nativo de rolldown (usado
+# por Vite) para linux-x64 (npm/cli#4828). Sin lockfile, npm resuelve fresco
+# para la plataforma del contenedor.
+RUN npm install
 COPY apps/admin-web ./apps/admin-web
 RUN npm run build -w admin-web
 
@@ -39,7 +43,7 @@ WORKDIR /srv
 COPY --from=api /tmp/node_modules_prod ./node_modules
 COPY --from=api /srv/dist ./dist
 COPY --from=api /srv/package.json ./package.json
-COPY --from=front /app/dist ./public
+COPY --from=front /app/apps/admin-web/dist ./public
 
 # La base vive en un volumen, no en la capa de imagen: reconstruir la imagen no
 # debe borrar los datos.
