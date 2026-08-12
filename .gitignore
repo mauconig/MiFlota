@@ -33,3 +33,12 @@ apps/api/.tmp
 
 # Credenciales locales
 .env
+
+# Expo (apps/admin-mobile)
+.expo/
+apps/admin-mobile/ios/
+apps/admin-mobile/android/
+apps/admin-mobile/expo-env.d.ts
+*.tsbuildinfo
+*.orig.*
+.kotlin/
