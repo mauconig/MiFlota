@@ -371,6 +371,69 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
   return reply.code(201).send({ car: carToJson(selCar.get(car.id, u.id) as CarRow), mov: movToJson(mov) });
 });
 
+/** Categorías válidas para un gasto suelto. Mismo set que `CATS` en el cliente. */
+const CATS_EGRESO = new Set(['Taller', 'Combustible', 'Seguro', 'Multas', 'Documentación', 'Otros']);
+
+/** Gasto genérico con comprobante opcional, sin efecto sobre el estado del auto:
+ *  a diferencia de `/taller`, esta ruta no saca al vehículo de circulación —
+ *  eso sigue siendo una decisión aparte, tomada en la ficha del auto. */
+app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) => {
+  const u = quien(req);
+  const car = selCar.get(req.params.id, u.id) as CarRow | undefined;
+  if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
+
+  let razon = '';
+  let monto = 0;
+  let cat = '';
+  let archivo: { id: string; nombre: string; tipo: string } | null = null;
+
+  try {
+    for await (const parte of req.parts()) {
+      if (parte.type === 'field') {
+        if (parte.fieldname === 'razon') razon = String(parte.value).trim().slice(0, 120);
+        if (parte.fieldname === 'monto') monto = Number(String(parte.value).replace(/\D/g, '')) || 0;
+        if (parte.fieldname === 'cat') cat = String(parte.value);
+        continue;
+      }
+      if (parte.fieldname !== 'comprobante') {
+        await parte.toBuffer();
+        continue;
+      }
+      const ext = TIPOS_COMPROBANTE[parte.mimetype];
+      if (!ext) {
+        await parte.toBuffer();
+        return reply.code(415).send({ error: 'El comprobante tiene que ser una foto o un PDF' });
+      }
+      const buf = await parte.toBuffer();
+      if (!buf.length) continue;
+      const id = randomUUID() + '.' + ext;
+      await writeFile(join(COMPROBANTES_DIR, id), buf);
+      archivo = { id, nombre: String(parte.filename || 'comprobante').slice(0, 120), tipo: parte.mimetype };
+    }
+  } catch (e) {
+    const err = e as { code?: string };
+    if (err.code === 'FST_REQ_FILE_TOO_LARGE') return reply.code(413).send({ error: 'El comprobante no puede pasar de 8 MB' });
+    throw e;
+  }
+
+  if (!razon) return reply.code(400).send({ error: 'Indicá de qué es el gasto' });
+  if (monto <= 0 || monto > 1_000_000_000) return reply.code(400).send({ error: 'Indicá cuánto se gastó' });
+  if (!CATS_EGRESO.has(cat)) return reply.code(400).send({ error: 'Elegí una categoría válida' });
+
+  const hoy = new Date().toISOString().slice(0, 10);
+  const info = db
+    .prepare(
+      `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
+       VALUES (?, ?, 'egreso', ?, ?, ?, ?, NULL, ?, ?, ?)`,
+    )
+    .run(u.id, car.id, monto, hoy, razon, cat, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
+
+  req.log.info({ car: car.plate, cat, monto, comprobante: !!archivo }, 'gasto registrado');
+
+  const mov = db.prepare('SELECT * FROM movs WHERE id = ?').get(info.lastInsertRowid) as MovRow;
+  return reply.code(201).send({ mov: movToJson(mov) });
+});
+
 /** Descarga del comprobante. Se resuelve por el movimiento y no por el nombre
  *  del archivo, así que el id solo sirve si el movimiento es del que pregunta. */
 app.get<{ Params: { id: string } }>('/api/comprobantes/:id', async (req, reply) => {

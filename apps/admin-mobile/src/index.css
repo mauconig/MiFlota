@@ -18,4 +18,39 @@ body {
   background: #f4f0e8;
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   color: #1a1a18;
+  overscroll-behavior-y: none;
+}
+
+button,
+input,
+select {
+  font-family: inherit;
+}
+
+a {
+  color: #b5791a;
+}
+
+::selection {
+  background: #f7dfae;
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes sheetIn {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
 }
