@@ -1,11 +1,12 @@
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
 import { useAuth } from '../../auth';
 import * as api from '../../api';
 import { SinSesion } from '../../api';
 import { TabHeader } from '../../components/Header';
+import { SkeletonList } from '../../components/Skeleton';
 import { fmtD, plural } from '../../format';
 import { COLORS } from '../../theme';
 import type { EstadoReporte, Reporte } from '../../types';
@@ -22,6 +23,7 @@ export default function Reportes() {
   const router = useRouter();
   const [reportes, setReportes] = useState<Reporte[] | null>(null);
   const [cargando, setCargando] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const cargar = useCallback(async () => {
     if (!token) return;
@@ -34,11 +36,26 @@ export default function Reportes() {
     }
   }, [token, sesionVencida]);
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await cargar();
+    setRefreshing(false);
+  }, [cargar]);
+
   useFocusEffect(
     useCallback(() => {
       cargar();
     }, [cargar]),
   );
+
+  if (cargando && !reportes) {
+    return (
+      <View style={{ flex: 1 }}>
+        <TabHeader title="Reportes del auto" sub="Cargando…" initials={me ? initials(me.driver) : ''} onPerfil={() => router.push('/(app)/perfil' as never)} />
+        <SkeletonList count={3} />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1 }}>
@@ -48,7 +65,10 @@ export default function Reportes() {
         initials={me ? initials(me.driver) : ''}
         onPerfil={() => router.push('/(app)/perfil' as never)}
       />
-      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 6, gap: 12 }}>
+      <ScrollView
+        contentContainerStyle={{ padding: 16, paddingTop: 6, gap: 12 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.textMuted} />}
+      >
         <Pressable
           onPress={() => router.push('/(app)/nueva-queja' as never)}
           style={{ borderWidth: 1, borderStyle: 'dashed', borderColor: '#d8cdb8', backgroundColor: '#fbf7ee', borderRadius: 20, minHeight: 50, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 9 }}
@@ -60,9 +80,7 @@ export default function Reportes() {
           <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.textSoft }}>Reportar una falla</Text>
         </Pressable>
 
-        {cargando && !reportes ? (
-          <ActivityIndicator color={COLORS.bgDark} style={{ marginTop: 20 }} />
-        ) : (reportes ?? []).length === 0 ? (
+        {(reportes ?? []).length === 0 ? (
           <Text style={{ fontSize: 13, color: COLORS.textMuted, textAlign: 'center', marginTop: 20 }}>Todavía no reportaste ninguna falla.</Text>
         ) : (
           (reportes ?? []).map((q) => {

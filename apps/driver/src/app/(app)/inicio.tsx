@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
+import { RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
 import { useAuth } from '../../auth';
@@ -8,6 +8,7 @@ import { SinSesion } from '../../api';
 import { Card } from '../../components/Card';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { TabHeader } from '../../components/Header';
+import { SkeletonDashboard } from '../../components/Skeleton';
 import { fmtG, fmtD, fmtHoy, mesLabel } from '../../format';
 import { COLORS } from '../../theme';
 import type { Resumen } from '../../types';
@@ -32,6 +33,7 @@ export default function Inicio() {
   const router = useRouter();
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [cargando, setCargando] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const cargar = useCallback(async () => {
     if (!token) return;
@@ -45,19 +47,28 @@ export default function Inicio() {
     }
   }, [token, sesionVencida]);
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await cargar();
+    setRefreshing(false);
+  }, [cargar]);
+
   useFocusEffect(
     useCallback(() => {
       cargar();
     }, [cargar]),
   );
 
-  if (cargando || !resumen || !me) {
+  if (cargando && !resumen) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color={COLORS.bgDark} />
+      <View style={{ flex: 1 }}>
+        <TabHeader title="Cargando…" sub="" initials="" onPerfil={() => {}} />
+        <SkeletonDashboard />
       </View>
     );
   }
+
+  if (!resumen || !me) return null;
 
   const tag = ESTADO_TAG[resumen.estado];
   const primerNombre = me.driver.split(' ')[0];
@@ -68,7 +79,10 @@ export default function Inicio() {
   return (
     <View style={{ flex: 1 }}>
       <TabHeader title={`Hola, ${primerNombre}`} sub={fmtHoy()} initials={initials(me.driver)} onPerfil={() => router.push('/(app)/perfil' as never)} />
-      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 6, gap: 12 }}>
+      <ScrollView
+        contentContainerStyle={{ padding: 16, paddingTop: 6, gap: 12 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.textMuted} />}
+      >
         {resumen.estado === 'atrasado' && (
           <View style={{ backgroundColor: COLORS.redBg, borderWidth: 1, borderColor: '#f0d0c6', borderRadius: 20, padding: 14, flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
             <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: COLORS.redDark, alignItems: 'center', justifyContent: 'center' }}>
