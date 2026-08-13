@@ -26,6 +26,10 @@ export interface CarRow {
   seguro_costo: number;
   seguro_periodo: string;
   seguro_cada: number;
+  /** Credenciales para entrar a apps/driver. Nulas hasta que el dueño las
+   *  genera; nunca se exponen en carToJson. */
+  driver_username: string | null;
+  driver_pass_hash: string | null;
 }
 
 export interface MovRow {
@@ -70,6 +74,25 @@ export interface PagoRow {
   tipo: string;
   medio: string | null;
   nota: string | null;
+  comprobante: string | null;
+  comprobante_nombre: string | null;
+  comprobante_tipo: string | null;
+}
+
+/** Un reporte de falla que un chofer manda desde apps/driver. Pensado para
+ *  poder mezclarse a futuro en el mismo `alertList` que ya arma Service/
+ *  Seguro/Taller (ver useFleetView.ts) — por eso `estado` deja lugar para que
+ *  el dueño lo vaya moviendo, aunque hoy nada todavía lo cambia de 'enviada'. */
+export interface ReporteRow {
+  id: number;
+  owner_id: number;
+  car_id: string;
+  driver: string;
+  cat: string;
+  urgencia: string;
+  texto: string;
+  estado: string;
+  fecha: string;
 }
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`: ordenan lexicográficamente en SQL y
@@ -131,6 +154,21 @@ export function openDb() {
       nota     TEXT
     );
 
+    -- Reportes de falla que un chofer manda desde apps/driver. El estado queda
+    -- listo para que el dueño lo mueva (vista/en_taller/resuelta) el día que
+    -- admin-web los muestre, aunque hoy nada todavía lo hace avanzar.
+    CREATE TABLE IF NOT EXISTS reportes_falla (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner_id INTEGER NOT NULL,
+      car_id   TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+      driver   TEXT NOT NULL,
+      cat      TEXT NOT NULL,
+      urgencia TEXT NOT NULL CHECK (urgencia IN ('puedo','urgente')),
+      texto    TEXT NOT NULL,
+      estado   TEXT NOT NULL DEFAULT 'enviada' CHECK (estado IN ('enviada','vista','en_taller','resuelta')),
+      fecha    TEXT NOT NULL
+    );
+
     -- Banderas de migraciones que corren una sola vez en la vida de la base.
     -- No usar la ausencia/presencia de una columna como guard cuando la propia
     -- migración la borra: en el siguiente arranque la columna vuelve a estar
@@ -140,10 +178,12 @@ export function openDb() {
       value TEXT NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS idx_movs_car    ON movs(car_id);
-    CREATE INDEX IF NOT EXISTS idx_movs_date   ON movs(date);
-    CREATE INDEX IF NOT EXISTS idx_pagos_owner ON pagos(owner_id);
-    CREATE INDEX IF NOT EXISTS idx_pagos_drv   ON pagos(driver);
+    CREATE INDEX IF NOT EXISTS idx_movs_car       ON movs(car_id);
+    CREATE INDEX IF NOT EXISTS idx_movs_date      ON movs(date);
+    CREATE INDEX IF NOT EXISTS idx_pagos_owner    ON pagos(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_pagos_drv      ON pagos(driver);
+    CREATE INDEX IF NOT EXISTS idx_reportes_owner ON reportes_falla(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_reportes_car   ON reportes_falla(car_id);
   `);
 
   // Los índices sobre owner_id se crean dentro de la migración, no acá: en una
@@ -211,6 +251,28 @@ function migrarOwner(db: Database.Database) {
   // chofer actual del auto sigue siendo el valor por defecto para esas, así
   // que la migración no necesita rellenarlas.
   if (!cols('movs').includes('driver')) db.exec('ALTER TABLE movs ADD COLUMN driver TEXT');
+
+  // Credenciales del chofer para entrar a apps/driver. Nulas hasta que el
+  // dueño las genera con POST /api/cars/:id/chofer-credenciales: un auto
+  // recién creado, o sin chofer, no tiene con qué entrar.
+  if (!cols('cars').includes('driver_username')) {
+    db.exec('ALTER TABLE cars ADD COLUMN driver_username TEXT');
+    db.exec('ALTER TABLE cars ADD COLUMN driver_pass_hash TEXT');
+    // SQLite no permite UNIQUE en un ALTER TABLE ADD COLUMN: va como índice
+    // parcial aparte. Parcial porque el login del chofer busca por usuario
+    // solo (no conoce su owner_id) y necesita que alcance para identificar
+    // una fila en toda la base; NULL no cuenta como duplicado, así que los
+    // autos sin chofer logueable no chocan entre sí.
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_cars_driver_username ON cars(driver_username) WHERE driver_username IS NOT NULL');
+  }
+
+  // Comprobante de un pago hecho desde apps/driver (mismo tratamiento que ya
+  // tiene movs.comprobante, ver arriba).
+  if (!cols('pagos').includes('comprobante')) {
+    db.exec('ALTER TABLE pagos ADD COLUMN comprobante TEXT');
+    db.exec('ALTER TABLE pagos ADD COLUMN comprobante_nombre TEXT');
+    db.exec('ALTER TABLE pagos ADD COLUMN comprobante_tipo TEXT');
+  }
 
   // Antes `amount` significaba dos cosas distintas según el estado: en un cobro
   // pagado era la plata que entró, en uno pendiente la que se esperaba, y en uno
@@ -387,5 +449,19 @@ export function pagoToJson(r: PagoRow) {
     tipo: r.tipo,
     ...(r.medio ? { medio: r.medio } : {}),
     ...(r.nota ? { nota: r.nota } : {}),
+    ...(r.comprobante ? { comprobante: { id: r.comprobante, nombre: r.comprobante_nombre ?? 'comprobante', tipo: r.comprobante_tipo ?? '' } } : {}),
+  };
+}
+
+export function reporteToJson(r: ReporteRow) {
+  return {
+    id: r.id,
+    carId: r.car_id,
+    driver: r.driver,
+    cat: r.cat,
+    urgencia: r.urgencia,
+    texto: r.texto,
+    estado: r.estado,
+    fecha: r.fecha,
   };
 }

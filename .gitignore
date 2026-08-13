@@ -34,11 +34,14 @@ apps/api/.tmp
 # Credenciales locales
 .env
 
-# Expo (apps/admin-mobile)
+# Expo (apps/admin-mobile, apps/driver)
 .expo/
 apps/admin-mobile/ios/
 apps/admin-mobile/android/
 apps/admin-mobile/expo-env.d.ts
+apps/driver/ios/
+apps/driver/android/
+apps/driver/expo-env.d.ts
 *.tsbuildinfo
 *.orig.*
 .kotlin/
