@@ -27,6 +27,7 @@ dist-ssr
 apps/api/node_modules
 apps/api/dist
 apps/api/.tmp
+apps/api/.localdata
 *.db
 *.db-wal
 *.db-shm
