@@ -6,16 +6,17 @@ React + TypeScript + Vite en el frontend, Fastify + SQLite en el backend.
 
 ## Estructura
 
-Monorepo con tres frontends (un workspace npm cada uno) y un backend
-independiente que los tres comparten:
+Monorepo con tres frontends y un backend independiente que los tres comparten:
 
 - `apps/admin-web` — panel de escritorio para el dueño (PC). Es la app
-  original y hoy la única con pantallas completas.
-- `apps/admin-mobile` — vista simplificada para el celular del dueño.
-  Todavía vacía (placeholder), pensada para alertas y cobros sin la
-  densidad de tablas del panel de escritorio.
+  original y hoy la única con pantallas completas. Workspace npm.
+- `apps/admin-mobile` — app Expo/React Native para el celular del dueño.
+  No es un workspace npm: React Native exige una versión exacta de `react`
+  (distinta de la que usan los frontends web) y mezclar ambas en el mismo
+  árbol de resolución de npm termina duplicando `react` en el bundle. Tiene
+  su propio `node_modules`/`package-lock.json`, igual que `apps/api`.
 - `apps/driver` — app para choferes (ver su deuda, registrar pagos, subir
-  comprobantes). Todavía vacía (placeholder).
+  comprobantes). Todavía vacía (placeholder). Workspace npm.
 - `apps/api` — backend Fastify + SQLite compartido por los tres frontends.
   No es un workspace npm: tiene una dependencia nativa (`better-sqlite3`) y
   gestiona su propio `node_modules`/`package-lock.json` por separado.
@@ -30,12 +31,13 @@ Dentro de `apps/admin-web`:
 ## Desarrollo
 
 ```bash
-npm install          # instala los tres frontends (workspaces)
-cd apps/api && npm install   # instala el backend por separado
+npm install                        # instala admin-web y driver (workspaces)
+cd apps/api && npm install         # instala el backend por separado
+cd apps/admin-mobile && npm install   # instala admin-mobile por separado
 
 npm run dev:api       # backend en :3000
 npm run dev            # admin-web en :5173 (alias de dev:admin-web)
-npm run dev:admin-mobile   # :5175
+npm run dev:admin-mobile   # Expo (Metro en :8081)
 npm run dev:driver         # :5176
 ```
 

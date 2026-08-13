@@ -1,49 +1,66 @@
+import { Pressable, Text, View } from 'react-native';
+import Svg, { Path, Rect } from 'react-native-svg';
 import type { MobileView } from '../useMobileView';
 import { Avatar } from '../components/Avatar';
 
 export function Ranking({ v }: { v: MobileView }) {
   const rk = v.ranking;
-  const seg = (on: boolean) => ({ background: on ? '#16150f' : 'transparent', color: on ? '#fffdf8' : '#6b665c' });
+  const segBg = (on: boolean) => (on ? '#16150f' : 'transparent');
+  const segFg = (on: boolean) => (on ? '#fffdf8' : '#6b665c');
   return (
-    <main style={{ padding: '8px 16px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'center', padding: '2px 0' }}>
-        <button onClick={v.period.openSheet} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 9, background: '#fffdf8', border: '1px solid #e6ded0', borderRadius: 24, padding: '9px 18px', fontSize: 13, fontWeight: 600, color: '#1a1a18', cursor: 'pointer' }}>
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#6b665c" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="5" width="18" height="16" rx="3" />
-            <path d="M8 3v4" />
-            <path d="M16 3v4" />
-            <path d="M3 11h18" />
-          </svg>
-          {v.period.label}
-        </button>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'row', background: '#fffdf8', border: '1px solid #e6ded0', borderRadius: 24, padding: 4, gap: 2 }}>
-        <button onClick={rk.setAuto} style={{ flex: 1, border: 'none', cursor: 'pointer', borderRadius: 20, padding: '9px 0', fontSize: 13, fontWeight: 600, ...seg(rk.byAuto) }}>
-          Por auto
-        </button>
-        <button onClick={rk.setModelo} style={{ flex: 1, border: 'none', cursor: 'pointer', borderRadius: 20, padding: '9px 0', fontSize: 13, fontWeight: 600, ...seg(!rk.byAuto) }}>
-          Por modelo
-        </button>
-      </div>
-      <div style={{ fontSize: 11, color: '#6b665c', paddingLeft: 6 }}>{rk.hint}</div>
+    <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16, gap: 10 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'center', paddingVertical: 2 }}>
+        <Pressable onPress={v.period.openSheet} style={{ flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#e6ded0', borderRadius: 24, paddingVertical: 9, paddingHorizontal: 18 }}>
+          <Svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="#6b665c" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+            <Rect x="3" y="5" width="18" height="16" rx="3" />
+            <Path d="M8 3v4" />
+            <Path d="M16 3v4" />
+            <Path d="M3 11h18" />
+          </Svg>
+          <Text style={{ fontSize: 13, fontWeight: '600', color: '#1a1a18' }}>{v.period.label}</Text>
+        </Pressable>
+      </View>
+      <View style={{ flexDirection: 'row', backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#e6ded0', borderRadius: 24, padding: 4, gap: 2 }}>
+        <Pressable onPress={rk.setAuto} style={{ flex: 1, borderRadius: 20, paddingVertical: 9, alignItems: 'center', backgroundColor: segBg(rk.byAuto) }}>
+          <Text style={{ fontSize: 13, fontWeight: '600', color: segFg(rk.byAuto) }}>Por auto</Text>
+        </Pressable>
+        <Pressable onPress={rk.setModelo} style={{ flex: 1, borderRadius: 20, paddingVertical: 9, alignItems: 'center', backgroundColor: segBg(!rk.byAuto) }}>
+          <Text style={{ fontSize: 13, fontWeight: '600', color: segFg(!rk.byAuto) }}>Por modelo</Text>
+        </Pressable>
+      </View>
+      <Text style={{ fontSize: 11, color: '#6b665c', paddingLeft: 6 }}>{rk.hint}</Text>
       {rk.rows.map((r, i) => (
-        <button
+        <Pressable
           key={i}
-          onClick={r.open}
-          style={{ background: i === 0 ? '#fdf6e8' : '#fffdf8', border: '1px solid ' + (i === 0 ? '#f2e4c6' : '#ece4d6'), borderRadius: 20, padding: '12px 15px', display: 'grid', gridTemplateColumns: '28px 34px 1fr 84px', alignItems: 'center', gap: 11, width: '100%', cursor: 'pointer', textAlign: 'left', color: 'inherit' }}
+          onPress={r.open}
+          style={{
+            backgroundColor: i === 0 ? '#fdf6e8' : '#fffdf8',
+            borderWidth: 1,
+            borderColor: i === 0 ? '#f2e4c6' : '#ece4d6',
+            borderRadius: 20,
+            paddingVertical: 12,
+            paddingHorizontal: 15,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 11,
+          }}
         >
-          <span style={{ fontSize: 14, fontWeight: 800, color: r.posColor }}>{r.pos}</span>
+          <Text style={{ width: 28, fontSize: 14, fontWeight: '800', color: r.posColor }}>{r.pos}</Text>
           <Avatar label={r.initials} size={34} />
-          <span style={{ minWidth: 0 }}>
-            <span style={{ display: 'block', fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em' }}>{r.name}</span>
-            <span style={{ display: 'block', fontSize: 11, color: '#6b665c', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.sub}</span>
-            <span style={{ display: 'block', height: 6, borderRadius: 3, background: '#f0ebe0', position: 'relative', marginTop: 6 }}>
-              <span style={{ position: 'absolute', inset: '0 auto 0 0', width: r.w + '%', borderRadius: 3, background: r.color }} />
-            </span>
-          </span>
-          <span style={{ textAlign: 'right', fontSize: 15, fontWeight: 700, letterSpacing: '-0.02em', color: r.color }}>{r.net}</span>
-        </button>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', letterSpacing: -0.2 }} numberOfLines={1}>
+              {r.name}
+            </Text>
+            <Text style={{ fontSize: 11, color: '#6b665c', marginTop: 1 }} numberOfLines={1}>
+              {r.sub}
+            </Text>
+            <View style={{ height: 6, borderRadius: 3, backgroundColor: '#f0ebe0', marginTop: 6 }}>
+              <View style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${r.w}%`, borderRadius: 3, backgroundColor: r.color }} />
+            </View>
+          </View>
+          <Text style={{ width: 84, textAlign: 'right', fontSize: 15, fontWeight: '700', letterSpacing: -0.3, color: r.color }}>{r.net}</Text>
+        </Pressable>
       ))}
-    </main>
+    </View>
   );
 }

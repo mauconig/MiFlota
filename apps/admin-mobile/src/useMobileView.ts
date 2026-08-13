@@ -1,13 +1,16 @@
-import { useEffect } from 'react';
-import type { Car, Mov, Pago, MobileState, Screen, RegistrarTab, FleetFilter } from './types';
+import { useEffect, useRef } from 'react';
+import { BackHandler, Keyboard } from 'react-native';
+import type { Car, Mov, Pago, MobileState, Screen, RegistrarTab, FleetFilter, PickedFile } from './types';
 import { imputar, type Aplicacion } from './cobranza';
 import { CATS, CATCOLORS } from './data';
-import { COLORS, TODAY, addD, addM, daysBetween, durLbl, dLbl, fmt, fmtShort, initials, statusColor, numFromInput, miles, isoLocal } from './format';
+import { COLORS, TODAY, addD, addM, daysBetween, durLbl, dLbl, dLblFull, fmt, fmtShort, initials, statusColor, numFromInput, miles, isoLocal } from './format';
 import type { FleetStore } from './api';
 
 const UMBRAL_VERDE = 2500000;
 const SVC_AVISO_DIAS = 15;
 const SEG_AVISO_DIAS = 20;
+/** Tope de meses entre renovaciones de la póliza. Coincide con el del servidor. */
+const SEG_CADA_MAX = 120;
 const MESES_ABR = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
 // --------------------------------------------------------------------------
@@ -119,6 +122,23 @@ export function blankRegistrarForm(tab: RegistrarTab, carId: string, driver: str
   return { tab, carId, digits: '', fecha: isoLocal(TODAY), nota: '', driver, tipo: 'pago', cat: CATS[0], comprobante: null, guardando: false };
 }
 
+function blankNuevoVehiculo(): import('./types').NuevoVehiculoForm {
+  return {
+    plate: '',
+    model: '',
+    year: '2018',
+    gpsTag: '',
+    lastService: isoLocal(TODAY),
+    serviceCada: '6',
+    serviceUnidad: 'meses',
+    // El vencimiento no se presupone: es el dato que hay que mirar en la póliza.
+    seguroVence: '',
+    seguroCosto: '',
+    seguroPeriodo: 'mensual',
+    seguroCada: '12',
+  };
+}
+
 export function initialMobileState(): MobileState {
   return {
     screen: 'dashboard',
@@ -129,9 +149,12 @@ export function initialMobileState(): MobileState {
     cTo: isoLocal(TODAY),
     periodSheet: false,
     estadoSheet: false,
+    tallerForm: null,
     choferSheet: false,
     choferForm: { name: '', cuota: '' },
-    nuevoVehiculo: { plate: '', model: '', year: '2018' },
+    nuevoVehiculo: blankNuevoVehiculo(),
+    nuevoVehiculoConfirm: false,
+    nuevoVehiculoGuardando: false,
     registrar: null,
     q: '',
     shortcut: '',
@@ -296,10 +319,35 @@ export interface MobileView {
     plate: string;
     model: string;
     year: string;
+    gpsTag: string;
     setPlate: (v: string) => void;
     setModel: (v: string) => void;
     setYear: (v: string) => void;
+    setGpsTag: (v: string) => void;
+    lastService: string;
+    setLastService: (iso: string) => void;
+    hoy: string;
+    serviceCada: string;
+    setServiceCada: (v: string) => void;
+    unidadOpts: Chip[];
+    seguroVence: string;
+    setSeguroVence: (iso: string) => void;
+    seguroCosto: string;
+    setSeguroCosto: (v: string) => void;
+    periodoOpts: Chip[];
+    seguroCada: string;
+    setSeguroCada: (v: string) => void;
+    /** Palabra al lado de "Renovar cada": sigue al chip Mensual/Anual (solo la
+     *  etiqueta — el valor guardado siempre son meses, ver `NuevoVehiculoForm`). */
+    cadaUnitLabel: string;
     guardar: () => void;
+    confirm: {
+      open: boolean;
+      resumen: { label: string; value: string }[];
+      guardando: boolean;
+      confirmar: () => void;
+      cancelar: () => void;
+    };
   };
 
   registrar: {
@@ -331,8 +379,8 @@ export interface MobileView {
       setCarId: (v: string) => void;
       selCars: { id: string; label: string }[];
       lockCar: boolean;
-      comprobante: File | null;
-      setComprobante: (f: File | null) => void;
+      comprobante: PickedFile | null;
+      setComprobante: (f: PickedFile | null) => void;
     } | null;
   } | null;
 
@@ -375,6 +423,18 @@ export interface MobileView {
     open: boolean;
     close: () => void;
     opts: { label: string; sub: string; bg: string; fg: string; subFg: string; bd: string; pick: () => void }[];
+    taller: {
+      plate: string;
+      razon: string;
+      setRazon: (v: string) => void;
+      monto: string;
+      setMonto: (v: string) => void;
+      comprobante: PickedFile | null;
+      setComprobante: (f: PickedFile | null) => void;
+      guardando: boolean;
+      guardar: () => void;
+      cancelar: () => void;
+    } | null;
   };
 
   choferSheet: {
@@ -399,7 +459,7 @@ export function useMobileView(
   pagos: Pago[],
   state: MobileState,
   update: (patch: Partial<MobileState> | ((s: MobileState) => Partial<MobileState>)) => void,
-  persist: Pick<FleetStore, 'patchCar' | 'addCar' | 'addPago' | 'addEgreso'>,
+  persist: Pick<FleetStore, 'patchCar' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller'>,
 ): MobileView {
   const toast = (msg: string) => update({ toast: msg });
   useEffect(() => {
@@ -408,33 +468,131 @@ export function useMobileView(
     return () => clearTimeout(t);
   }, [state.toast]);
 
-  // ---- navegación + historial del navegador ------------------------------
-  // Sin esto, el botón físico de "atrás" en Android (o el swipe de iOS) sale
-  // de la página en vez de volver a la pantalla anterior. Los sheets no se
-  // integran con el historial a propósito: solo se cierran con la X o tocando
-  // afuera, para no complicar la pila con entradas que no son pantallas.
-  useEffect(() => {
-    const onPop = (e: PopStateEvent) => {
-      const s = e.state as { screen: Screen; backTo: Screen; carId: string | null } | null;
-      update(s ? { screen: s.screen, backTo: s.backTo, carId: s.carId } : { screen: 'dashboard', backTo: 'dashboard', carId: null });
-    };
-    window.addEventListener('popstate', onPop);
-    history.replaceState({ screen: state.screen, backTo: state.backTo, carId: state.carId }, '');
-    return () => window.removeEventListener('popstate', onPop);
-    // eslint: solo corre al montar — el resto de la sincronización pasa por push/pop, no por este efecto.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // ---- navegación + botón físico de "atrás" de Android --------------------
+  // No hay History API en React Native: la pila de pantallas se mantiene acá
+  // a mano. Cada `push` guarda una foto de dónde estábamos parados antes de
+  // saltar, y `back` la restaura — así una cadena de pushes vuelve pantalla
+  // por pantalla, igual que hacía `history.back()` en la versión web. Los
+  // sheets no entran en la pila a propósito: solo se cierran con la X o
+  // tocando afuera, para no complicarla con entradas que no son pantallas.
+  const stackRef = useRef<{ screen: Screen; backTo: Screen; carId: string | null }[]>([]);
 
+  // Si queda un input enfocado cuando se cambia de pantalla, el teclado se
+  // cierra recién cuando el sistema nota que el campo se desmontó — ese
+  // desfasaje es lo que dejaba a KeyboardAvoidingView con el padding de abajo
+  // trabado (el BottomNav quedaba con un hueco de más). Cerrarlo a mano antes
+  // de cualquier navegación saca la carrera de encima.
   const push = (screen: Screen, patch: Partial<MobileState> = {}) => {
+    Keyboard.dismiss();
+    stackRef.current.push({ screen: state.screen, backTo: state.backTo, carId: state.carId });
     const backTo = state.screen;
     update({ screen, backTo, ...patch });
-    history.pushState({ screen, backTo, carId: patch.carId ?? state.carId }, '');
   };
   const replaceTab = (screen: Screen) => {
+    Keyboard.dismiss();
+    stackRef.current = [];
     update({ screen, backTo: screen, carId: null });
-    history.replaceState({ screen, backTo: screen, carId: null }, '');
   };
-  const back = () => history.back();
+  const back = () => {
+    Keyboard.dismiss();
+    const prev = stackRef.current.pop();
+    update(prev ?? { screen: 'dashboard', backTo: 'dashboard', carId: null });
+  };
+
+  // Misma validación para el botón "Agregar a la flota" (decide si se abre
+  // el resumen) y para "Confirmar" dentro del resumen (la corre de nuevo por
+  // las dudas, es barata y así nunca manda algo que no pasó las reglas).
+  const nuevoVehiculoValidar = () => {
+    const n = state.nuevoVehiculo;
+    const plate = n.plate.trim().toUpperCase();
+    if (!plate) {
+      toast('Ingresá la chapa del vehículo');
+      return null;
+    }
+    if (!n.model.trim()) {
+      toast('Ingresá la marca y el modelo');
+      return null;
+    }
+    if (cars.some((c) => c.plate.toUpperCase() === plate)) {
+      toast('Esa chapa ya está en la flota');
+      return null;
+    }
+    const cada = numFromInput(n.serviceCada);
+    if (!cada) {
+      toast('Indicá cada cuánto se le hace el service');
+      return null;
+    }
+    if (n.lastService > isoLocal(TODAY)) {
+      toast('El último service no puede ser una fecha futura');
+      return null;
+    }
+    if (!n.seguroVence) {
+      toast('Indicá cuándo vence el seguro');
+      return null;
+    }
+    const segCosto = numFromInput(n.seguroCosto);
+    if (!segCosto) {
+      toast('Indicá el costo del seguro');
+      return null;
+    }
+    const segCada = numFromInput(n.seguroCada);
+    if (!segCada || segCada > SEG_CADA_MAX) {
+      toast('Cada cuánto se renueva el seguro: entre 1 y ' + SEG_CADA_MAX + ' meses');
+      return null;
+    }
+    return {
+      plate,
+      payload: {
+        plate,
+        model: n.model.trim(),
+        year: numFromInput(n.year) || 2018,
+        gpsTag: n.gpsTag.trim(),
+        lastServiceDate: n.lastService || isoLocal(TODAY),
+        serviceCada: cada,
+        serviceUnidad: n.serviceUnidad,
+        seguroDate: n.seguroVence,
+        seguroCosto: segCosto,
+        seguroPeriodo: n.seguroPeriodo,
+        seguroCada: segCada,
+      },
+    };
+  };
+
+  const nuevoVehiculoResumen = () => {
+    const n = state.nuevoVehiculo;
+    const rows = [
+      { label: 'Chapa', value: n.plate.trim().toUpperCase() || '—' },
+      { label: 'Marca y modelo', value: n.model.trim() || '—' },
+      { label: 'Año', value: n.year || '—' },
+    ];
+    if (n.gpsTag.trim()) rows.push({ label: 'GPS tag', value: n.gpsTag.trim() });
+    rows.push({ label: 'Último service', value: n.lastService ? dLblFull(new Date(n.lastService + 'T12:00:00')) : '—' });
+    rows.push({ label: 'Service cada', value: (n.serviceCada || '—') + ' ' + (n.serviceUnidad === 'dias' ? 'días' : 'meses') });
+    rows.push({ label: 'Seguro vence', value: n.seguroVence ? dLblFull(new Date(n.seguroVence + 'T12:00:00')) : '—' });
+    const costo = numFromInput(n.seguroCosto);
+    rows.push({ label: 'Costo de la póliza', value: (costo ? fmt(costo) : '—') + (n.seguroPeriodo === 'mensual' ? ' por mes' : ' por año') });
+    rows.push({ label: 'Renovar cada', value: (n.seguroCada || '—') + ' ' + (n.seguroPeriodo === 'anual' ? 'años' : 'meses') });
+    return rows;
+  };
+
+  // El botón físico (o el gesto) de Android tiene que volver pantalla por
+  // pantalla igual que el de la app; solo sale de la app si ya está en el
+  // tab raíz sin nada en la pila. Se engancha una sola vez al montar y lee
+  // el estado más nuevo por ref para no tener que reconectar el listener en
+  // cada render.
+  const onRoot = state.screen === 'dashboard' && stackRef.current.length === 0;
+  const onRootRef = useRef(onRoot);
+  onRootRef.current = onRoot;
+  const backRef = useRef(back);
+  backRef.current = back;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (onRootRef.current) return false;
+      backRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
 
   const active = cars.filter((c) => c.estado !== 'baja');
   const carDe = new Map(cars.map((c) => [c.id, c]));
@@ -736,17 +894,11 @@ export function useMobileView(
 
   // ---- reportes -------------------------------------------------------
   const repMax = Math.max(...CATS.map((c) => tot.byCat[c] || 0), 1);
-  const exportXls = () => {
-    import('xlsx')
-      .then((XLSX) => {
-        const rows = movs.filter(inR).map((m) => [dLbl(m.date), m.type === 'ingreso' ? 'Cobro' : 'Gasto', m.desc, m.cat ?? '—', m.amount]);
-        const ws = XLSX.utils.aoa_to_sheet([['Fecha', 'Tipo', 'Descripción', 'Categoría', 'Monto'], ...rows]);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Movimientos');
-        XLSX.writeFile(wb, 'movimientos-' + isoLocal(TODAY) + '.xlsx');
-      })
-      .catch(() => toast('No se pudo generar la planilla'));
-  };
+  // La versión web genera el .xlsx con la librería `xlsx` y lo baja como Blob;
+  // ninguna de las dos cosas existe en React Native. Se exporta desde
+  // admin-web hasta que esto tenga una ruta propia (compartir un archivo con
+  // expo-file-system/expo-sharing).
+  const exportXls = () => toast('Función en camino');
   const exportPdf = () => toast('Función en camino');
 
   // ---- ranking -------------------------------------------------------
@@ -916,7 +1068,8 @@ export function useMobileView(
     tabActive: { dash: state.screen === 'dashboard', flota: state.screen === 'flota' || state.screen === 'detalle', ranking: state.screen === 'ranking', reportes: state.screen === 'reportes' },
     openSearch: () => push('search'),
     goDetalle: (carId) => push('detalle', { carId }),
-    goNuevoVehiculo: () => push('nuevoVehiculo', { carId: null, nuevoVehiculo: { plate: '', model: '', year: '2018' } }),
+    goNuevoVehiculo: () =>
+      push('nuevoVehiculo', { carId: null, nuevoVehiculo: blankNuevoVehiculo(), nuevoVehiculoConfirm: false, nuevoVehiculoGuardando: false }),
     goRegistrarCobro,
     goRegistrarGasto,
     hide: false,
@@ -962,22 +1115,62 @@ export function useMobileView(
       plate: state.nuevoVehiculo.plate,
       model: state.nuevoVehiculo.model,
       year: state.nuevoVehiculo.year,
+      gpsTag: state.nuevoVehiculo.gpsTag,
       setPlate: (v) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, plate: v } })),
       setModel: (v) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, model: v } })),
       setYear: (v) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, year: v } })),
+      setGpsTag: (v) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, gpsTag: v } })),
+      lastService: state.nuevoVehiculo.lastService,
+      setLastService: (iso) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, lastService: iso } })),
+      hoy: isoLocal(TODAY),
+      serviceCada: state.nuevoVehiculo.serviceCada,
+      setServiceCada: (v) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, serviceCada: v } })),
+      unidadOpts: (['dias', 'meses'] as const).map((u) => ({
+        label: u === 'dias' ? 'Días' : 'Meses',
+        ...chipStyle(state.nuevoVehiculo.serviceUnidad === u),
+        pick: () => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, serviceUnidad: u } })),
+      })),
+      seguroVence: state.nuevoVehiculo.seguroVence,
+      setSeguroVence: (iso) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, seguroVence: iso } })),
+      seguroCosto: state.nuevoVehiculo.seguroCosto,
+      setSeguroCosto: (v) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, seguroCosto: miles(v) } })),
+      periodoOpts: (['mensual', 'anual'] as const).map((p) => ({
+        label: p === 'mensual' ? 'Mensual' : 'Anual',
+        ...chipStyle(state.nuevoVehiculo.seguroPeriodo === p),
+        pick: () => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, seguroPeriodo: p } })),
+      })),
+      seguroCada: state.nuevoVehiculo.seguroCada,
+      setSeguroCada: (v) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, seguroCada: v } })),
+      // Solo la palabra: el valor guardado siempre son meses (ver NuevoVehiculoForm).
+      cadaUnitLabel: state.nuevoVehiculo.seguroPeriodo === 'anual' ? 'años' : 'meses',
       guardar: () => {
-        const n = state.nuevoVehiculo;
-        const plate = n.plate.trim().toUpperCase();
-        if (!plate) return toast('Ingresá la chapa del vehículo');
-        if (!n.model.trim()) return toast('Ingresá la marca y el modelo');
-        if (cars.some((c) => c.plate.toUpperCase() === plate)) return toast('Esa chapa ya está en la flota');
-        persist
-          .addCar({ plate, model: n.model.trim(), year: numFromInput(n.year) || 2018 })
-          .then((creado) => {
-            toast('Vehículo agregado · ' + plate);
-            push('detalle', { carId: creado.id, backTo: 'flota' });
-          })
-          .catch((e: Error) => toast('No se pudo agregar: ' + e.message));
+        if (!nuevoVehiculoValidar()) return;
+        update({ nuevoVehiculoConfirm: true });
+      },
+      confirm: {
+        open: state.nuevoVehiculoConfirm,
+        resumen: nuevoVehiculoResumen(),
+        guardando: state.nuevoVehiculoGuardando,
+        confirmar: () => {
+          const v = nuevoVehiculoValidar();
+          if (!v) {
+            update({ nuevoVehiculoConfirm: false });
+            return;
+          }
+          update({ nuevoVehiculoGuardando: true });
+          persist
+            .addCar(v.payload)
+            .then((creado) => {
+              toast('Vehículo agregado · ' + v.plate);
+              update({ nuevoVehiculoConfirm: false, nuevoVehiculoGuardando: false });
+              push('detalle', { carId: creado.id, backTo: 'flota' });
+            })
+            .catch((e: Error) => {
+              update({ nuevoVehiculoGuardando: false });
+              toast('No se pudo agregar: ' + e.message);
+            });
+        },
+        cancelar: () => update({ nuevoVehiculoConfirm: false }),
       },
     },
 
@@ -1033,7 +1226,7 @@ export function useMobileView(
 
     estadoSheet: {
       open: state.estadoSheet,
-      close: () => update({ estadoSheet: false }),
+      close: () => update({ estadoSheet: false, tallerForm: null }),
       opts: estadoOpts.map(([k, label, sub]) => {
         const on = car?.estado === k;
         return {
@@ -1045,12 +1238,54 @@ export function useMobileView(
           bd: on ? COLORS.ink : '#e6ded0',
           pick: () => {
             if (!car) return;
+            // Mandar a taller no es solo cambiar un estado: hay un gasto detrás y
+            // se pregunta por él antes, no después (mismo criterio que admin-web).
+            if (k === 'taller' && car.estado !== 'taller') {
+              update({ tallerForm: { carId: car.id, razon: '', monto: '', comprobante: null, guardando: false } });
+              return;
+            }
             persist.patchCar(car.id, { estado: k });
             update({ estadoSheet: false });
             toast('Estado actualizado · ' + label);
           },
         };
       }),
+      taller: (() => {
+        const t = state.tallerForm;
+        if (!t || !car || t.carId !== car.id) return null;
+        const editar = (patch: Partial<NonNullable<MobileState['tallerForm']>>) => update((s) => (s.tallerForm ? { tallerForm: { ...s.tallerForm, ...patch } } : {}));
+        return {
+          plate: car.plate,
+          razon: t.razon,
+          setRazon: (v: string) => editar({ razon: v }),
+          monto: t.monto,
+          setMonto: (v: string) => editar({ monto: miles(v) }),
+          comprobante: t.comprobante,
+          setComprobante: (f: PickedFile | null) => editar({ comprobante: f }),
+          guardando: t.guardando,
+          cancelar: () => update({ tallerForm: null }),
+          guardar: () => {
+            if (t.guardando) return;
+            const razon = t.razon.trim();
+            if (!razon) return toast('Escribí por qué entra a taller');
+            const monto = numFromInput(t.monto);
+            if (!monto) return toast('Indicá cuánto se gasta en el taller');
+            // El botón se bloquea mientras sube: con un comprobante de varios MB
+            // hay tiempo de sobra para apretarlo dos veces y duplicar el gasto.
+            editar({ guardando: true });
+            persist
+              .mandarATaller(car.id, { razon, monto, comprobante: t.comprobante })
+              .then(() => {
+                update({ tallerForm: null, estadoSheet: false });
+                toast(car.plate + ' en taller · gasto de ' + fmt(monto) + ' registrado');
+              })
+              .catch((e: Error) => {
+                editar({ guardando: false });
+                toast('No se pudo registrar: ' + e.message);
+              });
+          },
+        };
+      })(),
     },
 
     choferSheet: {
@@ -1066,7 +1301,8 @@ export function useMobileView(
         const name = state.choferForm.name.trim();
         if (!name) return toast('Ingresá el nombre del chofer');
         const cuota = numFromInput(state.choferForm.cuota);
-        persist.patchCar(car.id, { driver: name, cuota: cuota || car.cuota });
+        if (!cuota) return toast('Ingresá la cuota diaria del chofer');
+        persist.patchCar(car.id, { driver: name, cuota });
         update({ choferSheet: false });
         toast('Chofer asignado · ' + name);
       },

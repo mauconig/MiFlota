@@ -1,3 +1,4 @@
+import { Pressable, Text, View } from 'react-native';
 import { Avatar } from './Avatar';
 import { Tag } from './Tag';
 
@@ -16,24 +17,24 @@ interface CarCardView {
 
 export function CarCard({ c, periodShort }: { c: CarCardView; periodShort: string }) {
   return (
-    <button
-      onClick={c.open}
-      style={{ background: '#fffdf8', border: '1px solid #ece4d6', borderRadius: 20, padding: '13px 15px', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 13, width: '100%', cursor: 'pointer', textAlign: 'left', color: 'inherit' }}
+    <Pressable
+      onPress={c.open}
+      style={{ backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 20, paddingVertical: 13, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', gap: 13 }}
     >
       <Avatar label={c.initials} size={42} />
-      <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-          <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>{c.plate}</span>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+          <Text style={{ fontSize: 15, fontWeight: '700', letterSpacing: -0.2 }}>{c.plate}</Text>
           <Tag label={c.estado} bg={c.tagBg} fg={c.tagFg} />
-        </span>
-        <span style={{ display: 'block', fontSize: 12, color: '#6b665c', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        </View>
+        <Text style={{ fontSize: 12, color: '#6b665c', marginTop: 2 }} numberOfLines={1}>
           {c.model} · {c.driver}
-        </span>
-      </span>
-      <span style={{ textAlign: 'right', flex: 'none' }}>
-        <span style={{ display: 'block', fontSize: 15, fontWeight: 700, letterSpacing: '-0.02em', color: c.color }}>{c.net}</span>
-        <span style={{ display: 'block', fontSize: 10, fontWeight: 600, color: '#6b665c', marginTop: 1 }}>neto {periodShort}</span>
-      </span>
-    </button>
+        </Text>
+      </View>
+      <View style={{ alignItems: 'flex-end' }}>
+        <Text style={{ fontSize: 15, fontWeight: '700', letterSpacing: -0.3, color: c.color }}>{c.net}</Text>
+        <Text style={{ fontSize: 10, fontWeight: '600', color: '#6b665c', marginTop: 1 }}>neto {periodShort}</Text>
+      </View>
+    </Pressable>
   );
 }

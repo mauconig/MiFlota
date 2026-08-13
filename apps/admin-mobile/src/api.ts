@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Car, Mov, Pago } from './types';
+import { API_BASE } from './config';
+import type { Car, Mov, Pago, PickedFile } from './types';
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`. Se parsean a mediodía para que
  *  ningún huso horario corra el día al construir el Date. */
@@ -26,7 +27,10 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
   // que la ruta llegue a ejecutarse. Con FormData tampoco se declara: lo pone
   // el navegador, que es el único que sabe el separador que va a usar.
   const headers = init?.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : undefined;
-  const res = await fetch(url, { credentials: 'same-origin', ...init, headers: { ...headers, ...init?.headers } });
+  // A diferencia del browser, React Native no tiene un origin de página contra
+  // el que resolver una URL relativa: sin este prefijo, `/api/...` termina
+  // pegándole al propio servidor de Metro en vez de a la API.
+  const res = await fetch(API_BASE + url, { credentials: 'same-origin', ...init, headers: { ...headers, ...init?.headers } });
   if (!res.ok) {
     const cuerpo = await res.json().catch(() => null);
     const msg = (cuerpo as { error?: string } | null)?.error ?? `Error ${res.status}`;
@@ -81,6 +85,14 @@ export interface NuevoCarPayload {
   plate: string;
   model: string;
   year: number;
+  gpsTag: string;
+  lastServiceDate: string;
+  serviceCada: number;
+  serviceUnidad: 'dias' | 'meses';
+  seguroDate: string;
+  seguroCosto: number;
+  seguroPeriodo: 'mensual' | 'anual';
+  seguroCada: number;
 }
 
 export interface NuevoPagoPayload {
@@ -96,7 +108,7 @@ export interface NuevoEgresoPayload {
   razon: string;
   monto: number;
   cat: string;
-  comprobante: File | null;
+  comprobante: PickedFile | null;
 }
 
 export interface FleetStore {
@@ -109,6 +121,7 @@ export interface FleetStore {
   addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
   addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
   addEgreso: (carId: string, datos: NuevoEgresoPayload) => Promise<Mov>;
+  mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: PickedFile | null }) => Promise<void>;
 }
 
 /**
@@ -117,10 +130,8 @@ export interface FleetStore {
  * servidor decide algo (imputación de un pago, id del gasto) que no se puede
  * adivinar del lado del cliente.
  *
- * A propósito no incluye `deleteCar`/`deletePago`/`mandarATaller`: ninguna
- * pantalla de admin-mobile los usa. El sheet de Estado del vehículo pasa por
- * `patchCar(id, {estado:'taller'})` directo, no por `POST /cars/:id/taller`
- * — esa ruta multipart queda exclusiva de admin-web.
+ * A propósito no incluye `deleteCar`/`deletePago`: ninguna pantalla de
+ * admin-mobile los usa.
  */
 export function useFleetStore(onError: (msg: string) => void, onSinSesion: () => void): FleetStore {
   const [cars, setCars] = useState<Car[]>([]);
@@ -185,12 +196,32 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     fd.append('razon', datos.razon);
     fd.append('monto', String(datos.monto));
     fd.append('cat', datos.cat);
-    if (datos.comprobante) fd.append('comprobante', datos.comprobante);
+    // React Native no tiene `File`: un archivo elegido con expo-document-picker
+    // se adjunta como este objeto {uri,name,type}, que el fetch de RN entiende
+    // igual que un File real al armar el multipart.
+    if (datos.comprobante) {
+      fd.append('comprobante', { uri: datos.comprobante.uri, name: datos.comprobante.name, type: datos.comprobante.mimeType } as unknown as Blob);
+    }
     const r = await req<{ mov: MovDto }>(`/api/cars/${carId}/egreso`, { method: 'POST', body: fd });
     const mov = toMov(r.mov);
     setMovs((ms) => [mov, ...ms]);
     return mov;
   }, []);
 
-  return { cars, movs, pagos, cargando, error, patchCar, addCar, addPago, addEgreso };
+  // Mandar a taller cambia el estado y crea el gasto en la misma operación, así
+  // que no puede aplicarse en optimista: se espera al servidor y se aplican las
+  // dos cosas juntas o ninguna.
+  const mandarATaller = useCallback(async (id: string, datos: { razon: string; monto: number; comprobante: PickedFile | null }) => {
+    const fd = new FormData();
+    fd.append('razon', datos.razon);
+    fd.append('monto', String(datos.monto));
+    if (datos.comprobante) {
+      fd.append('comprobante', { uri: datos.comprobante.uri, name: datos.comprobante.name, type: datos.comprobante.mimeType } as unknown as Blob);
+    }
+    const r = await req<{ car: CarDto; mov: MovDto }>(`/api/cars/${id}/taller`, { method: 'POST', body: fd });
+    setCars((cs) => cs.map((c) => (c.id === id ? toCar(r.car) : c)));
+    setMovs((ms) => [toMov(r.mov), ...ms]);
+  }, []);
+
+  return { cars, movs, pagos, cargando, error, patchCar, addCar, addPago, addEgreso, mandarATaller };
 }

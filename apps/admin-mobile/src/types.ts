@@ -85,6 +85,14 @@ export interface NuevoVehiculoForm {
   plate: string;
   model: string;
   year: string;
+  gpsTag: string;
+  lastService: string;
+  serviceCada: string;
+  serviceUnidad: ServiceUnidad;
+  seguroVence: string;
+  seguroCosto: string;
+  seguroPeriodo: SeguroPeriodo;
+  seguroCada: string;
 }
 
 export interface ChoferForm {
@@ -105,12 +113,30 @@ export interface RegistrarForm {
   tipo: PagoTipo;
   /** Solo Gasto. */
   cat: string;
-  comprobante: File | null;
+  comprobante: PickedFile | null;
   guardando: boolean;
 }
 
 export type FleetFilter = 'todos' | 'activo' | 'taller' | 'alerta';
 export type RankBy = 'auto' | 'modelo';
+
+/** Archivo elegido con expo-document-picker: no hay `File` del browser en
+ *  React Native, así que el comprobante viaja como URI + metadata. */
+export interface PickedFile {
+  uri: string;
+  name: string;
+  mimeType: string;
+}
+
+/** Mandar a taller no es solo cambiar el estado: hay un gasto detrás que se
+ *  pregunta antes, no después (ver `mandarATaller` en api.ts). */
+export interface TallerForm {
+  carId: string;
+  razon: string;
+  monto: string;
+  comprobante: PickedFile | null;
+  guardando: boolean;
+}
 
 export interface MobileState {
   screen: Screen;
@@ -121,9 +147,14 @@ export interface MobileState {
   cTo: string;
   periodSheet: boolean;
   estadoSheet: boolean;
+  tallerForm: TallerForm | null;
   choferSheet: boolean;
   choferForm: ChoferForm;
   nuevoVehiculo: NuevoVehiculoForm;
+  /** true = ya se validó el formulario y se está mostrando el resumen para
+   *  confirmar antes de mandarlo al servidor. */
+  nuevoVehiculoConfirm: boolean;
+  nuevoVehiculoGuardando: boolean;
   registrar: RegistrarForm | null;
   q: string;
   shortcut: string;
