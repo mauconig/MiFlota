@@ -113,7 +113,7 @@ export function DriverDetail({ v }: { v: View }) {
           ) : (
             <div className="scroll-sin-barra" style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto' }}>
               {d.pagos.map((m, i) => (
-                <div key={i} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 11, padding: '9px 0', borderBottom: i === d.pagos.length - 1 ? 'none' : '1px solid #f4efe4' }}>
+                <div key={i} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 11, padding: '9px 0', borderBottom: i === d.pagos.length - 1 ? 'none' : '1px solid #f4efe4', flex: 'none' }}>
                   <span style={{ width: 30, height: 30, borderRadius: 10, background: m.iconBg, color: m.iconFg, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 13, fontWeight: 700 }}>{m.sign}</span>
                   <span style={{ width: 52, flex: 'none', fontSize: 12, color: '#6b665c' }}>{m.dateLbl}</span>
                   <span style={{ flex: 1, minWidth: 0 }}>

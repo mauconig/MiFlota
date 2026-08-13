@@ -1,3 +1,4 @@
+import { Pressable, Text, View } from 'react-native';
 import type { MobileView } from '../useMobileView';
 import { ChipRow } from '../components/ChipRow';
 
@@ -13,83 +14,85 @@ interface SearchRow {
 
 function RowList({ rows }: { rows: SearchRow[] }) {
   return (
-    <div style={{ background: '#fffdf8', border: '1px solid #ece4d6', borderRadius: 20, padding: '4px 14px' }}>
+    <View style={{ backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 20, paddingHorizontal: 14 }}>
       {rows.map((r, i) => (
-        <button
-          key={i}
-          onClick={r.open}
-          style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '11px 0', border: 'none', borderBottom: '1px solid #f4efe4', background: 'none', width: '100%', cursor: 'pointer', textAlign: 'left', color: 'inherit' }}
-        >
-          <span style={{ width: 34, height: 34, borderRadius: 17, background: r.iconBg, color: r.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 12, fontWeight: 700 }}>{r.icon}</span>
-          <span style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>{r.desc}</span>
-            <span style={{ display: 'block', fontSize: 11, color: '#6b665c', marginTop: 1 }}>{r.sub}</span>
-          </span>
-          {r.amt && <span style={{ flex: 'none', fontSize: 13, fontWeight: 700, color: r.color }}>{r.amt}</span>}
-        </button>
+        <Pressable key={i} onPress={r.open} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#f4efe4' }}>
+          <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: r.iconBg, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: r.color, fontSize: 12, fontWeight: '700' }}>{r.icon}</Text>
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ fontSize: 13, fontWeight: '600' }} numberOfLines={1}>
+              {r.desc}
+            </Text>
+            <Text style={{ fontSize: 11, color: '#6b665c', marginTop: 1 }} numberOfLines={1}>
+              {r.sub}
+            </Text>
+          </View>
+          {!!r.amt && <Text style={{ fontSize: 13, fontWeight: '700', color: r.color }}>{r.amt}</Text>}
+        </Pressable>
       ))}
-    </div>
+    </View>
   );
 }
 
 export function Search({ v }: { v: MobileView }) {
   const s = v.search;
   return (
-    <main style={{ padding: '8px 16px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16, gap: 12 }}>
       {s.emptyState && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b665c', paddingLeft: 4 }}>Atajos</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <View style={{ gap: 14 }}>
+          <View style={{ gap: 8 }}>
+            <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c', paddingLeft: 4 }}>Atajos</Text>
+            <View style={{ gap: 8 }}>
               {s.shortcuts.map((c, i) => (
-                <button key={i} onClick={c.pick} style={{ border: '1px solid ' + c.bd, background: c.bg, color: c.fg, borderRadius: 18, padding: '13px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}>
-                  {c.label}
-                </button>
+                <Pressable key={i} onPress={c.pick} style={{ borderWidth: 1, borderColor: c.bd, backgroundColor: c.bg, borderRadius: 18, paddingVertical: 13, paddingHorizontal: 16 }}>
+                  <Text style={{ color: c.fg, fontSize: 13, fontWeight: '600' }}>{c.label}</Text>
+                </Pressable>
               ))}
-            </div>
-          </div>
+            </View>
+          </View>
           {s.hasRecents && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b665c', paddingLeft: 4 }}>Recientes</span>
+            <View style={{ gap: 8 }}>
+              <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c', paddingLeft: 4 }}>Recientes</Text>
               <ChipRow chips={s.recents.map((r) => ({ label: r.label, bg: '#fffdf8', fg: '#3d3a34', bd: '#e6ded0', pick: r.pick }))} wrap />
-            </div>
+            </View>
           )}
-        </div>
+        </View>
       )}
 
       {s.hasShortcut && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b665c', paddingLeft: 4 }}>{s.shortcutTitle}</span>
-          {s.shortcutEmpty ? <div style={{ fontSize: 13, color: '#6b665c', padding: '4px 6px' }}>Nada pendiente acá. Buena señal.</div> : <RowList rows={s.shortcutRows} />}
-        </div>
+        <View style={{ gap: 8 }}>
+          <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c', paddingLeft: 4 }}>{s.shortcutTitle}</Text>
+          {s.shortcutEmpty ? <Text style={{ fontSize: 13, color: '#6b665c', paddingHorizontal: 6 }}>Nada pendiente acá. Buena señal.</Text> : <RowList rows={s.shortcutRows} />}
+        </View>
       )}
 
       {s.hasResCars && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b665c', paddingLeft: 4 }}>Autos</span>
+        <View style={{ gap: 8 }}>
+          <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c', paddingLeft: 4 }}>Autos</Text>
           <RowList rows={s.resCars} />
-        </div>
+        </View>
       )}
 
       {s.hasResDrivers && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b665c', paddingLeft: 4 }}>Choferes</span>
+        <View style={{ gap: 8 }}>
+          <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c', paddingLeft: 4 }}>Choferes</Text>
           <RowList rows={s.resDrivers} />
-        </div>
+        </View>
       )}
 
       {s.hasResMovs && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b665c', paddingLeft: 4 }}>Movimientos</span>
+        <View style={{ gap: 8 }}>
+          <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c', paddingLeft: 4 }}>Movimientos</Text>
           <RowList rows={s.resMovs} />
-        </div>
+        </View>
       )}
 
       {s.noResults && (
-        <div style={{ background: '#fffdf8', border: '1px solid #ece4d6', borderRadius: 20, padding: '20px 18px', textAlign: 'center' }}>
-          <span style={{ fontSize: 14, fontWeight: 700 }}>{s.noResTxt}</span>
-        </div>
+        <View style={{ backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 20, paddingVertical: 20, paddingHorizontal: 18, alignItems: 'center' }}>
+          <Text style={{ fontSize: 14, fontWeight: '700' }}>{s.noResTxt}</Text>
+        </View>
       )}
-    </main>
+    </View>
   );
 }

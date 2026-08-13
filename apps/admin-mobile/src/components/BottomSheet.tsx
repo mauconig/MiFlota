@@ -1,30 +1,45 @@
 import type { ReactNode } from 'react';
+import { KeyboardAvoidingView, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path } from 'react-native-svg';
 
 export function BottomSheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  // Un Modal no hereda el SafeAreaView de la pantalla de atrás — sin esto el
+  // botón de abajo del todo queda pegado a (o tapado por) la barra de gestos.
+  const insets = useSafeAreaInsets();
   return (
-    <div
-      onClick={onClose}
-      style={{ position: 'absolute', inset: 0, zIndex: 40, background: 'rgba(22,21,15,0.38)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{ background: '#fffdf8', borderRadius: '26px 26px 0 0', padding: '16px 18px 22px', display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '80%', overflowY: 'auto', animation: 'sheetIn 0.22s ease' }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 17, fontWeight: 700 }}>{title}</span>
-          <button
-            onClick={onClose}
-            aria-label="Cerrar"
-            style={{ width: 34, height: 34, borderRadius: 17, border: '1px solid #e6ded0', background: '#fffdf8', cursor: 'pointer', color: '#3d3a34', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}
+    <Modal visible transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+      {/* Un Modal de RN es su propia ventana nativa: no hereda el
+          KeyboardAvoidingView de la pantalla de atrás, así que necesita el
+          suyo propio o el teclado tapa cualquier input que tenga adentro.
+          `height` en vez de `padding` en Android llegó a dejar la pantalla
+          de atrás con un hueco en blanco permanente tras un remount (ver
+          Shell) — `padding` en las dos plataformas evita esa clase de bug. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(22,21,15,0.38)', justifyContent: 'flex-end' }} onPress={onClose}>
+          <Pressable
+            onPress={() => {}}
+            style={{ backgroundColor: '#fffdf8', borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingTop: 16, paddingBottom: 30 + insets.bottom, paddingHorizontal: 18, maxHeight: '80%' }}
           >
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <Text style={{ fontSize: 17, fontWeight: '700' }}>{title}</Text>
+              <Pressable
+                onPress={onClose}
+                accessibilityLabel="Cerrar"
+                style={{ width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: '#e6ded0', backgroundColor: '#fffdf8', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="#3d3a34" strokeWidth={2} strokeLinecap="round">
+                  <Path d="M18 6 6 18" />
+                  <Path d="m6 6 12 12" />
+                </Svg>
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={{ gap: 10 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {children}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }

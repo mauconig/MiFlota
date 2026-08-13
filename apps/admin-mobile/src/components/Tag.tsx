@@ -1,19 +1,22 @@
+import { Text } from 'react-native';
+
 export function Tag({ label, bg, fg, small }: { label: string; bg: string; fg: string; small?: boolean }) {
   return (
-    <span
+    <Text
       style={{
         fontSize: small ? 9 : 10,
-        fontWeight: 700,
-        letterSpacing: '0.06em',
+        fontWeight: '700',
+        letterSpacing: 0.5,
         textTransform: 'uppercase',
-        padding: small ? '2px 7px' : '2px 7px',
+        paddingVertical: 2,
+        paddingHorizontal: 7,
         borderRadius: small ? 9 : 10,
-        background: bg,
+        backgroundColor: bg,
         color: fg,
-        flex: 'none',
+        overflow: 'hidden',
       }}
     >
       {label}
-    </span>
+    </Text>
   );
 }

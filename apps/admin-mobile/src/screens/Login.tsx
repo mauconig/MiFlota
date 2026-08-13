@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { FormEvent } from 'react';
+import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 export function Login({ onEntrar }: { onEntrar: (usuario: string, password: string) => Promise<void> }) {
   const [usuario, setUsuario] = useState('');
@@ -7,8 +7,7 @@ export function Login({ onEntrar }: { onEntrar: (usuario: string, password: stri
   const [error, setError] = useState('');
   const [enviando, setEnviando] = useState(false);
 
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
+  const submit = () => {
     if (enviando) return;
     setEnviando(true);
     setError('');
@@ -20,41 +19,45 @@ export function Login({ onEntrar }: { onEntrar: (usuario: string, password: stri
       .finally(() => setEnviando(false));
   };
 
-  const fieldStyle = { display: 'flex', flexDirection: 'column' as const, gap: 6 };
-  const labelStyle = { fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' as const, color: '#6b665c' };
-  const inputStyle = { border: '1px solid #e6ded0', borderRadius: 14, padding: '13px 14px', fontSize: 15, color: '#1a1a18', background: '#fffdf8', outline: 'none' };
+  const labelStyle = { fontSize: 12, fontWeight: '700' as const, letterSpacing: 0.7, textTransform: 'uppercase' as const, color: '#6b665c' };
+  const inputStyle = { borderWidth: 1, borderColor: '#e6ded0', borderRadius: 14, paddingVertical: 13, paddingHorizontal: 14, fontSize: 15, color: '#1a1a18', backgroundColor: '#fffdf8' };
 
   return (
-    <div style={{ minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f4f0e8', padding: 24 }}>
-      <form onSubmit={submit} style={{ width: '100%', maxWidth: 340, display: 'flex', flexDirection: 'column', gap: 20 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-          <span style={{ width: 52, height: 52, borderRadius: 16, background: '#e8a13a', color: '#16150f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 800 }}>M</span>
-          <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: '-0.01em' }}>MiFlota</div>
-        </div>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: '#f4f0e8' }} behavior="padding">
+      <ScrollView contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }} keyboardShouldPersistTaps="handled">
+        <View style={{ width: '100%', maxWidth: 340, gap: 20 }}>
+        <View style={{ alignItems: 'center', gap: 10, marginBottom: 4 }}>
+          <View style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: '#e8a13a', alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: '#16150f', fontSize: 22, fontWeight: '800' }}>M</Text>
+          </View>
+          <Text style={{ fontSize: 19, fontWeight: '700', letterSpacing: -0.2 }}>MiFlota</Text>
+        </View>
 
-        <label style={fieldStyle}>
-          <span style={labelStyle}>Usuario</span>
-          <input value={usuario} onChange={(e) => setUsuario(e.target.value)} autoComplete="username" autoCapitalize="none" autoFocus style={inputStyle} />
-        </label>
-        <label style={fieldStyle}>
-          <span style={labelStyle}>Contraseña</span>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" style={inputStyle} />
-        </label>
+        <View style={{ gap: 6 }}>
+          <Text style={labelStyle}>Usuario</Text>
+          <TextInput value={usuario} onChangeText={setUsuario} autoCapitalize="none" autoCorrect={false} style={inputStyle} />
+        </View>
+        <View style={{ gap: 6 }}>
+          <Text style={labelStyle}>Contraseña</Text>
+          <TextInput value={password} onChangeText={setPassword} secureTextEntry autoCapitalize="none" style={inputStyle} />
+        </View>
 
-        {error && (
-          <div role="alert" style={{ fontSize: 13, color: '#a8412f', background: '#fdeeea', border: '1px solid #f0d0c6', borderRadius: 12, padding: '10px 12px' }}>
-            {error}
-          </div>
+        {!!error && (
+          <View style={{ backgroundColor: '#fdeeea', borderWidth: 1, borderColor: '#f0d0c6', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12 }}>
+            <Text style={{ fontSize: 13, color: '#a8412f' }}>{error}</Text>
+          </View>
         )}
 
-        <button
-          type="submit"
+        <Pressable
+          onPress={submit}
           disabled={enviando}
-          style={{ border: 'none', borderRadius: 18, background: '#16150f', color: '#fffdf8', minHeight: 52, fontSize: 15, fontWeight: 700, cursor: enviando ? 'progress' : 'pointer', opacity: enviando ? 0.6 : 1 }}
+          style={{ borderRadius: 18, backgroundColor: '#16150f', minHeight: 52, alignItems: 'center', justifyContent: 'center', opacity: enviando ? 0.6 : 1, flexDirection: 'row', gap: 8 }}
         >
-          {enviando ? 'Entrando…' : 'Entrar'}
-        </button>
-      </form>
-    </div>
+          {enviando && <ActivityIndicator color="#fffdf8" size="small" />}
+          <Text style={{ color: '#fffdf8', fontSize: 15, fontWeight: '700' }}>{enviando ? 'Entrando…' : 'Entrar'}</Text>
+        </Pressable>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }

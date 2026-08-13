@@ -1,3 +1,5 @@
+import { Pressable, ScrollView, Text, View } from 'react-native';
+
 interface Chip {
   label: string;
   bg: string;
@@ -7,29 +9,32 @@ interface Chip {
 }
 
 export function ChipRow({ chips, wrap, equal }: { chips: Chip[]; wrap?: boolean; equal?: boolean }) {
+  const items = chips.map((c, i) => (
+    <Pressable
+      key={i}
+      onPress={c.pick}
+      style={{
+        flex: equal ? 1 : undefined,
+        borderWidth: 1,
+        borderColor: c.bd,
+        backgroundColor: c.bg,
+        borderRadius: 19,
+        paddingVertical: equal ? 9 : 8,
+        paddingHorizontal: equal ? 0 : 14,
+        alignItems: 'center',
+      }}
+    >
+      <Text style={{ color: c.fg, fontSize: 12, fontWeight: '600' }} numberOfLines={1}>
+        {c.label}
+      </Text>
+    </Pressable>
+  ));
+
+  if (wrap) return <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>{items}</View>;
+  if (equal) return <View style={{ flexDirection: 'row', gap: 7 }}>{items}</View>;
   return (
-    <div style={{ display: 'flex', flexDirection: 'row', gap: 7, flexWrap: wrap ? 'wrap' : 'nowrap', overflow: wrap ? 'visible' : 'auto' }}>
-      {chips.map((c, i) => (
-        <button
-          key={i}
-          onClick={c.pick}
-          style={{
-            flex: equal ? 1 : 'none',
-            border: '1px solid ' + c.bd,
-            background: c.bg,
-            color: c.fg,
-            borderRadius: 19,
-            padding: equal ? '9px 0' : '8px 14px',
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-            textAlign: 'center',
-          }}
-        >
-          {c.label}
-        </button>
-      ))}
-    </div>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', gap: 7 }}>
+      {items}
+    </ScrollView>
   );
 }
