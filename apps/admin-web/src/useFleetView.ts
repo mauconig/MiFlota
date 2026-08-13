@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef } from 'react';
-import type { Car, Mov, Pago, UIState, NewCarForm, NewDriverForm } from './types';
+import type { Car, CarLocation, Mov, Pago, UIState, NewCarForm, NewDriverForm } from './types';
 import type { NuevoCarPayload, NuevoPagoPayload } from './api';
 import type { Aplicacion } from './cobranza';
 import { imputar } from './cobranza';
@@ -280,6 +280,14 @@ export interface DetailView {
   cuotaFmt: string;
   gpsTag: string;
   gpsFg: string;
+  location: {
+    latitude: number;
+    longitude: number;
+    accuracy: number | null;
+    age: string;
+    stale: boolean;
+    mapsUrl: string;
+  } | null;
   cobradas: string;
   pendientes: string;
   svcLbl: string;
@@ -605,6 +613,7 @@ export function useFleetView(
   cars: Car[],
   movs: Mov[],
   pagos: Pago[],
+  locations: CarLocation[],
   state: UIState,
   update: (patch: Partial<UIState> | ((s: UIState) => Partial<UIState>)) => void,
   persist: {
@@ -627,6 +636,21 @@ export function useFleetView(
   const go = (nav: UIState['nav'], extra?: Partial<UIState>) => update({ nav, ...(extra || {}) });
 
   const patchCar = persist.patchCar;
+  const locationByCar = new Map(locations.map((location) => [location.carId, location]));
+
+  const locationView = (location: CarLocation | undefined): DetailView['location'] => {
+    if (!location) return null;
+    const ageMinutes = Math.max(0, Math.floor((Date.now() - new Date(location.recordedAt).getTime()) / 60_000));
+    const age = ageMinutes < 2 ? 'hace un momento' : ageMinutes < 60 ? 'hace ' + ageMinutes + ' min' : 'hace ' + Math.floor(ageMinutes / 60) + ' h';
+    return {
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracy: location.accuracy ?? null,
+      age,
+      stale: ageMinutes > 10,
+      mapsUrl: `https://www.google.com/maps/search/?api=1&query=${location.latitude},${location.longitude}`,
+    };
+  };
 
   const ch = useMemo(
     () => ({
@@ -978,6 +1002,7 @@ export function useFleetView(
         cuotaFmt: '',
         gpsTag: '',
         gpsFg: '',
+        location: null,
         cobradas: '',
         pendientes: '',
         svcLbl: '',
@@ -1047,6 +1072,7 @@ export function useFleetView(
       cuotaFmt: c.cuota ? fmt(c.cuota, st.hide) : '—',
       gpsTag: c.gpsTag || 'Sin GPS',
       gpsFg: c.gpsTag ? '#3d3a34' : '#a09a8d',
+      location: locationView(locationByCar.get(c.id)),
       cobradas: cuotasCobradas + ' cuotas cobradas',
       pendientes: cuotasPend.length ? cuotasPend.length + ' sin cobrar · debe ' + fmtShort(cuotasPend.reduce((a, m) => a + (m.amount - cobradoDe(m)), 0), st.hide) : 'Todo cobrado',
       svcLbl: (dLeft < 0 ? 'Service vencido hace ' + durLbl(dLeft) : dLeft === 0 ? 'El service vence hoy' : 'Próximo service en ' + durLbl(dLeft)) + ' · ' + dLblFull(svcNextDate(c)),

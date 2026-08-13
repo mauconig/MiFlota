@@ -7,8 +7,8 @@ import { rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { CarRow, MovRow, PagoRow, ReporteRow } from './db.js';
-import { COMPROBANTES_DIR, DB_PATH, carToJson, movToJson, openDb, pagoToJson, reporteToJson } from './db.js';
+import type { CarRow, LocationRow, MovRow, PagoRow, ReporteRow } from './db.js';
+import { COMPROBANTES_DIR, DB_PATH, carToJson, locationToJson, movToJson, openDb, pagoToJson, reporteToJson } from './db.js';
 import {
   COOKIE,
   bloqueado,
@@ -141,6 +141,13 @@ const selCars = db.prepare('SELECT * FROM cars WHERE owner_id = ? ORDER BY rowid
 const selMovs = db.prepare('SELECT * FROM movs WHERE owner_id = ? ORDER BY date DESC, id DESC');
 const selPagos = db.prepare('SELECT * FROM pagos WHERE owner_id = ? ORDER BY fecha DESC, id DESC');
 const selCar = db.prepare('SELECT * FROM cars WHERE id = ? AND owner_id = ?');
+const selLocations = db.prepare(`
+  SELECT l.*
+    FROM driver_locations l
+    JOIN cars c ON c.id = l.car_id
+   WHERE c.owner_id = ?
+   ORDER BY l.received_at DESC
+`);
 
 /** El preHandler ya rechazó las peticiones sin sesión, así que acá siempre hay usuario. */
 const quien = (req: { cookies: Record<string, string | undefined> }) => usuarioDeSesion(db, req.cookies[COOKIE])!;
@@ -156,6 +163,13 @@ app.get('/api/state', async (req) => {
     movs: (selMovs.all(u.id) as MovRow[]).map(movToJson),
     pagos: (selPagos.all(u.id) as PagoRow[]).map(pagoToJson),
   };
+});
+
+/** Ultimas posiciones conocidas, separadas del estado historico para que el
+ * panel pueda refrescar el mapa sin descargar todos los movimientos. */
+app.get('/api/locations', async (req) => {
+  const u = quien(req);
+  return (selLocations.all(u.id) as LocationRow[]).map(locationToJson);
 });
 
 const ESTADOS = new Set(['activo', 'taller', 'baja']);
@@ -614,6 +628,54 @@ app.post('/api/chofer/logout', async (req) => {
   const auth = req.headers.authorization;
   if (auth?.startsWith('Bearer ')) borrarSesionChofer(db, auth.slice('Bearer '.length).trim());
   return { ok: true };
+});
+
+interface DriverLocationBody {
+  latitude?: unknown;
+  longitude?: unknown;
+  accuracy?: unknown;
+  recordedAt?: unknown;
+  mocked?: unknown;
+}
+
+app.post<{ Body: DriverLocationBody }>('/api/chofer/location', async (req, reply) => {
+  const s = quienChofer(db, req);
+  if (!s) return reply.code(401).send({ error: 'Sesión requerida' });
+
+  const latitude = Number(req.body?.latitude);
+  const longitude = Number(req.body?.longitude);
+  const accuracy = req.body?.accuracy == null ? null : Number(req.body.accuracy);
+  const recorded = new Date(String(req.body?.recordedAt ?? ''));
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    return reply.code(400).send({ error: 'Coordenadas inválidas' });
+  }
+  if (accuracy !== null && (!Number.isFinite(accuracy) || accuracy < 0)) {
+    return reply.code(400).send({ error: 'Precisión inválida' });
+  }
+  if (Number.isNaN(recorded.getTime())) return reply.code(400).send({ error: 'Fecha de ubicación inválida' });
+  if (recorded.getTime() > Date.now() + 5 * 60_000) return reply.code(400).send({ error: 'La ubicación no puede ser futura' });
+
+  // Android puede marcar una ubicación proveniente de un proveedor de mock.
+  // No es una defensa contra un cliente modificado, pero evita aceptar el caso
+  // detectable sin impedir ubicaciones legítimas donde el campo no existe.
+  if (req.body?.mocked === true) return reply.code(400).send({ error: 'La ubicación simulada no está permitida' });
+
+  const recordedAt = recorded.toISOString();
+  const receivedAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO driver_locations (car_id, latitude, longitude, accuracy, recorded_at, received_at, mocked)
+    VALUES (?, ?, ?, ?, ?, ?, 0)
+    ON CONFLICT(car_id) DO UPDATE SET
+      latitude = excluded.latitude,
+      longitude = excluded.longitude,
+      accuracy = excluded.accuracy,
+      recorded_at = excluded.recorded_at,
+      received_at = excluded.received_at,
+      mocked = excluded.mocked
+    WHERE excluded.recorded_at >= driver_locations.recorded_at
+  `).run(s.carId, latitude, longitude, accuracy, recordedAt, receivedAt);
+
+  return { ok: true, recordedAt };
 });
 
 app.get('/api/chofer/me', async (req, reply) => {

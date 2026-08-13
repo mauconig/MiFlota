@@ -79,7 +79,7 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
   }, []);
 
   const store = useFleetStore(avisar, onSalir);
-  const v = useFleetView(store.cars, store.movs, store.pagos, state, update, store);
+  const v = useFleetView(store.cars, store.movs, store.pagos, store.locations, state, update, store);
 
   if (store.cargando || store.error) return <Arranque error={store.error} />;
 

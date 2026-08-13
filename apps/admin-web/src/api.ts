@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Car, Mov, Pago } from './types';
+import type { Car, CarLocation, Mov, Pago } from './types';
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`. Se parsean a mediodía UTC para que
  *  ningún huso horario corra el día al construir el Date. */
@@ -104,6 +104,7 @@ export interface FleetStore {
   cars: Car[];
   movs: Mov[];
   pagos: Pago[];
+  locations: CarLocation[];
   cargando: boolean;
   error: string;
   patchCar: (id: string, patch: Partial<Car>) => void;
@@ -123,6 +124,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
   const [cars, setCars] = useState<Car[]>([]);
   const [movs, setMovs] = useState<Mov[]>([]);
   const [pagos, setPagos] = useState<Pago[]>([]);
+  const [locations, setLocations] = useState<CarLocation[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
 
@@ -131,6 +133,11 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     setCars(s.cars.map(toCar));
     setMovs(s.movs.map(toMov));
     setPagos(s.pagos.map(toPago));
+  }, []);
+
+  const recargarLocations = useCallback(async () => {
+    const latest = await req<CarLocation[]>('/api/locations');
+    setLocations(latest);
   }, []);
 
   useEffect(() => {
@@ -147,6 +154,21 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
       vivo = false;
     };
   }, [recargar, onSinSesion]);
+
+  useEffect(() => {
+    let vivo = true;
+    const cargar = () => {
+      recargarLocations().catch((e: Error) => {
+        if (vivo && e instanceof SinSesion) onSinSesion();
+      });
+    };
+    cargar();
+    const timer = setInterval(cargar, 30_000);
+    return () => {
+      vivo = false;
+      clearInterval(timer);
+    };
+  }, [recargarLocations, onSinSesion]);
 
   const patchCar = useCallback(
     (id: string, patch: Partial<Car>) => {
@@ -206,5 +228,5 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     setPagos((ps) => ps.filter((p) => p.id !== id));
   }, []);
 
-  return { cars, movs, pagos, cargando, error, patchCar, addCar, deleteCar, mandarATaller, addPago, deletePago };
+  return { cars, movs, pagos, locations, cargando, error, patchCar, addCar, deleteCar, mandarATaller, addPago, deletePago };
 }

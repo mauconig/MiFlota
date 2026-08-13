@@ -28,6 +28,16 @@ export interface Car {
   seguroCada: number;
 }
 
+export interface CarLocation {
+  carId: string;
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  recordedAt: string;
+  receivedAt: string;
+  mocked: boolean;
+}
+
 export type MovEstado = 'pagado' | 'pendiente' | 'parcial';
 
 export interface Mov {
