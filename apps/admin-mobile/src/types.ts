@@ -77,7 +77,7 @@ export interface Pago {
 // un frame de teléfono, no un dashboard de pestañas siempre montadas como
 // admin-web, así que este estado no se parece al `UIState` de ahí.
 
-export type Screen = 'dashboard' | 'flota' | 'detalle' | 'nuevoVehiculo' | 'registrar' | 'reportes' | 'ranking' | 'search';
+export type Screen = 'dashboard' | 'flota' | 'detalle' | 'nuevoVehiculo' | 'registrar' | 'reportes' | 'ranking' | 'assistant';
 export type Period = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
 export type RegistrarTab = 'cobro' | 'gasto';
 
@@ -98,6 +98,11 @@ export interface NuevoVehiculoForm {
 export interface ChoferForm {
   name: string;
   cuota: string;
+}
+
+export interface DriverCredentialDraft {
+  username: string;
+  password: string;
 }
 
 export interface RegistrarForm {
@@ -150,15 +155,14 @@ export interface MobileState {
   tallerForm: TallerForm | null;
   choferSheet: boolean;
   choferForm: ChoferForm;
+  choferCredentials: DriverCredentialDraft | null;
+  choferCredentialsLoading: boolean;
   nuevoVehiculo: NuevoVehiculoForm;
   /** true = ya se validó el formulario y se está mostrando el resumen para
    *  confirmar antes de mandarlo al servidor. */
   nuevoVehiculoConfirm: boolean;
   nuevoVehiculoGuardando: boolean;
   registrar: RegistrarForm | null;
-  q: string;
-  shortcut: string;
-  recents: string[];
   toast: string;
   fleetFilter: FleetFilter;
   rankBy: RankBy;

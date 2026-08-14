@@ -95,6 +95,16 @@ export interface ReporteRow {
   fecha: string;
 }
 
+export interface LocationRow {
+  car_id: string;
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  recorded_at: string;
+  received_at: string;
+  mocked: number;
+}
+
 /** Las fechas viajan como ISO `YYYY-MM-DD`: ordenan lexicográficamente en SQL y
  *  no arrastran zona horaria, que es la principal fuente de corrimientos de un día. */
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -169,6 +179,18 @@ export function openDb() {
       fecha    TEXT NOT NULL
     );
 
+    -- Ultima posicion conocida del auto. Se conserva una sola fila por auto:
+    -- el historial de recorridos no forma parte aun del dominio de la app.
+    CREATE TABLE IF NOT EXISTS driver_locations (
+      car_id       TEXT PRIMARY KEY REFERENCES cars(id) ON DELETE CASCADE,
+      latitude     REAL NOT NULL CHECK (latitude >= -90 AND latitude <= 90),
+      longitude    REAL NOT NULL CHECK (longitude >= -180 AND longitude <= 180),
+      accuracy     REAL CHECK (accuracy IS NULL OR accuracy >= 0),
+      recorded_at  TEXT NOT NULL,
+      received_at  TEXT NOT NULL,
+      mocked       INTEGER NOT NULL DEFAULT 0 CHECK (mocked IN (0, 1))
+    );
+
     -- Banderas de migraciones que corren una sola vez en la vida de la base.
     -- No usar la ausencia/presencia de una columna como guard cuando la propia
     -- migración la borra: en el siguiente arranque la columna vuelve a estar
@@ -184,6 +206,7 @@ export function openDb() {
     CREATE INDEX IF NOT EXISTS idx_pagos_drv      ON pagos(driver);
     CREATE INDEX IF NOT EXISTS idx_reportes_owner ON reportes_falla(owner_id);
     CREATE INDEX IF NOT EXISTS idx_reportes_car   ON reportes_falla(car_id);
+    CREATE INDEX IF NOT EXISTS idx_driver_locations_received ON driver_locations(received_at);
   `);
 
   // Los índices sobre owner_id se crean dentro de la migración, no acá: en una
@@ -463,5 +486,17 @@ export function reporteToJson(r: ReporteRow) {
     texto: r.texto,
     estado: r.estado,
     fecha: r.fecha,
+  };
+}
+
+export function locationToJson(r: LocationRow) {
+  return {
+    carId: r.car_id,
+    latitude: r.latitude,
+    longitude: r.longitude,
+    ...(r.accuracy == null ? {} : { accuracy: r.accuracy }),
+    recordedAt: r.recorded_at,
+    receivedAt: r.received_at,
+    mocked: Boolean(r.mocked),
   };
 }

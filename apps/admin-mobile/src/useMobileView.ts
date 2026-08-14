@@ -24,12 +24,6 @@ const svcDaysLeft = (c: Car) => daysBetween(TODAY, svcNextDate(c));
  *  maneja hoy: si el auto cambió de chofer, los cobros viejos no cambian de dueño. */
 const paidBy = (m: Mov, c: Car) => m.driver || c.driver;
 
-function matches(q: string, ...fields: (string | undefined)[]): boolean {
-  const needle = q.trim().toLowerCase();
-  if (!needle) return true;
-  return fields.some((f) => f?.toLowerCase().includes(needle));
-}
-
 function stats(movs: Mov[], aplicaciones: Aplicacion[], fm: (m: Mov) => boolean, fa: (a: Aplicacion) => boolean) {
   let fact = 0;
   let egr = 0;
@@ -152,13 +146,12 @@ export function initialMobileState(): MobileState {
     tallerForm: null,
     choferSheet: false,
     choferForm: { name: '', cuota: '' },
+    choferCredentials: null,
+    choferCredentialsLoading: false,
     nuevoVehiculo: blankNuevoVehiculo(),
     nuevoVehiculoConfirm: false,
     nuevoVehiculoGuardando: false,
     registrar: null,
-    q: '',
-    shortcut: '',
-    recents: [],
     toast: '',
     fleetFilter: 'todos',
     rankBy: 'auto',
@@ -233,16 +226,6 @@ interface DetalleView {
   openChoferSheet: () => void;
 }
 
-interface SearchRow {
-  desc: string;
-  sub: string;
-  amt: string;
-  color: string;
-  iconBg: string;
-  icon: string;
-  open: () => void;
-}
-
 interface RankRow {
   pos: string;
   posColor: string;
@@ -259,7 +242,7 @@ export interface MobileView {
   screen: Screen;
   isTab: boolean;
   isSub: boolean;
-  isSearch: boolean;
+  isAssistant: boolean;
   headerTitle: string;
   headerSub: string;
   back: () => void;
@@ -270,7 +253,7 @@ export interface MobileView {
   navReportes: () => void;
   tabActive: { dash: boolean; flota: boolean; ranking: boolean; reportes: boolean };
 
-  openSearch: () => void;
+  openAssistant: () => void;
   goDetalle: (carId: string) => void;
   goNuevoVehiculo: () => void;
   goRegistrarCobro: (carId?: string) => void;
@@ -397,28 +380,6 @@ export interface MobileView {
 
   ranking: { rows: RankRow[]; byAuto: boolean; setAuto: () => void; setModelo: () => void; hint: string };
 
-  search: {
-    q: string;
-    setQ: (v: string) => void;
-    clearQ: () => void;
-    emptyState: boolean;
-    shortcuts: Chip[];
-    hasShortcut: boolean;
-    shortcutTitle: string;
-    shortcutRows: SearchRow[];
-    shortcutEmpty: boolean;
-    resCars: SearchRow[];
-    hasResCars: boolean;
-    resDrivers: SearchRow[];
-    hasResDrivers: boolean;
-    resMovs: SearchRow[];
-    hasResMovs: boolean;
-    noResults: boolean;
-    noResTxt: string;
-    recents: { label: string; pick: () => void }[];
-    hasRecents: boolean;
-  };
-
   estadoSheet: {
     open: boolean;
     close: () => void;
@@ -441,10 +402,16 @@ export interface MobileView {
     open: boolean;
     close: () => void;
     title: string;
+    carLabel: string;
     name: string;
     setName: (v: string) => void;
     cuota: string;
     setCuota: (v: string) => void;
+    credentials: { username: string; password: string } | null;
+    credentialsLoading: boolean;
+    needsCredentials: boolean;
+    continuar: () => void;
+    volver: () => void;
     guardar: () => void;
     hasDriver: boolean;
     desvincular: () => void;
@@ -459,7 +426,7 @@ export function useMobileView(
   pagos: Pago[],
   state: MobileState,
   update: (patch: Partial<MobileState> | ((s: MobileState) => Partial<MobileState>)) => void,
-  persist: Pick<FleetStore, 'patchCar' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller'>,
+  persist: Pick<FleetStore, 'patchCar' | 'previewDriverCredentials' | 'assignDriver' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller'>,
 ): MobileView {
   const toast = (msg: string) => update({ toast: msg });
   useEffect(() => {
@@ -776,7 +743,13 @@ export function useMobileView(
       goCobro: () => goRegistrar('cobro', car.id),
       goGasto: () => goRegistrar('gasto', car.id),
       openEstadoSheet: () => update({ estadoSheet: true }),
-      openChoferSheet: () => update({ choferSheet: true, choferForm: { name: car.driver === 'Sin chofer' ? '' : car.driver, cuota: car.cuota ? String(car.cuota) : '' } }),
+      openChoferSheet: () =>
+        update({
+          choferSheet: true,
+          choferForm: { name: car.driver === 'Sin chofer' ? '' : car.driver, cuota: car.cuota ? String(car.cuota) : '' },
+          choferCredentials: null,
+          choferCredentialsLoading: false,
+        }),
     };
   }
 
@@ -941,96 +914,6 @@ export function useMobileView(
     }));
   }
 
-  // ---- search -------------------------------------------------------
-  const qTrim = state.q.trim();
-  const qLower = qTrim.toLowerCase();
-  const resCarsRaw = qTrim ? cars.filter((c) => (c.plate + ' ' + c.model).toLowerCase().includes(qLower)) : [];
-  const resDriversRaw = qTrim ? cars.filter((c) => c.driver !== 'Sin chofer' && c.driver.toLowerCase().includes(qLower)) : [];
-  const resMovsRaw = qTrim
-    ? movs
-        .filter((m) => matches(state.q, m.desc, m.cat, carDe.get(m.carId)?.plate))
-        .sort((a, b) => +b.date - +a.date)
-        .slice(0, 12)
-    : [];
-  const resCars: SearchRow[] = resCarsRaw.map((c) => {
-    const n = perCarNet(c);
-    return {
-      desc: c.plate,
-      sub: c.model + ' ' + c.year + ' · ' + c.driver,
-      amt: fmtShort(n),
-      color: c.estado === 'baja' ? '#6b665c' : statusColor(n, UMBRAL_VERDE),
-      iconBg: '#f4f0e8',
-      icon: initials(c.driver),
-      open: () => push('detalle', { carId: c.id }),
-    };
-  });
-  const resDrivers: SearchRow[] = resDriversRaw.map((c) => {
-    const debe = deudaPorChofer.get(c.driver) ?? 0;
-    return {
-      desc: c.driver,
-      sub: c.plate + ' · ' + (debe ? 'debe ' + fmtShort(debe) : 'al día'),
-      amt: debe ? fmtShort(debe) : fmtShort(perCarNet(c)),
-      color: debe ? COLORS.warn : COLORS.pos,
-      iconBg: '#f4f0e8',
-      icon: initials(c.driver),
-      open: () => push('detalle', { carId: c.id }),
-    };
-  });
-  const resMovs: SearchRow[] = resMovsRaw.map((m) => {
-    const c = carDe.get(m.carId);
-    const isIng = m.type === 'ingreso';
-    return {
-      desc: m.desc,
-      sub: dLbl(m.date) + ' · ' + (c?.plate ?? '') + ' · ' + (isIng ? 'cobro' : m.cat),
-      amt: (isIng ? '+' : '−') + fmtShort(m.amount).replace('−', ''),
-      color: isIng ? COLORS.pos : COLORS.neg,
-      iconBg: isIng ? '#e7f2ec' : '#fdeeea',
-      icon: isIng ? '↓' : '↑',
-      open: () => push('detalle', { carId: m.carId }),
-    };
-  });
-
-  function shortcutRows(kind: string): SearchRow[] {
-    if (kind === 'pendientes') {
-      return cuotas
-        .filter((m) => deudaDe(m) > 0 && inR(m))
-        .sort((a, b) => +b.date - +a.date)
-        .slice(0, 20)
-        .map((m) => {
-          const c = carDe.get(m.carId)!;
-          return {
-            desc: c.plate + ' · ' + paidBy(m, c),
-            sub: dLbl(m.date) + ' · debe ' + fmtShort(deudaDe(m)),
-            amt: fmtShort(deudaDe(m)),
-            color: COLORS.warn,
-            iconBg: '#fdf0dd',
-            icon: '!',
-            open: () => push('detalle', { carId: c.id }),
-          };
-        });
-    }
-    if (kind === 'perdida') {
-      return sorted
-        .filter((x) => x.n <= 0)
-        .map((x) => ({ desc: x.c.plate + ' · ' + x.c.driver, sub: x.c.model + ' ' + x.c.year, amt: fmtShort(x.n), color: COLORS.neg, iconBg: '#fdeeea', icon: '↓', open: () => push('detalle', { carId: x.c.id }) }));
-    }
-    return active
-      .filter((c) => svcDaysLeft(c) <= SVC_AVISO_DIAS)
-      .sort((a, b) => svcDaysLeft(a) - svcDaysLeft(b))
-      .map((c) => {
-        const d = svcDaysLeft(c);
-        return {
-          desc: c.plate + ' · ' + c.model,
-          sub: d <= 0 ? 'vencido hace ' + durLbl(d) : 'en ' + durLbl(d),
-          amt: '',
-          color: d <= 0 ? COLORS.neg : COLORS.warn,
-          iconBg: '#fdf0dd',
-          icon: '⚙',
-          open: () => push('detalle', { carId: c.id }),
-        };
-      });
-  }
-
   // ---- sheets -------------------------------------------------------
   const estadoOpts: [Car['estado'], string, string][] = [
     ['activo', 'Activo', 'En circulación, generando cuota'],
@@ -1046,18 +929,18 @@ export function useMobileView(
     detalle: ['Detalle del vehículo', ''],
     nuevoVehiculo: ['Nuevo vehículo', ''],
     registrar: [f?.tab === 'gasto' ? 'Registrar gasto' : 'Registrar cobro', ''],
-    search: ['Buscar', ''],
+    assistant: ['MiFlota IA', ''],
   };
 
   const isTab = ['dashboard', 'flota', 'ranking', 'reportes'].includes(state.screen);
   const isSub = ['detalle', 'nuevoVehiculo', 'registrar'].includes(state.screen);
-  const isSearch = state.screen === 'search';
+  const isAssistant = state.screen === 'assistant';
 
   return {
     screen: state.screen,
     isTab,
     isSub,
-    isSearch,
+    isAssistant,
     headerTitle: headerByScreen[state.screen][0],
     headerSub: headerByScreen[state.screen][1],
     back,
@@ -1066,7 +949,7 @@ export function useMobileView(
     navRanking: () => replaceTab('ranking'),
     navReportes: () => replaceTab('reportes'),
     tabActive: { dash: state.screen === 'dashboard', flota: state.screen === 'flota' || state.screen === 'detalle', ranking: state.screen === 'ranking', reportes: state.screen === 'reportes' },
-    openSearch: () => push('search'),
+    openAssistant: () => push('assistant'),
     goDetalle: (carId) => push('detalle', { carId }),
     goNuevoVehiculo: () =>
       push('nuevoVehiculo', { carId: null, nuevoVehiculo: blankNuevoVehiculo(), nuevoVehiculoConfirm: false, nuevoVehiculoGuardando: false }),
@@ -1198,32 +1081,6 @@ export function useMobileView(
       hint: state.rankBy === 'auto' ? 'Neto por auto en el período' : 'Neto total y promedio por modelo',
     },
 
-    search: {
-      q: state.q,
-      setQ: (v) => update({ q: v, shortcut: '' }),
-      clearQ: () => update({ q: '', shortcut: '' }),
-      emptyState: !qTrim && !state.shortcut,
-      shortcuts: [
-        ['pendientes', 'Pagos pendientes'],
-        ['perdida', 'Autos en pérdida'],
-        ['service', 'Service vencido o próximo'],
-      ].map(([k, label]) => ({ label, ...chipStyle(state.shortcut === k), pick: () => update({ shortcut: k, q: '' }) })),
-      hasShortcut: !!state.shortcut,
-      shortcutTitle: state.shortcut === 'pendientes' ? 'Pagos pendientes · ' + r.label : state.shortcut === 'perdida' ? 'Autos en pérdida · ' + r.label : state.shortcut === 'service' ? 'Service vencido o próximo' : '',
-      shortcutRows: state.shortcut ? shortcutRows(state.shortcut) : [],
-      shortcutEmpty: !!state.shortcut && shortcutRows(state.shortcut).length === 0,
-      resCars,
-      hasResCars: resCars.length > 0,
-      resDrivers,
-      hasResDrivers: resDrivers.length > 0,
-      resMovs,
-      hasResMovs: resMovs.length > 0,
-      noResults: !!qTrim && !resCars.length && !resDrivers.length && !resMovs.length,
-      noResTxt: 'Sin resultados para "' + qTrim + '"',
-      recents: state.recents.map((rec) => ({ label: rec, pick: () => update({ q: rec, shortcut: '' }) })),
-      hasRecents: state.recents.length > 0,
-    },
-
     estadoSheet: {
       open: state.estadoSheet,
       close: () => update({ estadoSheet: false, tallerForm: null }),
@@ -1290,27 +1147,67 @@ export function useMobileView(
 
     choferSheet: {
       open: state.choferSheet,
-      close: () => update({ choferSheet: false }),
-      title: car ? (car.driver === 'Sin chofer' ? 'Asignar chofer' : 'Chofer de ' + car.plate) : '',
+      close: () => update({ choferSheet: false, choferCredentials: null, choferCredentialsLoading: false }),
+      title: state.choferCredentials ? 'Datos para MiFlota Chofer' : car ? (car.driver === 'Sin chofer' ? 'Asignar chofer' : 'Chofer de ' + car.plate) : '',
+      carLabel: car ? car.plate + ' · ' + car.model : '',
       name: state.choferForm.name,
       setName: (v) => update((s) => ({ choferForm: { ...s.choferForm, name: v } })),
       cuota: state.choferForm.cuota,
       setCuota: (v) => update((s) => ({ choferForm: { ...s.choferForm, cuota: miles(v) } })),
-      guardar: () => {
-        if (!car) return;
+      credentials: state.choferCredentials,
+      credentialsLoading: state.choferCredentialsLoading,
+      needsCredentials: car?.driver !== state.choferForm.name.trim(),
+      continuar: () => {
+        if (!car || state.choferCredentialsLoading) return;
         const name = state.choferForm.name.trim();
         if (!name) return toast('Ingresá el nombre del chofer');
         const cuota = numFromInput(state.choferForm.cuota);
         if (!cuota) return toast('Ingresá la cuota diaria del chofer');
-        persist.patchCar(car.id, { driver: name, cuota });
-        update({ choferSheet: false });
-        toast('Chofer asignado · ' + name);
+        if (car.driver === name) return;
+
+        update({ choferCredentialsLoading: true });
+        persist
+          .previewDriverCredentials(car.id, name)
+          .then((credentials) => update({ choferCredentials: credentials, choferCredentialsLoading: false }))
+          .catch((e: Error) => {
+            update({ choferCredentialsLoading: false });
+            toast('No se pudieron generar los datos: ' + e.message);
+          });
+      },
+      volver: () => update({ choferCredentials: null, choferCredentialsLoading: false }),
+      guardar: () => {
+        if (!car || state.choferCredentialsLoading) return;
+        const name = state.choferForm.name.trim();
+        if (!name) return toast('Ingresá el nombre del chofer');
+        const cuota = numFromInput(state.choferForm.cuota);
+        if (!cuota) return toast('Ingresá la cuota diaria del chofer');
+
+        if (car.driver === name) {
+          persist.patchCar(car.id, { driver: name, cuota });
+          update({ choferSheet: false, choferCredentials: null });
+          toast('Chofer actualizado · ' + name);
+          return;
+        }
+
+        const credentials = state.choferCredentials;
+        if (!credentials) return;
+        update({ choferCredentialsLoading: true });
+        persist
+          .assignDriver(car.id, { driver: name, cuota, ...credentials })
+          .then(() => {
+            update({ choferSheet: false, choferCredentials: null, choferCredentialsLoading: false });
+            toast('Chofer asignado · ' + name);
+          })
+          .catch((e: Error) => {
+            update({ choferCredentialsLoading: false });
+            toast('No se pudo asignar: ' + e.message);
+          });
       },
       hasDriver: car?.driver !== 'Sin chofer',
       desvincular: () => {
         if (!car) return;
         persist.patchCar(car.id, { driver: 'Sin chofer', cuota: 0 });
-        update({ choferSheet: false });
+        update({ choferSheet: false, choferCredentials: null, choferCredentialsLoading: false });
         toast('Chofer desvinculado');
       },
     },

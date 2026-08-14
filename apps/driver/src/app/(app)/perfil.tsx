@@ -13,7 +13,7 @@ import type { Resumen } from '../../types';
 const ESTADO_LABEL: Record<Resumen['estado'], string> = { atrasado: 'Atrasado', adelantado: 'Adelantado', al_dia: 'Al día' };
 
 export default function Perfil() {
-  const { me, token, salir, sesionVencida } = useAuth();
+  const { me, token, salir, sesionVencida, locationStatus, activarUbicacion } = useAuth();
   const router = useRouter();
   const [resumen, setResumen] = useState<Resumen | null>(null);
 
@@ -59,6 +59,31 @@ export default function Perfil() {
               <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.text }}>{v}</Text>
             </View>
           ))}
+        </Card>
+
+        <Card style={{ gap: 9 }}>
+          <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', color: COLORS.textMuted }}>Ubicación del auto</Text>
+          <Text style={{ fontSize: 13, color: COLORS.text }}>
+            {locationStatus === 'active'
+              ? 'Compartiendo en segundo plano.'
+              : locationStatus === 'unavailable'
+                ? 'Expo Go no admite ubicación en segundo plano en Android. Usá un development build.'
+              : locationStatus === 'services-disabled'
+                ? 'Activá la ubicación del teléfono para compartirla.'
+                : locationStatus === 'permission-required'
+                  ? 'Falta permiso de ubicación en segundo plano.'
+                  : locationStatus === 'error'
+                    ? 'No se pudo activar el seguimiento.'
+                    : 'El seguimiento todavía no está activo.'}
+          </Text>
+          {locationStatus !== 'active' && locationStatus !== 'unavailable' && (
+            <Pressable
+              onPress={() => void activarUbicacion()}
+              style={{ minHeight: 48, borderRadius: 16, backgroundColor: COLORS.bgDark, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.onDark }}>Activar ubicación</Text>
+            </Pressable>
+          )}
         </Card>
 
         <Pressable

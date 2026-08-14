@@ -10,6 +10,7 @@ import { PrimaryButton } from '../../components/PrimaryButton';
 import { SubHeader } from '../../components/Header';
 import { COLORS } from '../../theme';
 import { CATS_REPORTE, type Urgencia } from '../../types';
+import { notifyReporte } from '../../notifications';
 
 const URGENCIAS: { key: Urgencia; label: string; sub: string }[] = [
   { key: 'puedo', label: 'Puedo seguir manejando', sub: 'Se puede arreglar en los próximos días' },
@@ -35,6 +36,7 @@ export default function NuevaQueja() {
     setEnviando(true);
     try {
       await api.postReporte(token, cat, urgencia, texto.trim());
+      await notifyReporte(cat);
       router.replace('/(app)/reportes' as never);
     } catch (e) {
       if (e instanceof SinSesion) {

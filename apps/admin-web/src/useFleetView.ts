@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef } from 'react';
-import type { Car, Mov, Pago, UIState, NewCarForm, NewDriverForm } from './types';
-import type { NuevoCarPayload, NuevoPagoPayload } from './api';
+import type { Car, CarLocation, Mov, Pago, UIState, NewCarForm, NewDriverForm } from './types';
+import type { DriverCredentials, NuevoCarPayload, NuevoPagoPayload } from './api';
 import type { Aplicacion } from './cobranza';
 import { imputar } from './cobranza';
 import { CATS, CATCOLORS } from './data';
@@ -280,6 +280,14 @@ export interface DetailView {
   cuotaFmt: string;
   gpsTag: string;
   gpsFg: string;
+  location: {
+    latitude: number;
+    longitude: number;
+    accuracy: number | null;
+    age: string;
+    stale: boolean;
+    mapsUrl: string;
+  } | null;
   cobradas: string;
   pendientes: string;
   svcLbl: string;
@@ -446,8 +454,13 @@ export interface View {
     carId: (e: React.ChangeEvent<HTMLSelectElement>) => void;
   };
   setNdrvCuota: (v: string) => void;
+  drvCredentials: DriverCredentials | null;
+  drvCredentialsLoading: boolean;
+  drvNeedsCredentials: boolean;
   closeModal: () => void;
   saveCar: () => void;
+  previewDrv: () => void;
+  backDrv: () => void;
   saveDrv: () => void;
   carOptions: CarOption[];
 
@@ -605,10 +618,13 @@ export function useFleetView(
   cars: Car[],
   movs: Mov[],
   pagos: Pago[],
+  locations: CarLocation[],
   state: UIState,
   update: (patch: Partial<UIState> | ((s: UIState) => Partial<UIState>)) => void,
   persist: {
     patchCar: (id: string, patch: Partial<Car>) => void;
+    previewDriverCredentials: (id: string, driver: string) => Promise<DriverCredentials>;
+    assignDriver: (id: string, payload: DriverCredentials & { driver: string; cuota: number }) => Promise<Car>;
     addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
     deleteCar: (id: string) => Promise<{ plate: string; movs: number }>;
     mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: File | null }) => Promise<void>;
@@ -627,6 +643,21 @@ export function useFleetView(
   const go = (nav: UIState['nav'], extra?: Partial<UIState>) => update({ nav, ...(extra || {}) });
 
   const patchCar = persist.patchCar;
+  const locationByCar = new Map(locations.map((location) => [location.carId, location]));
+
+  const locationView = (location: CarLocation | undefined): DetailView['location'] => {
+    if (!location) return null;
+    const ageMinutes = Math.max(0, Math.floor((Date.now() - new Date(location.recordedAt).getTime()) / 60_000));
+    const age = ageMinutes < 2 ? 'hace un momento' : ageMinutes < 60 ? 'hace ' + ageMinutes + ' min' : 'hace ' + Math.floor(ageMinutes / 60) + ' h';
+    return {
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracy: location.accuracy ?? null,
+      age,
+      stale: ageMinutes > 10,
+      mapsUrl: `https://www.google.com/maps/search/?api=1&query=${location.latitude},${location.longitude}`,
+    };
+  };
 
   const ch = useMemo(
     () => ({
@@ -717,26 +748,71 @@ export function useFleetView(
       .catch((e: Error) => toast('No se pudo agregar: ' + e.message));
   };
 
-  const saveDrv = () => {
+  const driverFormData = () => {
     const d = state.ndrv;
     const name = d.name.trim();
     if (!name) {
       toast('Ingresá el nombre del chofer');
-      return;
+      return null;
     }
     if (!d.carId) {
       toast('Elegí a qué vehículo lo asignás');
-      return;
+      return null;
     }
     const cuota = numFromInput(d.cuota);
     if (!cuota) {
       toast('Ingresá la cuota diaria del chofer');
-      return;
+      return null;
     }
     const car = cars.find((c) => c.id === d.carId)!;
-    patchCar(d.carId, { driver: name, cuota });
-    update({ modal: null, ndrv: blankDrv(), nav: 'choferes' });
-    toast('Chofer asignado · ' + name + ' · ' + car.plate);
+    return { d, name, cuota, car };
+  };
+
+  const previewDrv = (): void => {
+    if (state.driverCredentialsLoading) return;
+    const form = driverFormData();
+    if (!form) return;
+
+    // Editar solamente la cuota del mismo chofer no invalida su login ni debe
+    // generar una contraseña nueva. Ese caso se guarda directamente.
+    if (form.car.driver === form.name) return saveDrv();
+
+    update({ driverCredentialsLoading: true });
+    persist
+      .previewDriverCredentials(form.d.carId, form.name)
+      .then((credentials) => update({ driverCredentials: credentials, driverCredentialsLoading: false }))
+      .catch((e: Error) => {
+        update({ driverCredentialsLoading: false });
+        toast('No se pudieron generar los datos: ' + e.message);
+      });
+  };
+
+  const saveDrv = (): void => {
+    if (state.driverCredentialsLoading) return;
+    const form = driverFormData();
+    if (!form) return;
+
+    if (form.car.driver === form.name) {
+      patchCar(form.d.carId, { driver: form.name, cuota: form.cuota });
+      update({ modal: null, ndrv: blankDrv(), driverCredentials: null, nav: 'choferes' });
+      toast('Chofer actualizado · ' + form.name + ' · ' + form.car.plate);
+      return;
+    }
+
+    const credentials = state.driverCredentials;
+    if (!credentials) return previewDrv();
+
+    update({ driverCredentialsLoading: true });
+    persist
+      .assignDriver(form.d.carId, { driver: form.name, cuota: form.cuota, ...credentials })
+      .then(() => {
+        update({ modal: null, ndrv: blankDrv(), driverCredentials: null, driverCredentialsLoading: false, nav: 'choferes' });
+        toast('Chofer asignado · ' + form.name + ' · ' + form.car.plate);
+      })
+      .catch((e: Error) => {
+        update({ driverCredentialsLoading: false });
+        toast('No se pudo asignar: ' + e.message);
+      });
   };
 
   const savePago = () => {
@@ -978,6 +1054,7 @@ export function useFleetView(
         cuotaFmt: '',
         gpsTag: '',
         gpsFg: '',
+        location: null,
         cobradas: '',
         pendientes: '',
         svcLbl: '',
@@ -1047,6 +1124,7 @@ export function useFleetView(
       cuotaFmt: c.cuota ? fmt(c.cuota, st.hide) : '—',
       gpsTag: c.gpsTag || 'Sin GPS',
       gpsFg: c.gpsTag ? '#3d3a34' : '#a09a8d',
+      location: locationView(locationByCar.get(c.id)),
       cobradas: cuotasCobradas + ' cuotas cobradas',
       pendientes: cuotasPend.length ? cuotasPend.length + ' sin cobrar · debe ' + fmtShort(cuotasPend.reduce((a, m) => a + (m.amount - cobradoDe(m)), 0), st.hide) : 'Todo cobrado',
       svcLbl: (dLeft < 0 ? 'Service vencido hace ' + durLbl(dLeft) : dLeft === 0 ? 'El service vence hoy' : 'Próximo service en ' + durLbl(dLeft)) + ' · ' + dLblFull(svcNextDate(c)),
@@ -1149,7 +1227,13 @@ export function useFleetView(
         patchCar(c.id, { lastServiceDate: TODAY });
         toast('Service registrado el ' + dLblFull(TODAY) + ' · próximo en ' + svcIntervalo(c.serviceCada, c.serviceUnidad));
       },
-      editDriver: () => update({ modal: 'drv', ndrv: { name: c.driver === 'Sin chofer' ? '' : c.driver, carId: c.id, cuota: c.cuota ? miles(String(c.cuota)) : '' } }),
+      editDriver: () =>
+        update({
+          modal: 'drv',
+          ndrv: { name: c.driver === 'Sin chofer' ? '' : c.driver, carId: c.id, cuota: c.cuota ? miles(String(c.cuota)) : '' },
+          driverCredentials: null,
+          driverCredentialsLoading: false,
+        }),
       clearDriver: () => update({ confirm: { tipo: 'quitarChofer', carId: c.id } }),
       borrar: () => update({ confirm: { tipo: 'borrarAuto', carId: c.id } }),
     };
@@ -1241,7 +1325,14 @@ export function useFleetView(
         }),
       sinPagos: !cuotas.length,
       verVehiculo: () => update({ driverId: null, detailId: c.id }),
-      editar: () => update({ driverId: null, modal: 'drv', ndrv: { name: c.driver, carId: c.id, cuota: c.cuota ? miles(String(c.cuota)) : '' } }),
+      editar: () =>
+        update({
+          driverId: null,
+          modal: 'drv',
+          ndrv: { name: c.driver, carId: c.id, cuota: c.cuota ? miles(String(c.cuota)) : '' },
+          driverCredentials: null,
+          driverCredentialsLoading: false,
+        }),
       quitar: () => update({ driverId: null, confirm: { tipo: 'quitarChofer', carId: c.id } }),
     };
   })();
@@ -1574,7 +1665,7 @@ export function useFleetView(
     })(),
     chQ: st.chQ,
     setChQ: (e) => update({ chQ: e.target.value }),
-    openDrvModal: () => update({ modal: 'drv', ndrv: blankDrv() }),
+    openDrvModal: () => update({ modal: 'drv', ndrv: blankDrv(), driverCredentials: null, driverCredentialsLoading: false }),
 
     movsSub: movsFiltered.length + ' movimientos en ' + r.short + (st.movType !== 'todos' || st.movCat !== 'todas' ? ' con los filtros aplicados' : ''),
     movTypeChips: (
@@ -1761,8 +1852,13 @@ export function useFleetView(
     ch,
     ndrv: st.ndrv,
     dh,
-    closeModal: () => update({ modal: null }),
+    drvCredentials: st.driverCredentials,
+    drvCredentialsLoading: st.driverCredentialsLoading,
+    drvNeedsCredentials: cars.find((c) => c.id === st.ndrv.carId)?.driver !== st.ndrv.name.trim(),
+    closeModal: () => update({ modal: null, driverCredentials: null, driverCredentialsLoading: false }),
     saveCar,
+    previewDrv,
+    backDrv: () => update({ driverCredentials: null, driverCredentialsLoading: false }),
     saveDrv,
     carOptions: cars
       .filter((c) => c.estado !== 'baja')

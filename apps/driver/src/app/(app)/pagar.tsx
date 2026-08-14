@@ -13,6 +13,7 @@ import { fmtG, plural } from '../../format';
 import { COLORS } from '../../theme';
 import { MEDIOS_PAGO } from '../../types';
 import type { Resumen } from '../../types';
+import { notifyPago } from '../../notifications';
 
 export default function Pagar() {
   const { token, sesionVencida } = useAuth();
@@ -65,6 +66,7 @@ export default function Pagar() {
     setEnviando(true);
     try {
       await api.postPago(token, total, medio, comprobante);
+      await notifyPago(total);
       router.replace('/(app)/pagos' as never);
     } catch (e) {
       if (e instanceof SinSesion) {

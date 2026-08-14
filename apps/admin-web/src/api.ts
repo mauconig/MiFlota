@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Car, Mov, Pago } from './types';
+import type { Car, CarLocation, Mov, Pago } from './types';
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`. Se parsean a mediodía UTC para que
  *  ningún huso horario corra el día al construir el Date. */
@@ -100,13 +100,26 @@ export interface NuevoPagoPayload {
   nota?: string;
 }
 
+export interface DriverCredentials {
+  username: string;
+  password: string;
+}
+
+export interface AssignDriverPayload extends DriverCredentials {
+  driver: string;
+  cuota: number;
+}
+
 export interface FleetStore {
   cars: Car[];
   movs: Mov[];
   pagos: Pago[];
+  locations: CarLocation[];
   cargando: boolean;
   error: string;
   patchCar: (id: string, patch: Partial<Car>) => void;
+  previewDriverCredentials: (id: string, driver: string) => Promise<DriverCredentials>;
+  assignDriver: (id: string, payload: AssignDriverPayload) => Promise<Car>;
   addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
   deleteCar: (id: string) => Promise<{ plate: string; movs: number }>;
   mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: File | null }) => Promise<void>;
@@ -123,6 +136,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
   const [cars, setCars] = useState<Car[]>([]);
   const [movs, setMovs] = useState<Mov[]>([]);
   const [pagos, setPagos] = useState<Pago[]>([]);
+  const [locations, setLocations] = useState<CarLocation[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
 
@@ -131,6 +145,11 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     setCars(s.cars.map(toCar));
     setMovs(s.movs.map(toMov));
     setPagos(s.pagos.map(toPago));
+  }, []);
+
+  const recargarLocations = useCallback(async () => {
+    const latest = await req<CarLocation[]>('/api/locations');
+    setLocations(latest);
   }, []);
 
   useEffect(() => {
@@ -148,6 +167,21 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     };
   }, [recargar, onSinSesion]);
 
+  useEffect(() => {
+    let vivo = true;
+    const cargar = () => {
+      recargarLocations().catch((e: Error) => {
+        if (vivo && e instanceof SinSesion) onSinSesion();
+      });
+    };
+    cargar();
+    const timer = setInterval(cargar, 30_000);
+    return () => {
+      vivo = false;
+      clearInterval(timer);
+    };
+  }, [recargarLocations, onSinSesion]);
+
   const patchCar = useCallback(
     (id: string, patch: Partial<Car>) => {
       setCars((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
@@ -163,6 +197,25 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     },
     [onError, onSinSesion, recargar],
   );
+
+  const previewDriverCredentials = useCallback(
+    (id: string, driver: string) =>
+      req<DriverCredentials>(`/api/cars/${id}/chofer-credenciales/preview`, {
+        method: 'POST',
+        body: JSON.stringify({ driver }),
+      }),
+    [],
+  );
+
+  const assignDriver = useCallback(async (id: string, payload: AssignDriverPayload) => {
+    const r = await req<{ car: CarDto }>(`/api/cars/${id}/asignar-chofer`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const car = toCar(r.car);
+    setCars((cs) => cs.map((c) => (c.id === id ? car : c)));
+    return car;
+  }, []);
 
   const addCar = useCallback(async (nuevo: NuevoCarPayload) => {
     const creado = toCar(await req<CarDto>('/api/cars', { method: 'POST', body: JSON.stringify(nuevo) }));
@@ -206,5 +259,20 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     setPagos((ps) => ps.filter((p) => p.id !== id));
   }, []);
 
-  return { cars, movs, pagos, cargando, error, patchCar, addCar, deleteCar, mandarATaller, addPago, deletePago };
+  return {
+    cars,
+    movs,
+    pagos,
+    locations,
+    cargando,
+    error,
+    patchCar,
+    previewDriverCredentials,
+    assignDriver,
+    addCar,
+    deleteCar,
+    mandarATaller,
+    addPago,
+    deletePago,
+  };
 }

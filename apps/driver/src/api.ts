@@ -24,6 +24,21 @@ export const logout = (token: string) => req<{ ok: true }>('/api/chofer/logout',
 
 export const getMe = (token: string) => req<Me>('/api/chofer/me', token);
 
+export interface DriverLocationPayload {
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  recordedAt: string;
+  mocked: boolean;
+}
+
+export const postLocation = (token: string, location: DriverLocationPayload) =>
+  req<{ ok: true; recordedAt: string }>('/api/chofer/location', token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(location),
+  });
+
 export const getResumen = (token: string) => req<Resumen>('/api/chofer/resumen', token);
 
 export const getPagos = (token: string, dias?: number) => req<Pago[]>(`/api/chofer/pagos${dias ? `?dias=${dias}` : ''}`, token);

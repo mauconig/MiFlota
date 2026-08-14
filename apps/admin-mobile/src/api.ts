@@ -111,6 +111,45 @@ export interface NuevoEgresoPayload {
   comprobante: PickedFile | null;
 }
 
+export interface AssistantHistoryItem {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface AssistantCard {
+  kind: 'driver' | 'car' | 'metric';
+  title: string;
+  value: string;
+  subtitle?: string;
+}
+
+export interface AssistantReply {
+  answer: string;
+  cards: AssistantCard[];
+  asOf: string;
+  mode: 'local' | 'deepseek' | 'fallback';
+  notice?: string;
+}
+
+/** La pregunta viaja al backend autenticado. La clave y el acceso a los datos
+ * permanecen siempre en el servidor; el bundle de Expo no contiene ninguno. */
+export function askAssistant(question: string, history: AssistantHistoryItem[]): Promise<AssistantReply> {
+  return req<AssistantReply>('/api/assistant/query', {
+    method: 'POST',
+    body: JSON.stringify({ question, history: history.slice(-6) }),
+  });
+}
+
+export interface DriverCredentials {
+  username: string;
+  password: string;
+}
+
+export interface AssignDriverPayload extends DriverCredentials {
+  driver: string;
+  cuota: number;
+}
+
 export interface FleetStore {
   cars: Car[];
   movs: Mov[];
@@ -118,6 +157,8 @@ export interface FleetStore {
   cargando: boolean;
   error: string;
   patchCar: (id: string, patch: Partial<Car>) => void;
+  previewDriverCredentials: (id: string, driver: string) => Promise<DriverCredentials>;
+  assignDriver: (id: string, payload: AssignDriverPayload) => Promise<Car>;
   addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
   addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
   addEgreso: (carId: string, datos: NuevoEgresoPayload) => Promise<Mov>;
@@ -133,7 +174,7 @@ export interface FleetStore {
  * A propósito no incluye `deleteCar`/`deletePago`: ninguna pantalla de
  * admin-mobile los usa.
  */
-export function useFleetStore(onError: (msg: string) => void, onSinSesion: () => void): FleetStore {
+export function useFleetStore(onError: (msg: string) => void, onSinSesion: () => void, enabled = true): FleetStore {
   const [cars, setCars] = useState<Car[]>([]);
   const [movs, setMovs] = useState<Mov[]>([]);
   const [pagos, setPagos] = useState<Pago[]>([]);
@@ -148,6 +189,17 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
   }, []);
 
   useEffect(() => {
+    if (!enabled) {
+      // App monta este hook también mientras muestra Login. Limpiar acá evita
+      // que otro usuario vea por un instante los datos de la sesión anterior;
+      // cuando el login termina, `enabled` cambia y se hace la carga real.
+      setCars([]);
+      setMovs([]);
+      setPagos([]);
+      setError('');
+      setCargando(true);
+      return;
+    }
     let vivo = true;
     recargar()
       .then(() => vivo && setError(''))
@@ -160,7 +212,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     return () => {
       vivo = false;
     };
-  }, [recargar, onSinSesion]);
+  }, [enabled, recargar, onSinSesion]);
 
   const patchCar = useCallback(
     (id: string, patch: Partial<Car>) => {
@@ -175,6 +227,25 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     },
     [onError, onSinSesion, recargar],
   );
+
+  const previewDriverCredentials = useCallback(
+    (id: string, driver: string) =>
+      req<DriverCredentials>(`/api/cars/${id}/chofer-credenciales/preview`, {
+        method: 'POST',
+        body: JSON.stringify({ driver }),
+      }),
+    [],
+  );
+
+  const assignDriver = useCallback(async (id: string, payload: AssignDriverPayload) => {
+    const r = await req<{ car: CarDto }>(`/api/cars/${id}/asignar-chofer`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const car = toCar(r.car);
+    setCars((cs) => cs.map((c) => (c.id === id ? car : c)));
+    return car;
+  }, []);
 
   const addCar = useCallback(async (nuevo: NuevoCarPayload) => {
     const creado = toCar(await req<CarDto>('/api/cars', { method: 'POST', body: JSON.stringify(nuevo) }));
@@ -223,5 +294,18 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     setMovs((ms) => [toMov(r.mov), ...ms]);
   }, []);
 
-  return { cars, movs, pagos, cargando, error, patchCar, addCar, addPago, addEgreso, mandarATaller };
+  return {
+    cars,
+    movs,
+    pagos,
+    cargando,
+    error,
+    patchCar,
+    previewDriverCredentials,
+    assignDriver,
+    addCar,
+    addPago,
+    addEgreso,
+    mandarATaller,
+  };
 }

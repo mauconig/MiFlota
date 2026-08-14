@@ -7,8 +7,8 @@ import { rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { CarRow, MovRow, PagoRow, ReporteRow } from './db.js';
-import { COMPROBANTES_DIR, DB_PATH, carToJson, movToJson, openDb, pagoToJson, reporteToJson } from './db.js';
+import type { CarRow, LocationRow, MovRow, PagoRow, ReporteRow } from './db.js';
+import { COMPROBANTES_DIR, DB_PATH, carToJson, locationToJson, movToJson, openDb, pagoToJson, reporteToJson } from './db.js';
 import {
   COOKIE,
   bloqueado,
@@ -34,6 +34,7 @@ import {
   quienChofer,
 } from './authChofer.js';
 import { imputar } from './cobranza.js';
+import { answerAssistant, buildAssistantSnapshot, unavailableAssistantReply, type AssistantHistoryItem } from './assistant.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = process.env.MIFLOTA_PUBLIC ?? join(HERE, '..', 'public');
@@ -141,6 +142,13 @@ const selCars = db.prepare('SELECT * FROM cars WHERE owner_id = ? ORDER BY rowid
 const selMovs = db.prepare('SELECT * FROM movs WHERE owner_id = ? ORDER BY date DESC, id DESC');
 const selPagos = db.prepare('SELECT * FROM pagos WHERE owner_id = ? ORDER BY fecha DESC, id DESC');
 const selCar = db.prepare('SELECT * FROM cars WHERE id = ? AND owner_id = ?');
+const selLocations = db.prepare(`
+  SELECT l.*
+    FROM driver_locations l
+    JOIN cars c ON c.id = l.car_id
+   WHERE c.owner_id = ?
+   ORDER BY l.received_at DESC
+`);
 
 /** El preHandler ya rechazó las peticiones sin sesión, así que acá siempre hay usuario. */
 const quien = (req: { cookies: Record<string, string | undefined> }) => usuarioDeSesion(db, req.cookies[COOKIE])!;
@@ -156,6 +164,72 @@ app.get('/api/state', async (req) => {
     movs: (selMovs.all(u.id) as MovRow[]).map(movToJson),
     pagos: (selPagos.all(u.id) as PagoRow[]).map(pagoToJson),
   };
+});
+
+interface AssistantQueryBody {
+  question?: string;
+  history?: AssistantHistoryItem[];
+}
+
+// Evita que dobles taps o clientes reintentando en paralelo consuman dos
+// respuestas del modelo para el mismo dueño. También serializa las respuestas
+// locales, cuya sección crítica dura apenas unos milisegundos.
+const assistantInFlight = new Set<number>();
+const assistantRate = new Map<number, { since: number; count: number }>();
+const ASSISTANT_RATE_WINDOW_MS = 60_000;
+const ASSISTANT_RATE_MAX = 20;
+
+function allowAssistantRequest(ownerId: number): boolean {
+  const now = Date.now();
+  const current = assistantRate.get(ownerId);
+  if (!current || now - current.since >= ASSISTANT_RATE_WINDOW_MS) {
+    assistantRate.set(ownerId, { since: now, count: 1 });
+    return true;
+  }
+  if (current.count >= ASSISTANT_RATE_MAX) return false;
+  current.count += 1;
+  return true;
+}
+
+app.post<{ Body: AssistantQueryBody }>('/api/assistant/query', async (req, reply) => {
+  const u = quien(req);
+  const question = String(req.body?.question ?? '').trim();
+  if (!question) return reply.code(400).send({ error: 'Escribí una pregunta' });
+  if (question.length > 600) return reply.code(400).send({ error: 'La pregunta no puede superar 600 caracteres' });
+  if (!allowAssistantRequest(u.id)) return reply.code(429).send({ error: 'Demasiadas preguntas seguidas. Esperá un minuto.' });
+  if (assistantInFlight.has(u.id)) return reply.code(429).send({ error: 'Ya estoy respondiendo otra pregunta' });
+
+  const rawHistory = Array.isArray(req.body?.history) ? req.body.history : [];
+  const history: AssistantHistoryItem[] = rawHistory
+    .filter((item): item is AssistantHistoryItem => !!item && (item.role === 'user' || item.role === 'assistant') && typeof item.content === 'string')
+    .slice(-6)
+    .map((item) => ({ role: item.role, content: item.content.slice(0, 1200) }));
+
+  const snapshot = buildAssistantSnapshot(selCars.all(u.id) as CarRow[], selMovs.all(u.id) as MovRow[], selPagos.all(u.id) as PagoRow[], hoyISO());
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20_000);
+  assistantInFlight.add(u.id);
+  try {
+    return await answerAssistant(question, history, snapshot, {
+      apiKey: process.env.DEEPSEEK_API_KEY,
+      baseUrl: process.env.DEEPSEEK_BASE_URL,
+      model: process.env.DEEPSEEK_MODEL,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    req.log.warn({ error }, 'falló la consulta a DeepSeek');
+    return unavailableAssistantReply(snapshot);
+  } finally {
+    clearTimeout(timeout);
+    assistantInFlight.delete(u.id);
+  }
+});
+
+/** Ultimas posiciones conocidas, separadas del estado historico para que el
+ * panel pueda refrescar el mapa sin descargar todos los movimientos. */
+app.get('/api/locations', async (req) => {
+  const u = quien(req);
+  return (selLocations.all(u.id) as LocationRow[]).map(locationToJson);
 });
 
 const ESTADOS = new Set(['activo', 'taller', 'baja']);
@@ -235,10 +309,74 @@ app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (re
   return carToJson(selCar.get(req.params.id, u.id) as CarRow);
 });
 
+/** Prepara las credenciales que se muestran en el paso de confirmación. No
+ * toca el vehículo: si el dueño cierra el modal, el alta queda cancelada sin
+ * dejar un usuario huérfano ni una contraseña activa. */
+app.post<{ Params: { id: string }; Body: { driver?: string } }>('/api/cars/:id/chofer-credenciales/preview', async (req, reply) => {
+  const u = quien(req);
+  const car = selCar.get(req.params.id, u.id) as CarRow | undefined;
+  if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
+
+  const driver = String(req.body?.driver ?? '').trim();
+  if (driver === 'Sin chofer' || !CAMPOS.driver.ok(driver)) {
+    return reply.code(400).send({ error: 'Nombre de chofer inválido' });
+  }
+
+  return {
+    username: car.driver === driver && car.driver_username ? car.driver_username : generarUsername(db, driver),
+    password: generarPassword(),
+  };
+});
+
+interface AsignarChoferBody {
+  driver?: string;
+  cuota?: number;
+  username?: string;
+  password?: string;
+}
+
+/** Confirma en una sola escritura tanto la asignación como las credenciales
+ * que el dueño acaba de revisar. Así nunca queda un chofer asignado sin poder
+ * entrar a la app, ni credenciales activas para un alta cancelada. */
+app.post<{ Params: { id: string }; Body: AsignarChoferBody }>('/api/cars/:id/asignar-chofer', async (req, reply) => {
+  const u = quien(req);
+  const car = selCar.get(req.params.id, u.id) as CarRow | undefined;
+  if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
+
+  const driver = String(req.body?.driver ?? '').trim();
+  const cuota = req.body?.cuota;
+  const username = String(req.body?.username ?? '').trim().toLowerCase();
+  const password = String(req.body?.password ?? '');
+
+  if (driver === 'Sin chofer' || !CAMPOS.driver.ok(driver)) return reply.code(400).send({ error: 'Nombre de chofer inválido' });
+  if (typeof cuota !== 'number' || !Number.isInteger(cuota) || cuota <= 0 || cuota > 100_000_000) return reply.code(400).send({ error: 'Cuota diaria inválida' });
+  if (!/^[a-z0-9.]{1,40}$/.test(username)) return reply.code(400).send({ error: 'Usuario de chofer inválido' });
+  if (!/^[A-Za-z2-9]{9}$/.test(password)) return reply.code(400).send({ error: 'Contraseña de chofer inválida' });
+
+  const passHash = await hashPassword(password);
+  // Se comprueba después del hash: ese es el único await de la ruta y otra
+  // asignación podría haber ocupado el usuario mientras se calculaba.
+  const usado = db.prepare('SELECT id FROM cars WHERE driver_username = ? AND id <> ?').get(username, car.id) as { id: string } | undefined;
+  if (usado) return reply.code(409).send({ error: 'Ese usuario acaba de ser ocupado. Volvé atrás y generá datos nuevos.' });
+
+  const guardado = db.prepare('UPDATE cars SET driver = ?, cuota = ?, driver_username = ?, driver_pass_hash = ? WHERE id = ? AND owner_id = ?').run(
+    driver,
+    cuota,
+    username,
+    passHash,
+    car.id,
+    u.id,
+  );
+  if (!guardado.changes) return reply.code(404).send({ error: 'Vehículo inexistente' });
+  borrarSesionesDeCar(db, car.id);
+  req.log.info({ car: car.plate, driver }, 'chofer asignado con credenciales');
+  return { car: carToJson(selCar.get(car.id, u.id) as CarRow) };
+});
+
 /** Genera (o regenera) el usuario y contraseña con los que el chofer entra a
- *  apps/driver. El usuario se mantiene si ya existía —cambiarlo en cada
- *  reseteo rompería el hábito del chofer sin necesidad—, la contraseña
- *  siempre es nueva y cualquier sesión abierta con la anterior se cierra. */
+ * apps/driver. El usuario se mantiene si ya existía —cambiarlo en cada
+ * reseteo rompería el hábito del chofer sin necesidad—, la contraseña
+ * siempre es nueva y cualquier sesión abierta con la anterior se cierra. */
 app.post<{ Params: { id: string } }>('/api/cars/:id/chofer-credenciales', async (req, reply) => {
   const u = quien(req);
   const car = selCar.get(req.params.id, u.id) as CarRow | undefined;
@@ -614,6 +752,54 @@ app.post('/api/chofer/logout', async (req) => {
   const auth = req.headers.authorization;
   if (auth?.startsWith('Bearer ')) borrarSesionChofer(db, auth.slice('Bearer '.length).trim());
   return { ok: true };
+});
+
+interface DriverLocationBody {
+  latitude?: unknown;
+  longitude?: unknown;
+  accuracy?: unknown;
+  recordedAt?: unknown;
+  mocked?: unknown;
+}
+
+app.post<{ Body: DriverLocationBody }>('/api/chofer/location', async (req, reply) => {
+  const s = quienChofer(db, req);
+  if (!s) return reply.code(401).send({ error: 'Sesión requerida' });
+
+  const latitude = Number(req.body?.latitude);
+  const longitude = Number(req.body?.longitude);
+  const accuracy = req.body?.accuracy == null ? null : Number(req.body.accuracy);
+  const recorded = new Date(String(req.body?.recordedAt ?? ''));
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    return reply.code(400).send({ error: 'Coordenadas inválidas' });
+  }
+  if (accuracy !== null && (!Number.isFinite(accuracy) || accuracy < 0)) {
+    return reply.code(400).send({ error: 'Precisión inválida' });
+  }
+  if (Number.isNaN(recorded.getTime())) return reply.code(400).send({ error: 'Fecha de ubicación inválida' });
+  if (recorded.getTime() > Date.now() + 5 * 60_000) return reply.code(400).send({ error: 'La ubicación no puede ser futura' });
+
+  // Android puede marcar una ubicación proveniente de un proveedor de mock.
+  // No es una defensa contra un cliente modificado, pero evita aceptar el caso
+  // detectable sin impedir ubicaciones legítimas donde el campo no existe.
+  if (req.body?.mocked === true) return reply.code(400).send({ error: 'La ubicación simulada no está permitida' });
+
+  const recordedAt = recorded.toISOString();
+  const receivedAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO driver_locations (car_id, latitude, longitude, accuracy, recorded_at, received_at, mocked)
+    VALUES (?, ?, ?, ?, ?, ?, 0)
+    ON CONFLICT(car_id) DO UPDATE SET
+      latitude = excluded.latitude,
+      longitude = excluded.longitude,
+      accuracy = excluded.accuracy,
+      recorded_at = excluded.recorded_at,
+      received_at = excluded.received_at,
+      mocked = excluded.mocked
+    WHERE excluded.recorded_at >= driver_locations.recorded_at
+  `).run(s.carId, latitude, longitude, accuracy, recordedAt, receivedAt);
+
+  return { ok: true, recordedAt };
 });
 
 app.get('/api/chofer/me', async (req, reply) => {

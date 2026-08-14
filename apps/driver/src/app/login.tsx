@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -42,6 +42,8 @@ export default function Login() {
   };
 
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  const footerLift = Math.round(height * 0.07);
 
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.bgDark }}>
@@ -108,7 +110,7 @@ export default function Login() {
           </Pressable>
         </View>
 
-        <Text style={{ marginTop: 'auto', fontSize: 11, color: '#77726a', lineHeight: 17 }}>
+        <Text style={{ marginTop: 'auto', marginBottom: footerLift, fontSize: 11, color: '#77726a', lineHeight: 17 }}>
           El dueño de la flota te asigna el auto, el usuario y la contraseña. Si no los tenés, pedíselos a él.
         </Text>
       </View>

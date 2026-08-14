@@ -17,6 +17,11 @@
       "predictiveBackGestureEnabled": false,
       "edgeToEdgeEnabled": true,
       "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.RECORD_AUDIO"
       ],
       "package": "com.mauconig.driver"
@@ -32,6 +37,15 @@
         }
       ],
       "expo-secure-store",
+      "expo-notifications",
+      [
+        "expo-location",
+        {
+          "isAndroidBackgroundLocationEnabled": true,
+          "isIosBackgroundLocationEnabled": true,
+          "locationAlwaysAndWhenInUsePermission": "MiFlota necesita tu ubicación para que el dueño pueda localizar el auto mientras trabajás."
+        }
+      ],
       [
         "expo-image-picker",
         {
