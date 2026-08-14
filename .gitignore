@@ -35,6 +35,11 @@ apps/api/.localdata
 
 # Credenciales locales
 .env
+/handoff.md
+/apks/
+
+# Diagnosticos locales de dispositivos
+/.phone-driver*
 
 # Expo (apps/admin-mobile, apps/driver)
 .expo/
