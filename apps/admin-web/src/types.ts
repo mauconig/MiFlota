@@ -110,6 +110,11 @@ export interface NewDriverForm {
   cuota: string;
 }
 
+export interface DriverCredentialDraft {
+  username: string;
+  password: string;
+}
+
 export interface UIState {
   period: Period;
   filter: FleetFilter;
@@ -134,6 +139,8 @@ export interface UIState {
   modal: ModalKind;
   ncar: NewCarForm;
   ndrv: NewDriverForm;
+  driverCredentials: DriverCredentialDraft | null;
+  driverCredentialsLoading: boolean;
   detailId: string | null;
   /** Intervalo de service que se está editando en la ficha, sin guardar todavía.
       Lleva el id del vehículo para que abrir otro no arrastre el borrador. */

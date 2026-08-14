@@ -100,6 +100,16 @@ export interface NuevoPagoPayload {
   nota?: string;
 }
 
+export interface DriverCredentials {
+  username: string;
+  password: string;
+}
+
+export interface AssignDriverPayload extends DriverCredentials {
+  driver: string;
+  cuota: number;
+}
+
 export interface FleetStore {
   cars: Car[];
   movs: Mov[];
@@ -108,6 +118,8 @@ export interface FleetStore {
   cargando: boolean;
   error: string;
   patchCar: (id: string, patch: Partial<Car>) => void;
+  previewDriverCredentials: (id: string, driver: string) => Promise<DriverCredentials>;
+  assignDriver: (id: string, payload: AssignDriverPayload) => Promise<Car>;
   addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
   deleteCar: (id: string) => Promise<{ plate: string; movs: number }>;
   mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: File | null }) => Promise<void>;
@@ -186,6 +198,25 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     [onError, onSinSesion, recargar],
   );
 
+  const previewDriverCredentials = useCallback(
+    (id: string, driver: string) =>
+      req<DriverCredentials>(`/api/cars/${id}/chofer-credenciales/preview`, {
+        method: 'POST',
+        body: JSON.stringify({ driver }),
+      }),
+    [],
+  );
+
+  const assignDriver = useCallback(async (id: string, payload: AssignDriverPayload) => {
+    const r = await req<{ car: CarDto }>(`/api/cars/${id}/asignar-chofer`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const car = toCar(r.car);
+    setCars((cs) => cs.map((c) => (c.id === id ? car : c)));
+    return car;
+  }, []);
+
   const addCar = useCallback(async (nuevo: NuevoCarPayload) => {
     const creado = toCar(await req<CarDto>('/api/cars', { method: 'POST', body: JSON.stringify(nuevo) }));
     setCars((cs) => [...cs, creado]);
@@ -228,5 +259,20 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     setPagos((ps) => ps.filter((p) => p.id !== id));
   }, []);
 
-  return { cars, movs, pagos, locations, cargando, error, patchCar, addCar, deleteCar, mandarATaller, addPago, deletePago };
+  return {
+    cars,
+    movs,
+    pagos,
+    locations,
+    cargando,
+    error,
+    patchCar,
+    previewDriverCredentials,
+    assignDriver,
+    addCar,
+    deleteCar,
+    mandarATaller,
+    addPago,
+    deletePago,
+  };
 }

@@ -249,10 +249,74 @@ app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (re
   return carToJson(selCar.get(req.params.id, u.id) as CarRow);
 });
 
+/** Prepara las credenciales que se muestran en el paso de confirmación. No
+ * toca el vehículo: si el dueño cierra el modal, el alta queda cancelada sin
+ * dejar un usuario huérfano ni una contraseña activa. */
+app.post<{ Params: { id: string }; Body: { driver?: string } }>('/api/cars/:id/chofer-credenciales/preview', async (req, reply) => {
+  const u = quien(req);
+  const car = selCar.get(req.params.id, u.id) as CarRow | undefined;
+  if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
+
+  const driver = String(req.body?.driver ?? '').trim();
+  if (driver === 'Sin chofer' || !CAMPOS.driver.ok(driver)) {
+    return reply.code(400).send({ error: 'Nombre de chofer inválido' });
+  }
+
+  return {
+    username: car.driver === driver && car.driver_username ? car.driver_username : generarUsername(db, driver),
+    password: generarPassword(),
+  };
+});
+
+interface AsignarChoferBody {
+  driver?: string;
+  cuota?: number;
+  username?: string;
+  password?: string;
+}
+
+/** Confirma en una sola escritura tanto la asignación como las credenciales
+ * que el dueño acaba de revisar. Así nunca queda un chofer asignado sin poder
+ * entrar a la app, ni credenciales activas para un alta cancelada. */
+app.post<{ Params: { id: string }; Body: AsignarChoferBody }>('/api/cars/:id/asignar-chofer', async (req, reply) => {
+  const u = quien(req);
+  const car = selCar.get(req.params.id, u.id) as CarRow | undefined;
+  if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
+
+  const driver = String(req.body?.driver ?? '').trim();
+  const cuota = req.body?.cuota;
+  const username = String(req.body?.username ?? '').trim().toLowerCase();
+  const password = String(req.body?.password ?? '');
+
+  if (driver === 'Sin chofer' || !CAMPOS.driver.ok(driver)) return reply.code(400).send({ error: 'Nombre de chofer inválido' });
+  if (typeof cuota !== 'number' || !Number.isInteger(cuota) || cuota <= 0 || cuota > 100_000_000) return reply.code(400).send({ error: 'Cuota diaria inválida' });
+  if (!/^[a-z0-9.]{1,40}$/.test(username)) return reply.code(400).send({ error: 'Usuario de chofer inválido' });
+  if (!/^[A-Za-z2-9]{9}$/.test(password)) return reply.code(400).send({ error: 'Contraseña de chofer inválida' });
+
+  const passHash = await hashPassword(password);
+  // Se comprueba después del hash: ese es el único await de la ruta y otra
+  // asignación podría haber ocupado el usuario mientras se calculaba.
+  const usado = db.prepare('SELECT id FROM cars WHERE driver_username = ? AND id <> ?').get(username, car.id) as { id: string } | undefined;
+  if (usado) return reply.code(409).send({ error: 'Ese usuario acaba de ser ocupado. Volvé atrás y generá datos nuevos.' });
+
+  const guardado = db.prepare('UPDATE cars SET driver = ?, cuota = ?, driver_username = ?, driver_pass_hash = ? WHERE id = ? AND owner_id = ?').run(
+    driver,
+    cuota,
+    username,
+    passHash,
+    car.id,
+    u.id,
+  );
+  if (!guardado.changes) return reply.code(404).send({ error: 'Vehículo inexistente' });
+  borrarSesionesDeCar(db, car.id);
+  req.log.info({ car: car.plate, driver }, 'chofer asignado con credenciales');
+  return { car: carToJson(selCar.get(car.id, u.id) as CarRow) };
+});
+
 /** Genera (o regenera) el usuario y contraseña con los que el chofer entra a
- *  apps/driver. El usuario se mantiene si ya existía —cambiarlo en cada
- *  reseteo rompería el hábito del chofer sin necesidad—, la contraseña
- *  siempre es nueva y cualquier sesión abierta con la anterior se cierra. */
+ * apps/driver. El usuario se mantiene si ya existía —cambiarlo en cada
+ * reseteo rompería el hábito del chofer sin necesidad—, la contraseña
+ * siempre es nueva y cualquier sesión abierta con la anterior se cierra. */
 app.post<{ Params: { id: string } }>('/api/cars/:id/chofer-credenciales', async (req, reply) => {
   const u = quien(req);
   const car = selCar.get(req.params.id, u.id) as CarRow | undefined;

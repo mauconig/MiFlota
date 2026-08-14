@@ -100,6 +100,11 @@ export interface ChoferForm {
   cuota: string;
 }
 
+export interface DriverCredentialDraft {
+  username: string;
+  password: string;
+}
+
 export interface RegistrarForm {
   tab: RegistrarTab;
   /** Auto de contexto: fijo si se abrió desde la ficha de un vehículo, editable
@@ -150,6 +155,8 @@ export interface MobileState {
   tallerForm: TallerForm | null;
   choferSheet: boolean;
   choferForm: ChoferForm;
+  choferCredentials: DriverCredentialDraft | null;
+  choferCredentialsLoading: boolean;
   nuevoVehiculo: NuevoVehiculoForm;
   /** true = ya se validó el formulario y se está mostrando el resumen para
    *  confirmar antes de mandarlo al servidor. */

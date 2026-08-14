@@ -152,6 +152,8 @@ export function initialMobileState(): MobileState {
     tallerForm: null,
     choferSheet: false,
     choferForm: { name: '', cuota: '' },
+    choferCredentials: null,
+    choferCredentialsLoading: false,
     nuevoVehiculo: blankNuevoVehiculo(),
     nuevoVehiculoConfirm: false,
     nuevoVehiculoGuardando: false,
@@ -441,10 +443,16 @@ export interface MobileView {
     open: boolean;
     close: () => void;
     title: string;
+    carLabel: string;
     name: string;
     setName: (v: string) => void;
     cuota: string;
     setCuota: (v: string) => void;
+    credentials: { username: string; password: string } | null;
+    credentialsLoading: boolean;
+    needsCredentials: boolean;
+    continuar: () => void;
+    volver: () => void;
     guardar: () => void;
     hasDriver: boolean;
     desvincular: () => void;
@@ -459,7 +467,7 @@ export function useMobileView(
   pagos: Pago[],
   state: MobileState,
   update: (patch: Partial<MobileState> | ((s: MobileState) => Partial<MobileState>)) => void,
-  persist: Pick<FleetStore, 'patchCar' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller'>,
+  persist: Pick<FleetStore, 'patchCar' | 'previewDriverCredentials' | 'assignDriver' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller'>,
 ): MobileView {
   const toast = (msg: string) => update({ toast: msg });
   useEffect(() => {
@@ -776,7 +784,13 @@ export function useMobileView(
       goCobro: () => goRegistrar('cobro', car.id),
       goGasto: () => goRegistrar('gasto', car.id),
       openEstadoSheet: () => update({ estadoSheet: true }),
-      openChoferSheet: () => update({ choferSheet: true, choferForm: { name: car.driver === 'Sin chofer' ? '' : car.driver, cuota: car.cuota ? String(car.cuota) : '' } }),
+      openChoferSheet: () =>
+        update({
+          choferSheet: true,
+          choferForm: { name: car.driver === 'Sin chofer' ? '' : car.driver, cuota: car.cuota ? String(car.cuota) : '' },
+          choferCredentials: null,
+          choferCredentialsLoading: false,
+        }),
     };
   }
 
@@ -1290,27 +1304,67 @@ export function useMobileView(
 
     choferSheet: {
       open: state.choferSheet,
-      close: () => update({ choferSheet: false }),
-      title: car ? (car.driver === 'Sin chofer' ? 'Asignar chofer' : 'Chofer de ' + car.plate) : '',
+      close: () => update({ choferSheet: false, choferCredentials: null, choferCredentialsLoading: false }),
+      title: state.choferCredentials ? 'Datos para MiFlota Chofer' : car ? (car.driver === 'Sin chofer' ? 'Asignar chofer' : 'Chofer de ' + car.plate) : '',
+      carLabel: car ? car.plate + ' · ' + car.model : '',
       name: state.choferForm.name,
       setName: (v) => update((s) => ({ choferForm: { ...s.choferForm, name: v } })),
       cuota: state.choferForm.cuota,
       setCuota: (v) => update((s) => ({ choferForm: { ...s.choferForm, cuota: miles(v) } })),
-      guardar: () => {
-        if (!car) return;
+      credentials: state.choferCredentials,
+      credentialsLoading: state.choferCredentialsLoading,
+      needsCredentials: car?.driver !== state.choferForm.name.trim(),
+      continuar: () => {
+        if (!car || state.choferCredentialsLoading) return;
         const name = state.choferForm.name.trim();
         if (!name) return toast('Ingresá el nombre del chofer');
         const cuota = numFromInput(state.choferForm.cuota);
         if (!cuota) return toast('Ingresá la cuota diaria del chofer');
-        persist.patchCar(car.id, { driver: name, cuota });
-        update({ choferSheet: false });
-        toast('Chofer asignado · ' + name);
+        if (car.driver === name) return;
+
+        update({ choferCredentialsLoading: true });
+        persist
+          .previewDriverCredentials(car.id, name)
+          .then((credentials) => update({ choferCredentials: credentials, choferCredentialsLoading: false }))
+          .catch((e: Error) => {
+            update({ choferCredentialsLoading: false });
+            toast('No se pudieron generar los datos: ' + e.message);
+          });
+      },
+      volver: () => update({ choferCredentials: null, choferCredentialsLoading: false }),
+      guardar: () => {
+        if (!car || state.choferCredentialsLoading) return;
+        const name = state.choferForm.name.trim();
+        if (!name) return toast('Ingresá el nombre del chofer');
+        const cuota = numFromInput(state.choferForm.cuota);
+        if (!cuota) return toast('Ingresá la cuota diaria del chofer');
+
+        if (car.driver === name) {
+          persist.patchCar(car.id, { driver: name, cuota });
+          update({ choferSheet: false, choferCredentials: null });
+          toast('Chofer actualizado · ' + name);
+          return;
+        }
+
+        const credentials = state.choferCredentials;
+        if (!credentials) return;
+        update({ choferCredentialsLoading: true });
+        persist
+          .assignDriver(car.id, { driver: name, cuota, ...credentials })
+          .then(() => {
+            update({ choferSheet: false, choferCredentials: null, choferCredentialsLoading: false });
+            toast('Chofer asignado · ' + name);
+          })
+          .catch((e: Error) => {
+            update({ choferCredentialsLoading: false });
+            toast('No se pudo asignar: ' + e.message);
+          });
       },
       hasDriver: car?.driver !== 'Sin chofer',
       desvincular: () => {
         if (!car) return;
         persist.patchCar(car.id, { driver: 'Sin chofer', cuota: 0 });
-        update({ choferSheet: false });
+        update({ choferSheet: false, choferCredentials: null, choferCredentialsLoading: false });
         toast('Chofer desvinculado');
       },
     },

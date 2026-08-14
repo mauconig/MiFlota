@@ -44,6 +44,8 @@ const initialState: UIState = {
   modal: null,
   ncar: blankCar(),
   ndrv: blankDrv(),
+  driverCredentials: null,
+  driverCredentialsLoading: false,
   detailId: null,
   svcEdit: null,
   taller: null,
