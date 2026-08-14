@@ -26,7 +26,7 @@ export default function App() {
   // Si el servidor dice que la sesión ya no vale, `auth.salir` limpia el
   // estado local (el POST /api/logout que dispara es inofensivo aunque la
   // sesión ya esté vencida del otro lado).
-  const store = useFleetStore(onError, auth.salir);
+  const store = useFleetStore(onError, auth.salir, !!auth.sesion);
 
   if (auth.cargando) return <Spinner />;
   if (!auth.sesion) {

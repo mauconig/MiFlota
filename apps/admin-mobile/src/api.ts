@@ -145,7 +145,7 @@ export interface FleetStore {
  * A propósito no incluye `deleteCar`/`deletePago`: ninguna pantalla de
  * admin-mobile los usa.
  */
-export function useFleetStore(onError: (msg: string) => void, onSinSesion: () => void): FleetStore {
+export function useFleetStore(onError: (msg: string) => void, onSinSesion: () => void, enabled = true): FleetStore {
   const [cars, setCars] = useState<Car[]>([]);
   const [movs, setMovs] = useState<Mov[]>([]);
   const [pagos, setPagos] = useState<Pago[]>([]);
@@ -160,6 +160,17 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
   }, []);
 
   useEffect(() => {
+    if (!enabled) {
+      // App monta este hook también mientras muestra Login. Limpiar acá evita
+      // que otro usuario vea por un instante los datos de la sesión anterior;
+      // cuando el login termina, `enabled` cambia y se hace la carga real.
+      setCars([]);
+      setMovs([]);
+      setPagos([]);
+      setError('');
+      setCargando(true);
+      return;
+    }
     let vivo = true;
     recargar()
       .then(() => vivo && setError(''))
@@ -172,7 +183,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     return () => {
       vivo = false;
     };
-  }, [recargar, onSinSesion]);
+  }, [enabled, recargar, onSinSesion]);
 
   const patchCar = useCallback(
     (id: string, patch: Partial<Car>) => {
