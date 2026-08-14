@@ -1,6 +1,6 @@
 import { KeyboardAvoidingView, ScrollView, View } from 'react-native';
 import type { MobileView } from '../useMobileView';
-import { TabHeader, SubHeader, SearchHeader } from './Header';
+import { TabHeader, SubHeader } from './Header';
 import { BottomNav } from './BottomNav';
 import { Toast } from './Toast';
 import { PeriodoSheet } from './PeriodoSheet';
@@ -13,7 +13,7 @@ import { NuevoVehiculo } from '../screens/NuevoVehiculo';
 import { Registrar } from '../screens/registrar/Registrar';
 import { Reportes } from '../screens/Reportes';
 import { Ranking } from '../screens/Ranking';
-import { Search } from '../screens/Search';
+import { Assistant } from '../screens/Assistant';
 
 export function Shell({ v, nombre, onLogout }: { v: MobileView; nombre: string; onLogout: () => void }) {
   return (
@@ -24,20 +24,25 @@ export function Shell({ v, nombre, onLogout }: { v: MobileView; nombre: string; 
     // lo puede mover — solo el contenido de arriba se corre para el teclado.
     <View style={{ flex: 1, backgroundColor: '#f4f0e8' }}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
-        {v.isTab && <TabHeader title={v.headerTitle} sub={v.headerSub} onSearch={v.openSearch} onProfile={onLogout} nombre={nombre} />}
+        {v.isTab && <TabHeader title={v.headerTitle} sub={v.headerSub} onAssistant={v.openAssistant} onProfile={onLogout} nombre={nombre} />}
         {v.isSub && <SubHeader title={v.headerTitle} onBack={v.back} />}
-        {v.isSearch && <SearchHeader q={v.search.q} onQ={v.search.setQ} onClear={v.search.clearQ} onBack={v.back} />}
+        {v.isAssistant && <SubHeader title={v.headerTitle} onBack={v.back} />}
 
-        <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
-          {v.screen === 'dashboard' && <Dashboard v={v} />}
-          {v.screen === 'flota' && <Flota v={v} />}
-          {v.screen === 'detalle' && <Detalle v={v} />}
-          {v.screen === 'nuevoVehiculo' && <NuevoVehiculo v={v} />}
-          {v.screen === 'registrar' && <Registrar v={v} />}
-          {v.screen === 'reportes' && <Reportes v={v} />}
-          {v.screen === 'ranking' && <Ranking v={v} />}
-          {v.screen === 'search' && <Search v={v} />}
-        </ScrollView>
+        {v.isAssistant ? (
+          // El chat necesita su propio scroll para que los mensajes y el
+          // compositor se acomoden bien al teclado.
+          <Assistant onSinSesion={onLogout} />
+        ) : (
+          <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
+            {v.screen === 'dashboard' && <Dashboard v={v} />}
+            {v.screen === 'flota' && <Flota v={v} />}
+            {v.screen === 'detalle' && <Detalle v={v} />}
+            {v.screen === 'nuevoVehiculo' && <NuevoVehiculo v={v} />}
+            {v.screen === 'registrar' && <Registrar v={v} />}
+            {v.screen === 'reportes' && <Reportes v={v} />}
+            {v.screen === 'ranking' && <Ranking v={v} />}
+          </ScrollView>
+        )}
       </KeyboardAvoidingView>
 
       <View style={{ position: 'relative' }}>

@@ -1,0 +1,230 @@
+import { useRef, useState } from 'react';
+import { ActivityIndicator, FlatList, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
+import { askAssistant, SinSesion, type AssistantCard, type AssistantHistoryItem } from '../api';
+
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  cards?: AssistantCard[];
+  asOf?: string;
+  notice?: string;
+  error?: boolean;
+  retryQuestion?: string;
+}
+
+const INTRO: ChatMessage = {
+  id: 'intro',
+  role: 'assistant',
+  text: 'Preguntame por deudas, cobros, gastos o rendimiento. Consulto los datos reales de tu flota cada vez que me escribís.',
+};
+
+const SUGGESTIONS = ['¿Quién debe más?', '¿Qué auto rinde más este mes?', '¿Cuánto cobré esta semana?', '¿En qué gasté más este mes?'];
+
+function dateLabel(iso: string): string {
+  const [year, month, day] = iso.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+function ResultCard({ card }: { card: AssistantCard }) {
+  return (
+    <View style={styles.resultCard}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.resultTitle} numberOfLines={1}>
+          {card.title}
+        </Text>
+        {!!card.subtitle && (
+          <Text style={styles.resultSubtitle} numberOfLines={2}>
+            {card.subtitle}
+          </Text>
+        )}
+      </View>
+      <Text style={styles.resultValue}>{card.value}</Text>
+    </View>
+  );
+}
+
+export function Assistant({ onSinSesion }: { onSinSesion: () => void }) {
+  const [messages, setMessages] = useState<ChatMessage[]>([INTRO]);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const listRef = useRef<FlatList<ChatMessage>>(null);
+  const nextId = useRef(1);
+
+  const send = async (raw: string) => {
+    const question = raw.trim();
+    if (!question || sending) return;
+
+    Keyboard.dismiss();
+    const userMessage: ChatMessage = { id: `m${nextId.current++}`, role: 'user', text: question };
+    const history: AssistantHistoryItem[] = messages
+      .filter((message) => message.id !== INTRO.id && !message.error)
+      .slice(-6)
+      .map((message) => ({ role: message.role, content: message.text }));
+    setMessages((current) => [...current, userMessage]);
+    setDraft('');
+    setSending(true);
+
+    try {
+      const reply = await askAssistant(question, history);
+      setMessages((current) => [
+        ...current,
+        {
+          id: `m${nextId.current++}`,
+          role: 'assistant',
+          text: reply.answer,
+          cards: reply.cards,
+          asOf: reply.asOf,
+          notice: reply.notice,
+        },
+      ]);
+    } catch (error) {
+      if (error instanceof SinSesion) {
+        onSinSesion();
+        return;
+      }
+      const detail = error instanceof Error ? error.message : 'Error inesperado';
+      setMessages((current) => [
+        ...current,
+        {
+          id: `m${nextId.current++}`,
+          role: 'assistant',
+          text: `No pude consultar la flota: ${detail}`,
+          error: true,
+          retryQuestion: question,
+        },
+      ]);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const renderMessage = ({ item }: { item: ChatMessage }) => {
+    const mine = item.role === 'user';
+    return (
+      <View style={[styles.messageWrap, mine && styles.messageWrapMine]}>
+        {!mine && <Text style={styles.sender}>MIFLOTA IA</Text>}
+        <View style={[styles.bubble, mine ? styles.userBubble : styles.assistantBubble, item.error && styles.errorBubble]}>
+          <Text style={[styles.messageText, mine && styles.userText]}>{item.text}</Text>
+        </View>
+        {!!item.cards?.length && (
+          <View style={styles.cards}>
+            {item.cards.map((card, index) => (
+              <ResultCard key={`${card.kind}-${card.title}-${index}`} card={card} />
+            ))}
+          </View>
+        )}
+        {!!item.notice && (
+          <View style={styles.notice}>
+            <Text style={styles.noticeText}>{item.notice}</Text>
+          </View>
+        )}
+        {!!item.asOf && <Text style={styles.asOf}>Datos actualizados al {dateLabel(item.asOf)}</Text>}
+        {!!item.retryQuestion && (
+          <Pressable onPress={() => void send(item.retryQuestion!)} disabled={sending} accessibilityRole="button" style={styles.retryButton}>
+            <Text style={styles.retryText}>Volver a intentar</Text>
+          </Pressable>
+        )}
+      </View>
+    );
+  };
+
+  return (
+    <View style={styles.screen}>
+      <FlatList
+        ref={listRef}
+        data={messages}
+        renderItem={renderMessage}
+        keyExtractor={(item) => item.id}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.list}
+        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+        ListFooterComponent={
+          <View style={{ gap: 12 }}>
+            {messages.length === 1 && (
+              <View style={styles.suggestions}>
+                <Text style={styles.suggestionLabel}>PROBÁ PREGUNTANDO</Text>
+                <View style={styles.suggestionGrid}>
+                  {SUGGESTIONS.map((suggestion) => (
+                    <Pressable key={suggestion} onPress={() => void send(suggestion)} disabled={sending} style={styles.suggestion}>
+                      <Text style={styles.suggestionText}>{suggestion}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            )}
+            {sending && (
+              <View style={styles.loadingBubble}>
+                <ActivityIndicator color="#8a5d16" size="small" />
+                <Text style={styles.loadingText}>Consultando la flota…</Text>
+              </View>
+            )}
+          </View>
+        }
+      />
+
+      <View style={styles.composer}>
+        <TextInput
+          value={draft}
+          onChangeText={setDraft}
+          placeholder="Preguntá sobre tu flota"
+          placeholderTextColor="#8b857b"
+          multiline
+          maxLength={600}
+          editable={!sending}
+          style={styles.input}
+          accessibilityLabel="Pregunta para el asistente"
+        />
+        <Pressable
+          onPress={() => void send(draft)}
+          disabled={!draft.trim() || sending}
+          accessibilityRole="button"
+          accessibilityLabel="Enviar pregunta"
+          style={({ pressed }) => [styles.sendButton, (!draft.trim() || sending) && styles.sendDisabled, pressed && styles.sendPressed]}
+        >
+          <Svg viewBox="0 0 24 24" width={20} height={20} fill="none" stroke="#16150f" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <Path d="m22 2-7 20-4-9-9-4Z" />
+            <Path d="M22 2 11 13" />
+          </Svg>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1 },
+  list: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 18, gap: 12 },
+  suggestions: { gap: 9, marginBottom: 4 },
+  suggestionLabel: { paddingLeft: 3, fontSize: 10, fontWeight: '700', letterSpacing: 1, color: '#6b665c' },
+  suggestionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  suggestion: { maxWidth: '100%', borderWidth: 1, borderColor: '#e4d7c3', backgroundColor: '#fff8e9', borderRadius: 18, paddingHorizontal: 13, paddingVertical: 9 },
+  suggestionText: { color: '#6e4a13', fontSize: 12, fontWeight: '600' },
+  messageWrap: { alignSelf: 'stretch', alignItems: 'flex-start', gap: 5 },
+  messageWrapMine: { alignItems: 'flex-end' },
+  sender: { marginLeft: 3, color: '#8a5d16', fontSize: 9, fontWeight: '800', letterSpacing: 1 },
+  bubble: { maxWidth: '88%', borderRadius: 19, paddingHorizontal: 14, paddingVertical: 11 },
+  assistantBubble: { backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#e6ded0', borderTopLeftRadius: 6 },
+  userBubble: { backgroundColor: '#16150f', borderTopRightRadius: 6 },
+  errorBubble: { backgroundColor: '#fff2ee', borderColor: '#efc8bc' },
+  messageText: { color: '#2a2823', fontSize: 14, lineHeight: 20 },
+  userText: { color: '#fffaf0' },
+  cards: { alignSelf: 'stretch', gap: 7, marginTop: 2 },
+  resultCard: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 15, borderWidth: 1, borderColor: '#e6ded0', backgroundColor: '#fffdf8', paddingHorizontal: 13, paddingVertical: 10 },
+  resultTitle: { color: '#2a2823', fontSize: 12, fontWeight: '700' },
+  resultSubtitle: { color: '#756f65', fontSize: 10, marginTop: 2 },
+  resultValue: { color: '#256b4d', fontSize: 13, fontWeight: '800' },
+  notice: { maxWidth: '92%', borderRadius: 12, backgroundColor: '#fdf0dd', paddingHorizontal: 10, paddingVertical: 7 },
+  noticeText: { color: '#835c18', fontSize: 10, lineHeight: 14 },
+  asOf: { color: '#817b71', fontSize: 9, marginLeft: 3 },
+  retryButton: { borderRadius: 14, borderWidth: 1, borderColor: '#d7aa99', paddingHorizontal: 12, paddingVertical: 7 },
+  retryText: { color: '#914531', fontSize: 11, fontWeight: '700' },
+  loadingBubble: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 9, borderRadius: 18, borderTopLeftRadius: 6, backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#e6ded0', paddingHorizontal: 14, paddingVertical: 11 },
+  loadingText: { color: '#6b665c', fontSize: 12 },
+  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 9, backgroundColor: '#fffdf8', borderTopWidth: 1, borderTopColor: '#e6ded0', paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10 },
+  input: { flex: 1, maxHeight: 112, minHeight: 44, borderRadius: 22, borderWidth: 1, borderColor: '#ddd4c5', backgroundColor: '#f8f4ec', color: '#1a1a18', fontSize: 14, lineHeight: 19, paddingHorizontal: 15, paddingVertical: 11 },
+  sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#e8a13a', alignItems: 'center', justifyContent: 'center' },
+  sendDisabled: { opacity: 0.4 },
+  sendPressed: { transform: [{ scale: 0.96 }] },
+});

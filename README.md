@@ -46,6 +46,20 @@ Los tres frontends proxean `/api` hacia `http://127.0.0.1:3000`, así que el
 backend tiene que estar corriendo para que cualquiera de ellos funcione contra
 datos reales.
 
+### Asistente de admin-mobile
+
+El botón de asistente consulta `POST /api/assistant/query`. La API calcula
+deudas, cobros, gastos y rentabilidad directamente sobre la flota del usuario;
+DeepSeek solo interpreta y redacta consultas que no cubren esos cálculos
+directos. Nunca se le da acceso a SQL ni se envían credenciales, sesiones, GPS
+o comprobantes.
+
+Para habilitar preguntas libres, completá `DEEPSEEK_API_KEY=` en el `.env` de
+la raíz. El modelo predeterminado es `deepseek-v4-flash`. `npm --prefix
+apps/api start` carga ese archivo automáticamente; Docker Compose propaga las
+mismas variables al contenedor. Las consultas directas sugeridas en la pantalla
+funcionan aun con la clave vacía.
+
 ## Build
 
 ```bash

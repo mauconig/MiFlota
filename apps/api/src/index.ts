@@ -34,6 +34,7 @@ import {
   quienChofer,
 } from './authChofer.js';
 import { imputar } from './cobranza.js';
+import { answerAssistant, buildAssistantSnapshot, unavailableAssistantReply, type AssistantHistoryItem } from './assistant.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = process.env.MIFLOTA_PUBLIC ?? join(HERE, '..', 'public');
@@ -163,6 +164,65 @@ app.get('/api/state', async (req) => {
     movs: (selMovs.all(u.id) as MovRow[]).map(movToJson),
     pagos: (selPagos.all(u.id) as PagoRow[]).map(pagoToJson),
   };
+});
+
+interface AssistantQueryBody {
+  question?: string;
+  history?: AssistantHistoryItem[];
+}
+
+// Evita que dobles taps o clientes reintentando en paralelo consuman dos
+// respuestas del modelo para el mismo dueño. También serializa las respuestas
+// locales, cuya sección crítica dura apenas unos milisegundos.
+const assistantInFlight = new Set<number>();
+const assistantRate = new Map<number, { since: number; count: number }>();
+const ASSISTANT_RATE_WINDOW_MS = 60_000;
+const ASSISTANT_RATE_MAX = 20;
+
+function allowAssistantRequest(ownerId: number): boolean {
+  const now = Date.now();
+  const current = assistantRate.get(ownerId);
+  if (!current || now - current.since >= ASSISTANT_RATE_WINDOW_MS) {
+    assistantRate.set(ownerId, { since: now, count: 1 });
+    return true;
+  }
+  if (current.count >= ASSISTANT_RATE_MAX) return false;
+  current.count += 1;
+  return true;
+}
+
+app.post<{ Body: AssistantQueryBody }>('/api/assistant/query', async (req, reply) => {
+  const u = quien(req);
+  const question = String(req.body?.question ?? '').trim();
+  if (!question) return reply.code(400).send({ error: 'Escribí una pregunta' });
+  if (question.length > 600) return reply.code(400).send({ error: 'La pregunta no puede superar 600 caracteres' });
+  if (!allowAssistantRequest(u.id)) return reply.code(429).send({ error: 'Demasiadas preguntas seguidas. Esperá un minuto.' });
+  if (assistantInFlight.has(u.id)) return reply.code(429).send({ error: 'Ya estoy respondiendo otra pregunta' });
+
+  const rawHistory = Array.isArray(req.body?.history) ? req.body.history : [];
+  const history: AssistantHistoryItem[] = rawHistory
+    .filter((item): item is AssistantHistoryItem => !!item && (item.role === 'user' || item.role === 'assistant') && typeof item.content === 'string')
+    .slice(-6)
+    .map((item) => ({ role: item.role, content: item.content.slice(0, 1200) }));
+
+  const snapshot = buildAssistantSnapshot(selCars.all(u.id) as CarRow[], selMovs.all(u.id) as MovRow[], selPagos.all(u.id) as PagoRow[], hoyISO());
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20_000);
+  assistantInFlight.add(u.id);
+  try {
+    return await answerAssistant(question, history, snapshot, {
+      apiKey: process.env.DEEPSEEK_API_KEY,
+      baseUrl: process.env.DEEPSEEK_BASE_URL,
+      model: process.env.DEEPSEEK_MODEL,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    req.log.warn({ error }, 'falló la consulta a DeepSeek');
+    return unavailableAssistantReply(snapshot);
+  } finally {
+    clearTimeout(timeout);
+    assistantInFlight.delete(u.id);
+  }
 });
 
 /** Ultimas posiciones conocidas, separadas del estado historico para que el

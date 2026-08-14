@@ -111,6 +111,35 @@ export interface NuevoEgresoPayload {
   comprobante: PickedFile | null;
 }
 
+export interface AssistantHistoryItem {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface AssistantCard {
+  kind: 'driver' | 'car' | 'metric';
+  title: string;
+  value: string;
+  subtitle?: string;
+}
+
+export interface AssistantReply {
+  answer: string;
+  cards: AssistantCard[];
+  asOf: string;
+  mode: 'local' | 'deepseek' | 'fallback';
+  notice?: string;
+}
+
+/** La pregunta viaja al backend autenticado. La clave y el acceso a los datos
+ * permanecen siempre en el servidor; el bundle de Expo no contiene ninguno. */
+export function askAssistant(question: string, history: AssistantHistoryItem[]): Promise<AssistantReply> {
+  return req<AssistantReply>('/api/assistant/query', {
+    method: 'POST',
+    body: JSON.stringify({ question, history: history.slice(-6) }),
+  });
+}
+
 export interface DriverCredentials {
   username: string;
   password: string;
