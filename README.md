@@ -38,6 +38,7 @@ cd apps/admin-mobile && npm install   # instala admin-mobile por separado
 npm run dev:api       # backend en :3000
 npm run dev            # admin-web en :5173 (alias de dev:admin-web)
 npm run dev:admin-mobile   # Expo (Metro en :8081)
+npm --prefix apps/admin-mobile run android  # development build local + emulador
 npm run dev:driver         # :5176
 ```
 
