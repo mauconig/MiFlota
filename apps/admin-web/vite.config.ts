@@ -11,7 +11,9 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:3000', changeOrigin: true },
+      // El panel de desarrollo también usa el backend compartido de la VPS.
+      // Así no se crean datos en una API local por accidente.
+      '/api': { target: 'https://miflota.147-93-180-120.sslip.io', changeOrigin: true, secure: true },
     },
   },
 })

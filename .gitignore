@@ -52,3 +52,7 @@ apps/driver/expo-env.d.ts
 *.tsbuildinfo
 *.orig.*
 .kotlin/
+
+# Local Gradle/Android caches created outside the generated android project
+.gradle-*/
+.android-*/

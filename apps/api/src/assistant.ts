@@ -6,16 +6,44 @@ export interface AssistantHistoryItem {
   content: string;
 }
 
+export type AssistantAction =
+  | { kind: 'car'; carId: string; label: string }
+  | { kind: 'query'; question: string; label: string };
+
 export interface AssistantCard {
   kind: 'driver' | 'car' | 'metric';
   title: string;
   value: string;
   subtitle?: string;
+  action?: AssistantAction;
+}
+
+export interface AssistantTableColumn {
+  key: string;
+  label: string;
+}
+
+export interface AssistantTableRow {
+  id: string;
+  cells: Record<string, string>;
+  action?: AssistantAction;
+}
+
+export interface AssistantTable {
+  columns: AssistantTableColumn[];
+  rows: AssistantTableRow[];
+}
+
+export interface AssistantFilter {
+  label: string;
+  question: string;
 }
 
 export interface AssistantReply {
   answer: string;
   cards: AssistantCard[];
+  table?: AssistantTable;
+  filters?: AssistantFilter[];
   asOf: string;
   mode: 'local' | 'deepseek' | 'fallback';
   notice?: string;
@@ -49,6 +77,7 @@ interface AssistantCar {
 interface AssistantDriver {
   name: string;
   currentCars: string[];
+  currentCarIds: string[];
   billed: number;
   applied: number;
   debt: number;
@@ -159,6 +188,7 @@ export function buildAssistantSnapshot(cars: CarRow[], movs: MovRow[], pagos: Pa
     return {
       name,
       currentCars: cars.filter((car) => car.driver === name).map((car) => car.plate),
+      currentCarIds: cars.filter((car) => car.driver === name).map((car) => car.id),
       billed,
       applied,
       debt: Math.max(0, billed - applied),
@@ -234,9 +264,93 @@ function selectedPeriod(snapshot: AssistantSnapshot, question: string): { label:
   return { label: 'este mes', summary: snapshot.periods.month, carField: 'month' };
 }
 
+function carAction(car: AssistantCar, label = 'Ver vehículo'): AssistantAction {
+  return { kind: 'car', carId: car.id, label };
+}
+
+function driverAction(driver: AssistantDriver, label = 'Ver conductor'): AssistantAction | undefined {
+  const carId = driver.currentCarIds[0];
+  return carId ? { kind: 'car', carId, label } : undefined;
+}
+
+function debtTable(drivers: AssistantDriver[]): AssistantTable {
+  return {
+    columns: [
+      { key: 'driver', label: 'Conductor' },
+      { key: 'debt', label: 'Deuda' },
+      { key: 'oldest', label: 'Más antigua' },
+      { key: 'cars', label: 'Autos' },
+    ],
+    rows: drivers.map((driver) => ({
+      id: driver.name,
+      cells: {
+        driver: driver.name,
+        debt: fmt(driver.debt),
+        oldest: driver.oldestUnpaidDate || 'Sin deuda vencida',
+        cars: driver.currentCars.join(' · ') || 'Sin auto',
+      },
+      action: driverAction(driver),
+    })),
+  };
+}
+
+function debtFilters(): AssistantFilter[] {
+  return [
+    { label: 'Solo mayores a ₲1.000.000', question: '¿Quiénes deben más de un millón?' },
+    { label: 'Ordenar por antigüedad', question: '¿Quién tiene la deuda más antigua?' },
+  ];
+}
+
 /** Respuestas exactas para las consultas más frecuentes, incluso sin API key. */
 export function localAssistantReply(question: string, snapshot: AssistantSnapshot): AssistantReply | null {
   const q = normalise(question);
+
+  const namedDriver = snapshot.drivers.find((driver) => q.includes(normalise(driver.name)));
+  if (namedDriver && /(cuanto|que|debe|deuda|adeuda)/.test(q)) {
+    const cars = snapshot.cars.filter((car) => car.driver === namedDriver.name);
+    return {
+      answer: namedDriver.debt > 0
+        ? `${namedDriver.name} debe ${fmt(namedDriver.debt)}${namedDriver.oldestUnpaidDate ? `. Su deuda más antigua es del ${namedDriver.oldestUnpaidDate}.` : '.'}`
+        : `${namedDriver.name} no tiene deuda pendiente.`,
+      cards: [{
+        kind: 'driver',
+        title: namedDriver.name,
+        value: fmt(namedDriver.debt),
+        subtitle: namedDriver.currentCars.join(' · ') || 'Sin auto asignado actualmente',
+        action: driverAction(namedDriver),
+      }],
+      table: cars.length ? {
+        columns: [{ key: 'plate', label: 'Auto' }, { key: 'model', label: 'Modelo' }, { key: 'status', label: 'Estado' }],
+        rows: cars.map((car) => ({ id: car.id, cells: { plate: car.plate, model: car.model, status: car.status }, action: carAction(car) })),
+      } : undefined,
+      filters: debtFilters(),
+      asOf: snapshot.asOf,
+      mode: 'local',
+    };
+  }
+
+  if (/(quienes|quien|lista|listame).*(atras|deben|deuda)/.test(q) || /atrasados|morosos/.test(q)) {
+    const minimumMillion = /millon|1000000/.test(q);
+    const oldestFirst = /antigua|vieja/.test(q);
+    const debtors = snapshot.drivers
+      .filter((driver) => driver.debt > 0 && (!minimumMillion || driver.debt > 1_000_000))
+      .slice()
+      .sort((a, b) => oldestFirst
+        ? (a.oldestUnpaidDate || '9999-99-99').localeCompare(b.oldestUnpaidDate || '9999-99-99')
+        : b.debt - a.debt);
+    return {
+      answer: debtors.length
+        ? oldestFirst
+          ? `${debtors[0].name} tiene la deuda más antigua${debtors[0].oldestUnpaidDate ? `, del ${debtors[0].oldestUnpaidDate}.` : '.'}`
+          : `Hay ${debtors.length} conductor${debtors.length === 1 ? '' : 'es'} con deuda pendiente.`
+        : 'No hay conductores con deuda registrada.',
+      cards: debtors.slice(0, 3).map((driver) => ({ kind: 'driver', title: driver.name, value: fmt(driver.debt), subtitle: driver.currentCars.join(' · ') || 'Sin auto asignado', action: driverAction(driver) })),
+      table: debtTable(debtors),
+      filters: debtFilters(),
+      asOf: snapshot.asOf,
+      mode: 'local',
+    };
+  }
 
   if (/(quien|chofer).*(debe mas|mayor deuda)|(debe mas|mayor deuda).*(quien|chofer)/.test(q)) {
     const debtors = snapshot.drivers.filter((driver) => driver.debt > 0);
@@ -251,7 +365,10 @@ export function localAssistantReply(question: string, snapshot: AssistantSnapsho
         title: driver.name,
         value: fmt(driver.debt),
         subtitle: driver.currentCars.length ? driver.currentCars.join(' · ') : 'Sin auto asignado actualmente',
+        action: driverAction(driver),
       })),
+      table: debtTable(debtors),
+      filters: debtFilters(),
       asOf: snapshot.asOf,
       mode: 'local',
     };
@@ -280,7 +397,25 @@ export function localAssistantReply(question: string, snapshot: AssistantSnapsho
         title: `${car.plate} · ${car.model}`,
         value: fmt(car[period.carField].net),
         subtitle: `${fmt(car[period.carField].collected)} cobrado · ${fmt(car[period.carField].expenses)} gastado`,
+        action: carAction(car),
       })),
+      table: {
+        columns: [{ key: 'car', label: 'Auto' }, { key: 'net', label: 'Neto' }, { key: 'collected', label: 'Cobrado' }, { key: 'expenses', label: 'Gastos' }],
+        rows: ranked.slice(0, 5).map((car) => ({
+          id: car.id,
+          cells: {
+            car: `${car.plate} · ${car.model}`,
+            net: fmt(car[period.carField].net),
+            collected: fmt(car[period.carField].collected),
+            expenses: fmt(car[period.carField].expenses),
+          },
+          action: carAction(car),
+        })),
+      },
+      filters: [
+        { label: 'Esta semana', question: '¿Qué auto rindió más esta semana?' },
+        { label: 'Todo el historial', question: '¿Qué auto rindió más en todo el historial?' },
+      ],
       asOf: snapshot.asOf,
       mode: 'local',
     };
@@ -293,6 +428,10 @@ export function localAssistantReply(question: string, snapshot: AssistantSnapsho
       cards: [
         { kind: 'metric', title: 'Cobrado', value: fmt(period.summary.collected), subtitle: period.label },
         { kind: 'metric', title: 'Neto', value: fmt(period.summary.net), subtitle: 'Cobrado menos gastos' },
+      ],
+      filters: [
+        { label: 'Ver gastos', question: `¿En qué gasté más ${period.label}?` },
+        { label: 'Ver facturado', question: `¿Cuánto facturé ${period.label}?` },
       ],
       asOf: snapshot.asOf,
       mode: 'local',
@@ -307,6 +446,7 @@ export function localAssistantReply(question: string, snapshot: AssistantSnapsho
         ? `Gastaste ${fmt(period.summary.expenses)} ${period.label}. La categoría principal fue ${categories[0][0]} con ${fmt(categories[0][1])}.`
         : `No hay gastos registrados ${period.label}.`,
       cards: categories.slice(0, 3).map(([category, amount]) => ({ kind: 'metric', title: category, value: fmt(amount) })),
+      filters: categories.slice(0, 5).map(([category]) => ({ label: category, question: `¿Cuánto gasté en ${category} ${period.label}?` })),
       asOf: snapshot.asOf,
       mode: 'local',
     };
@@ -320,8 +460,8 @@ export function localAssistantReply(question: string, snapshot: AssistantSnapsho
     return {
       answer: `Encontré ${cars.length + drivers.length} resultado${cars.length + drivers.length === 1 ? '' : 's'}.`,
       cards: [
-        ...cars.map((car): AssistantCard => ({ kind: 'car', title: `${car.plate} · ${car.model}`, value: car.status, subtitle: car.driver })),
-        ...drivers.map((driver): AssistantCard => ({ kind: 'driver', title: driver.name, value: fmt(driver.debt), subtitle: driver.currentCars.join(' · ') || 'Sin auto asignado' })),
+        ...cars.map((car): AssistantCard => ({ kind: 'car', title: `${car.plate} · ${car.model}`, value: car.status, subtitle: car.driver, action: carAction(car) })),
+        ...drivers.map((driver): AssistantCard => ({ kind: 'driver', title: driver.name, value: fmt(driver.debt), subtitle: driver.currentCars.join(' · ') || 'Sin auto asignado', action: driverAction(driver) })),
       ],
       asOf: snapshot.asOf,
       mode: 'local',
@@ -379,7 +519,10 @@ export async function answerAssistant(
   });
   const body = (await response.json().catch(() => null)) as DeepSeekResponse | null;
   if (!response.ok) throw new Error(body?.error?.message || `DeepSeek respondió ${response.status}`);
-  const answer = body?.choices?.[0]?.message?.content?.trim();
+  const answer = body?.choices?.[0]?.message?.content?.trim()
+    ?.replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/`([^`]+)`/g, '$1');
   if (!answer) throw new Error('DeepSeek devolvió una respuesta vacía');
   return { answer, cards: [], asOf: snapshot.asOf, mode: 'deepseek' };
 }

@@ -31,7 +31,7 @@ export function Shell({ v, nombre, onLogout }: { v: MobileView; nombre: string; 
         {v.isAssistant ? (
           // El chat necesita su propio scroll para que los mensajes y el
           // compositor se acomoden bien al teclado.
-          <Assistant onSinSesion={onLogout} />
+          <Assistant onSinSesion={onLogout} onOpenCar={v.goDetalle} />
         ) : (
           <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
             {v.screen === 'dashboard' && <Dashboard v={v} />}

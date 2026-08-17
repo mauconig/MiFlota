@@ -1,13 +1,15 @@
 import { useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import { askAssistant, SinSesion, type AssistantCard, type AssistantHistoryItem } from '../api';
+import { askAssistant, SinSesion, type AssistantAction, type AssistantCard, type AssistantHistoryItem, type AssistantTable } from '../api';
 
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   text: string;
   cards?: AssistantCard[];
+  table?: AssistantTable;
+  filters?: { label: string; question: string }[];
   asOf?: string;
   notice?: string;
   error?: boolean;
@@ -27,8 +29,8 @@ function dateLabel(iso: string): string {
   return `${day}/${month}/${year}`;
 }
 
-function ResultCard({ card }: { card: AssistantCard }) {
-  return (
+function ResultCard({ card, onAction }: { card: AssistantCard; onAction: (action: AssistantAction) => void }) {
+  const content = (
     <View style={styles.resultCard}>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={styles.resultTitle} numberOfLines={1}>
@@ -43,9 +45,38 @@ function ResultCard({ card }: { card: AssistantCard }) {
       <Text style={styles.resultValue}>{card.value}</Text>
     </View>
   );
+  return card.action ? (
+    <Pressable onPress={() => onAction(card.action!)} accessibilityRole="button" accessibilityLabel={card.action.label}>
+      {content}
+    </Pressable>
+  ) : content;
 }
 
-export function Assistant({ onSinSesion }: { onSinSesion: () => void }) {
+function ResultTable({ table, onAction }: { table: AssistantTable; onAction: (action: AssistantAction) => void }) {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tableScroll}>
+      <View style={styles.table}>
+        <View style={styles.tableRow}>
+          {table.columns.map((column) => <Text key={column.key} style={[styles.tableCell, styles.tableHeader]}>{column.label}</Text>)}
+        </View>
+        {table.rows.map((row) => {
+          const content = (
+            <View style={styles.tableRow}>
+              {table.columns.map((column) => <Text key={column.key} style={styles.tableCell} numberOfLines={2}>{row.cells[column.key] || '—'}</Text>)}
+            </View>
+          );
+          return row.action ? (
+            <Pressable key={row.id} onPress={() => onAction(row.action!)} accessibilityRole="button" accessibilityLabel={row.action.label}>
+              {content}
+            </Pressable>
+          ) : <View key={row.id}>{content}</View>;
+        })}
+      </View>
+    </ScrollView>
+  );
+}
+
+export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void; onOpenCar: (carId: string) => void }) {
   const [messages, setMessages] = useState<ChatMessage[]>([INTRO]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -75,6 +106,8 @@ export function Assistant({ onSinSesion }: { onSinSesion: () => void }) {
           role: 'assistant',
           text: reply.answer,
           cards: reply.cards,
+          table: reply.table,
+          filters: reply.filters,
           asOf: reply.asOf,
           notice: reply.notice,
         },
@@ -100,6 +133,11 @@ export function Assistant({ onSinSesion }: { onSinSesion: () => void }) {
     }
   };
 
+  const activateAction = (action: AssistantAction) => {
+    if (action.kind === 'car') onOpenCar(action.carId);
+    else void send(action.question);
+  };
+
   const renderMessage = ({ item }: { item: ChatMessage }) => {
     const mine = item.role === 'user';
     return (
@@ -111,7 +149,17 @@ export function Assistant({ onSinSesion }: { onSinSesion: () => void }) {
         {!!item.cards?.length && (
           <View style={styles.cards}>
             {item.cards.map((card, index) => (
-              <ResultCard key={`${card.kind}-${card.title}-${index}`} card={card} />
+              <ResultCard key={`${card.kind}-${card.title}-${index}`} card={card} onAction={activateAction} />
+            ))}
+          </View>
+        )}
+        {!!item.table?.rows.length && <ResultTable table={item.table} onAction={activateAction} />}
+        {!!item.filters?.length && (
+          <View style={styles.filters}>
+            {item.filters.map((filter) => (
+              <Pressable key={`${item.id}-${filter.label}`} onPress={() => void send(filter.question)} disabled={sending} style={styles.filter} accessibilityRole="button">
+                <Text style={styles.filterText}>{filter.label}</Text>
+              </Pressable>
             ))}
           </View>
         )}
@@ -215,6 +263,14 @@ const styles = StyleSheet.create({
   resultTitle: { color: '#2a2823', fontSize: 12, fontWeight: '700' },
   resultSubtitle: { color: '#756f65', fontSize: 10, marginTop: 2 },
   resultValue: { color: '#256b4d', fontSize: 13, fontWeight: '800' },
+  tableScroll: { alignSelf: 'stretch', marginTop: 3 },
+  table: { minWidth: '100%', borderWidth: 1, borderColor: '#e6ded0', borderRadius: 14, overflow: 'hidden', backgroundColor: '#fffdf8' },
+  tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#eee7dc', paddingHorizontal: 10, paddingVertical: 9 },
+  tableCell: { minWidth: 104, flex: 1, color: '#3b3831', fontSize: 10, lineHeight: 14, paddingRight: 8 },
+  tableHeader: { color: '#7e5a1e', fontWeight: '800', fontSize: 9 },
+  filters: { alignSelf: 'stretch', flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 2 },
+  filter: { borderWidth: 1, borderColor: '#e4d7c3', backgroundColor: '#fff8e9', borderRadius: 16, paddingHorizontal: 11, paddingVertical: 8 },
+  filterText: { color: '#6e4a13', fontSize: 10, fontWeight: '700' },
   notice: { maxWidth: '92%', borderRadius: 12, backgroundColor: '#fdf0dd', paddingHorizontal: 10, paddingVertical: 7 },
   noticeText: { color: '#835c18', fontSize: 10, lineHeight: 14 },
   asOf: { color: '#817b71', fontSize: 9, marginLeft: 3 },

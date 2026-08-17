@@ -116,16 +116,33 @@ export interface AssistantHistoryItem {
   content: string;
 }
 
+export type AssistantAction =
+  | { kind: 'car'; carId: string; label: string }
+  | { kind: 'query'; question: string; label: string };
+
 export interface AssistantCard {
   kind: 'driver' | 'car' | 'metric';
   title: string;
   value: string;
   subtitle?: string;
+  action?: AssistantAction;
+}
+
+export interface AssistantTable {
+  columns: { key: string; label: string }[];
+  rows: { id: string; cells: Record<string, string>; action?: AssistantAction }[];
+}
+
+export interface AssistantFilter {
+  label: string;
+  question: string;
 }
 
 export interface AssistantReply {
   answer: string;
   cards: AssistantCard[];
+  table?: AssistantTable;
+  filters?: AssistantFilter[];
   asOf: string;
   mode: 'local' | 'deepseek' | 'fallback';
   notice?: string;
