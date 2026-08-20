@@ -191,6 +191,18 @@ export function openDb() {
       mocked       INTEGER NOT NULL DEFAULT 0 CHECK (mocked IN (0, 1))
     );
 
+    -- Tokens Expo Push del panel del dueño. Un mismo dispositivo puede
+    -- registrarse varias veces (por reinstalación o renovación del token),
+    -- pero cada token queda asociado a un único dueño.
+    CREATE TABLE IF NOT EXISTS admin_push_tokens (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner_id    INTEGER NOT NULL,
+      token       TEXT NOT NULL UNIQUE,
+      platform    TEXT NOT NULL CHECK (platform IN ('android', 'ios', 'web')),
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL
+    );
+
     -- Banderas de migraciones que corren una sola vez en la vida de la base.
     -- No usar la ausencia/presencia de una columna como guard cuando la propia
     -- migración la borra: en el siguiente arranque la columna vuelve a estar
@@ -207,6 +219,7 @@ export function openDb() {
     CREATE INDEX IF NOT EXISTS idx_reportes_owner ON reportes_falla(owner_id);
     CREATE INDEX IF NOT EXISTS idx_reportes_car   ON reportes_falla(car_id);
     CREATE INDEX IF NOT EXISTS idx_driver_locations_received ON driver_locations(received_at);
+    CREATE INDEX IF NOT EXISTS idx_admin_push_tokens_owner ON admin_push_tokens(owner_id);
   `);
 
   // Los índices sobre owner_id se crean dentro de la migración, no acá: en una

@@ -35,6 +35,7 @@ import {
 } from './authChofer.js';
 import { imputar } from './cobranza.js';
 import { answerAssistant, buildAssistantSnapshot, unavailableAssistantReply, type AssistantHistoryItem } from './assistant.js';
+import { sendOwnerPush } from './push.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = process.env.MIFLOTA_PUBLIC ?? join(HERE, '..', 'public');
@@ -164,6 +165,39 @@ app.get('/api/state', async (req) => {
     movs: (selMovs.all(u.id) as MovRow[]).map(movToJson),
     pagos: (selPagos.all(u.id) as PagoRow[]).map(pagoToJson),
   };
+});
+
+interface AdminPushTokenBody {
+  token?: string;
+  platform?: string;
+}
+
+const PUSH_TOKEN_RE = /^(?:Expo|Exponent)PushToken\[[A-Za-z0-9_-]+\]$/;
+const PUSH_PLATFORMS = new Set(['android', 'ios', 'web']);
+
+/** Registra el dispositivo del dueño para recibir novedades de su flota. */
+app.post<{ Body: AdminPushTokenBody }>('/api/push/admin/register', async (req, reply) => {
+  const u = quien(req);
+  const token = String(req.body?.token ?? '').trim();
+  const platform = String(req.body?.platform ?? '').trim().toLowerCase();
+  if (!PUSH_TOKEN_RE.test(token) || token.length > 256) return reply.code(400).send({ error: 'Token push inválido' });
+  if (!PUSH_PLATFORMS.has(platform)) return reply.code(400).send({ error: 'Plataforma inválida' });
+
+  const ahora = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO admin_push_tokens (owner_id, token, platform, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(token) DO UPDATE SET owner_id = excluded.owner_id, platform = excluded.platform, updated_at = excluded.updated_at
+  `).run(u.id, token, platform, ahora, ahora);
+  return { ok: true };
+});
+
+/** Quita el token antes de cerrar sesión para no enviar datos al usuario equivocado. */
+app.delete<{ Body: AdminPushTokenBody }>('/api/push/admin/register', async (req) => {
+  const u = quien(req);
+  const token = String(req.body?.token ?? '').trim();
+  if (token) db.prepare('DELETE FROM admin_push_tokens WHERE owner_id = ? AND token = ?').run(u.id, token);
+  return { ok: true };
 });
 
 interface AssistantQueryBody {
@@ -900,6 +934,11 @@ app.post<{ Params: never }>('/api/chofer/pagos', async (req, reply) => {
     .run(s.ownerId, s.carId, s.driver, hoy, monto, 'pago', medio || null, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
 
   req.log.info({ driver: s.driver, monto, medio, comprobante: !!archivo }, 'pago de chofer registrado');
+  void sendOwnerPush(db, s.ownerId, {
+    title: 'Pago recibido',
+    body: `${s.driver} registró un pago de ₲ ${Math.round(monto).toLocaleString('es-PY')}.`,
+    data: { type: 'driver_payment', paymentId: Number(info.lastInsertRowid), carId: s.carId },
+  }).catch((e: Error) => req.log.warn({ err: e, ownerId: s.ownerId }, 'no se pudo enviar push de pago'));
   return reply.code(201).send(pagoToJson(db.prepare('SELECT * FROM pagos WHERE id = ?').get(info.lastInsertRowid) as PagoRow));
 });
 
@@ -929,6 +968,12 @@ app.post<{ Body: { cat?: string; urgencia?: string; texto?: string } }>('/api/ch
     .run(s.ownerId, s.carId, s.driver, cat, urgencia, texto, hoyISO());
 
   req.log.info({ driver: s.driver, cat, urgencia }, 'reporte de falla registrado');
+  const car = db.prepare('SELECT plate FROM cars WHERE id = ?').get(s.carId) as { plate: string } | undefined;
+  void sendOwnerPush(db, s.ownerId, {
+    title: urgencia === 'urgente' ? 'Queja urgente' : 'Nueva queja del chofer',
+    body: `${s.driver} reportó ${cat} en ${car?.plate ?? s.carId}: ${texto}`.slice(0, 180),
+    data: { type: 'driver_report', reportId: Number(info.lastInsertRowid), carId: s.carId, urgency: urgencia },
+  }).catch((e: Error) => req.log.warn({ err: e, ownerId: s.ownerId }, 'no se pudo enviar push de reporte'));
   return reply.code(201).send(reporteToJson(db.prepare('SELECT * FROM reportes_falla WHERE id = ?').get(info.lastInsertRowid) as ReporteRow));
 });
 
