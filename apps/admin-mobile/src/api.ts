@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import * as SecureStore from 'expo-secure-store';
 import { API_BASE } from './config';
 import type { Car, Mov, Pago, PickedFile } from './types';
 
@@ -48,7 +49,33 @@ export interface Auth {
   sesion: Sesion | null;
   cargando: boolean;
   entrar: (usuario: string, password: string) => Promise<void>;
-  salir: () => void;
+  salir: () => Promise<void>;
+}
+
+export function registerAdminPushToken(token: string, platform: string): Promise<{ ok: true }> {
+  return req<{ ok: true }>('/api/push/admin/register', {
+    method: 'POST',
+    body: JSON.stringify({ token, platform }),
+  });
+}
+
+export function unregisterAdminPushToken(token: string): Promise<{ ok: true }> {
+  return req<{ ok: true }>('/api/push/admin/register', {
+    method: 'DELETE',
+    body: JSON.stringify({ token }),
+  });
+}
+
+export function persistPushToken(token: string): Promise<void> {
+  return SecureStore.setItemAsync('miflota_admin_push_token', token);
+}
+
+export function readPersistedPushToken(): Promise<string | null> {
+  return SecureStore.getItemAsync('miflota_admin_push_token');
+}
+
+export function clearPersistedPushToken(): Promise<void> {
+  return SecureStore.deleteItemAsync('miflota_admin_push_token');
 }
 
 /** Sesión de la app. La cookie es httpOnly, así que el cliente nunca ve el
@@ -72,10 +99,14 @@ export function useAuth(): Auth {
     setSesion(await req<Sesion>('/api/login', { method: 'POST', body: JSON.stringify({ usuario, password }) }));
   }, []);
 
-  const salir = useCallback(() => {
-    req('/api/logout', { method: 'POST' })
-      .catch(() => {})
-      .finally(() => setSesion(null));
+  const salir = useCallback(async () => {
+    const pushToken = await readPersistedPushToken();
+    if (pushToken) {
+      await unregisterAdminPushToken(pushToken).catch(() => {});
+      await clearPersistedPushToken().catch(() => {});
+    }
+    await req('/api/logout', { method: 'POST' }).catch(() => {});
+    setSesion(null);
   }, []);
 
   return { sesion, cargando, entrar, salir };

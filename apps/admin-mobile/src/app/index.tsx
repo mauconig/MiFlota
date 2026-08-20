@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator } from 'react-native';
 // El `SafeAreaView` que trae 'react-native' es un no-op en Android (solo
 // funciona en iOS) — con ese, el header queda debajo de la barra de estado.
@@ -9,6 +9,7 @@ import { Login } from '../screens/Login';
 import { Shell } from '../components/Shell';
 import { useMobileView, initialMobileState } from '../useMobileView';
 import type { MobileState } from '../types';
+import { registerAdminPushNotifications } from '../notifications';
 
 const Spinner = () => (
   <SafeAreaView style={{ flex: 1, backgroundColor: '#f4f0e8', alignItems: 'center', justifyContent: 'center' }}>
@@ -23,6 +24,10 @@ export default function App() {
     setState((s) => ({ ...s, ...(typeof patch === 'function' ? patch(s) : patch) }));
   }, []);
   const onError = useCallback((msg: string) => update({ toast: msg }), [update]);
+  useEffect(() => {
+    if (!auth.sesion) return;
+    void registerAdminPushNotifications().catch(() => {});
+  }, [auth.sesion]);
   // Si el servidor dice que la sesión ya no vale, `auth.salir` limpia el
   // estado local (el POST /api/logout que dispara es inofensivo aunque la
   // sesión ya esté vencida del otro lado).
@@ -48,7 +53,7 @@ function AuthedApp({
   store,
 }: {
   nombre: string;
-  onLogout: () => void;
+  onLogout: () => void | Promise<void>;
   state: MobileState;
   update: (patch: Partial<MobileState> | ((s: MobileState) => Partial<MobileState>)) => void;
   store: FleetStore;

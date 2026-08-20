@@ -16,10 +16,14 @@
       },
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize",
-      "package": "com.mauconig.adminmobile"
+      "package": "com.mauconig.adminmobile",
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     "plugins": [
       "expo-router",
+      "expo-notifications",
       [
         "expo-splash-screen",
         {
@@ -28,6 +32,13 @@
           "imageWidth": 120
         }
       ]
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7fa2d31a-27ae-4ebc-a4bc-87b988686c3a"
+      }
+    },
+    "owner": "mauconig"
   }
 }
