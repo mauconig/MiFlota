@@ -1,0 +1,16 @@
+[
+  { "plate": "HBTC 412", "driver": "Carlos Benítez", "username": "carlos.benitez", "password": "Mcarlosbe" },
+  { "plate": "GKPD 883", "driver": "Miguel Ojeda", "username": "miguel.ojeda", "password": "Mmigueloj" },
+  { "plate": "HCVR 105", "driver": "Rodrigo Villalba", "username": "rodrigo.villalba", "password": "Mrodrigov" },
+  { "plate": "GXNM 774", "driver": "Óscar Giménez", "username": "oscar.gimenez", "password": "Moscargim" },
+  { "plate": "HDFS 236", "driver": "Fernando Cáceres", "username": "fernando.caceres", "password": "Mfernando" },
+  { "plate": "GTWQ 590", "driver": "Julio Franco", "username": "julio.franco", "password": "Mjuliofra" },
+  { "plate": "HAKL 928", "driver": "Marcos Aguilar", "username": "marcos.aguilar", "password": "Mmarcosag" },
+  { "plate": "GZBV 341", "driver": "Diego Rotela", "username": "diego.rotela", "password": "Mdiegorot" },
+  { "plate": "HEJP 067", "driver": "Sergio Duarte", "username": "sergio.duarte", "password": "Msergiodu" },
+  { "plate": "GYRD 455", "driver": "Iván Acosta", "username": "ivan.acosta", "password": "Mivanacos" },
+  { "plate": "HBMX 719", "driver": "Pablo Martínez", "username": "pablo.martinez", "password": "Mpablomar" },
+  { "plate": "GVLC 208", "driver": "Hugo Ferreira", "username": "hugo.ferreira", "password": "Mhugoferr" },
+  { "plate": "HCQT 634", "driver": "Cristian Espínola", "username": "cristian.espinola", "password": "Mcristian" },
+  { "plate": "BCDF 221", "driver": "Nelson Vera", "username": "nelson.vera", "password": "Mnelsonve" }
+]
