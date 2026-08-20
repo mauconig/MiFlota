@@ -30,6 +30,7 @@ token stored), scrypt passwords, 8-failures-per-IP+user → 10-min lockout. All 
 routes require a session except `/api/health`, `/api/login`, `/api/me`. First user is
 created on boot from `MIFLOTA_ADMIN_USER/PASSWORD/NOMBRE`; more users via
 `node dist/crear-usuario.js <usuario> [--seed] [--reset] [--adoptar]` CLI.
+Documentación completa del auth in-house (sin Clerk) en `docs/auth.md`.
 
 **Endpoints** (all under `/api`, session-gated):
 
