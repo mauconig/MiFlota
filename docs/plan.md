@@ -32,8 +32,9 @@
 ### Sesiones y tokens
 
 - ✅ Sesiones opacas, aleatorias y revocables; solo hashes en la base.
-- ✅ Expiración absoluta (30 días); ⏳ expiración por inactividad server-side
-  (el timeout de 30 min del chofer es del cliente).
+- ✅ Expiración absoluta (30 días); ✅ expiración por inactividad server-side
+  (ventana deslizante: dueño 7 días, chofer 30 minutos; `ultimo_uso` en las
+  tablas de sesión).
 - ⏳ Revocación por dispositivo desde la UI (hoy: logout puntual, y reset de
   password o reasignación de chofer cierran sus sesiones).
 - ✅ Cookies `httpOnly`, `SameSite` y `Secure` en producción.
@@ -45,8 +46,10 @@
 
 - ✅ Un contrato único de login/logout/me por tipo de identidad.
 - ✅ Respuestas de error consistentes, sin revelar si existe el usuario.
-- ⏳ Rate limiting persistente por IP + identidad (hoy es en memoria).
-- ⏳ Auditoría de login exitoso, fallido, logout, reset y revocación.
+- ✅ Rate limiting persistente por IP + identidad (tabla `login_fallos`;
+  sobrevive reinicios del proceso).
+- ✅ Auditoría de login exitoso, fallido, bloqueado, logout, reset y revocación
+  (tabla `auth_log`, retención de 90 días).
 - ✅ Middleware central de sesión + owner-scoping en todas las consultas.
 
 ### Migración
@@ -67,9 +70,9 @@
 
 ## Pendiente (solo si se decide retomar)
 
-1. Identidad estable de chofer (tabla `drivers`) + roles/estado en `users`.
+1. Identidad estable de chofer (tabla `drivers`) + roles/estado en `users`. ✅
 2. Reset de contraseña por token con vencimiento corto.
-3. Caducidad por inactividad y rate limit persistente en el servidor.
-4. Auditoría de auth.
+3. Caducidad por inactividad y rate limit persistente en el servidor. ✅
+4. Auditoría de auth. ✅
 5. Gestión/revocación de sesiones por dispositivo desde la UI.
 6. Sesión del dueño de admin-mobile persistida en SecureStore.
