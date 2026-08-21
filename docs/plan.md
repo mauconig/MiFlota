@@ -35,8 +35,9 @@
 - ✅ Expiración absoluta (30 días); ✅ expiración por inactividad server-side
   (ventana deslizante: dueño 7 días, chofer 30 minutos; `ultimo_uso` en las
   tablas de sesión).
-- ⏳ Revocación por dispositivo desde la UI (hoy: logout puntual, y reset de
-  password o reasignación de chofer cierran sus sesiones).
+- ✅ Revocación por dispositivo desde la UI ("Sesiones activas" en el panel:
+  listar, cerrar una puntual, cerrar todas menos la actual; el dueño también
+  puede patear la sesión de un chofer sin regenerarle credenciales).
 - ✅ Cookies `httpOnly`, `SameSite` y `Secure` en producción.
 - ✅ Token del chofer en SecureStore; ⏳ la sesión del dueño en admin-mobile
   depende de la cookie del fetch de RN (no hay token propio en SecureStore).
@@ -74,5 +75,5 @@
 2. Reset de contraseña por token con vencimiento corto.
 3. Caducidad por inactividad y rate limit persistente en el servidor. ✅
 4. Auditoría de auth. ✅
-5. Gestión/revocación de sesiones por dispositivo desde la UI.
+5. Gestión/revocación de sesiones por dispositivo desde la UI. ✅
 6. Sesión del dueño de admin-mobile persistida en SecureStore.
