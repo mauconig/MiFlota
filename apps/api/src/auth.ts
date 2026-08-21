@@ -8,6 +8,13 @@ const SCRYPT_LEN = 64;
 export const COOKIE = 'miflota_sesion';
 /** Cuánto dura una sesión sin volver a pedir contraseña. */
 const SESION_DIAS = 30;
+/** Cuánto puede estar un dueño sin abrir la app antes de que la sesión muera
+ *  server-side, aunque la cookie siga vigente. Ventana deslizante: cada uso la
+ *  renueva. Techo absoluto: SESION_DIAS. */
+const INACTIVIDAD_DUENO_MS = 7 * 864e5;
+/** Cada cuánto se refresca `ultimo_uso`: escribir en cada request sería
+ *  innecesario con better-sqlite3; con esto queda como mucho 1 min de deriva. */
+const TOQUE_MS = 60_000;
 
 export function migrarAuth(db: Database.Database) {
   db.exec(`
@@ -31,11 +38,40 @@ export function migrarAuth(db: Database.Database) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+    -- Freno a la fuerza bruta que sobrevive reinicios del proceso: intentos
+    -- fallidos y bloqueo vigente, por IP+usuario.
+    CREATE TABLE IF NOT EXISTS login_fallos (
+      clave           TEXT PRIMARY KEY,
+      fallos          INTEGER NOT NULL DEFAULT 0,
+      bloqueado_hasta TEXT,
+      actualizado     TEXT NOT NULL
+    );
+
+    -- Auditoría de auth: quién entró, quién lo intentó y qué sesiones se
+    -- revocaron. Solo eventos, no consultas: una fila por acción de auth.
+    CREATE TABLE IF NOT EXISTS auth_log (
+      id         INTEGER PRIMARY KEY,
+      fecha      TEXT NOT NULL,
+      evento     TEXT NOT NULL,
+      identidad  TEXT,
+      ip         TEXT,
+      user_agent TEXT,
+      detalle    TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_auth_log_fecha ON auth_log(fecha);
   `);
 
   const cols = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
   if (!cols('users').includes('rol')) db.exec("ALTER TABLE users ADD COLUMN rol TEXT NOT NULL DEFAULT 'owner' CHECK (rol IN ('owner','admin'))");
   if (!cols('users').includes('estado')) db.exec("ALTER TABLE users ADD COLUMN estado TEXT NOT NULL DEFAULT 'activo' CHECK (estado IN ('activo','deshabilitado'))");
+  // Último uso de la sesión para la expiración por inactividad. Las filas
+  // previas arrancan desde su creación, no desde la migración.
+  if (!cols('sessions').includes('ultimo_uso')) {
+    db.exec('ALTER TABLE sessions ADD COLUMN ultimo_uso TEXT');
+    db.exec('UPDATE sessions SET ultimo_uso = creada WHERE ultimo_uso IS NULL');
+  }
 }
 
 /** `scrypt$N$salt$hash`. Guarda el costo junto al hash para poder subirlo más
@@ -84,15 +120,26 @@ export function usuarioDeSesion(db: Database.Database, token: string | undefined
   if (!token) return null;
   const fila = db
     .prepare(
-      `SELECT u.id, u.usuario, u.nombre, u.rol, u.estado, s.expira
+      `SELECT u.id, u.usuario, u.nombre, u.rol, u.estado, s.expira, COALESCE(s.ultimo_uso, s.creada) AS ultimo_uso
           FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = ?`,
     )
-    .get(hashToken(token)) as (Usuario & { expira: string }) | undefined;
+    .get(hashToken(token)) as (Usuario & { expira: string; ultimo_uso: string }) | undefined;
   if (!fila) return null;
+  const hash = hashToken(token);
   if (new Date(fila.expira) < new Date()) {
-    db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
+    db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hash);
     return null;
+  }
+  // Expiración por inactividad: la ventana se renueva en cada uso, así que una
+  // sesión activa no muere aunque sea vieja; una abandonada sí.
+  if (Date.now() - new Date(fila.ultimo_uso).getTime() > INACTIVIDAD_DUENO_MS) {
+    db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hash);
+    return null;
+  }
+  // Toque deslizante con throttle: evita un UPDATE por request.
+  if (Date.now() - new Date(fila.ultimo_uso).getTime() > TOQUE_MS) {
+    db.prepare('UPDATE sessions SET ultimo_uso = ? WHERE token_hash = ?').run(new Date().toISOString(), hash);
   }
   if (fila.estado !== 'activo') return null;
   return { id: fila.id, usuario: fila.usuario, nombre: fila.nombre, rol: fila.rol, estado: fila.estado };
@@ -103,7 +150,78 @@ export function borrarSesion(db: Database.Database, token: string | undefined) {
 }
 
 export function limpiarSesionesVencidas(db: Database.Database) {
-  db.prepare('DELETE FROM sessions WHERE expira < ?').run(new Date().toISOString());
+  const ahora = new Date().toISOString();
+  db.prepare('DELETE FROM sessions WHERE expira < ? OR COALESCE(ultimo_uso, creada) < ?').run(ahora, new Date(Date.now() - INACTIVIDAD_DUENO_MS).toISOString());
+}
+
+/* --------------------------- rate limit persistente --------------------------- */
+
+/**
+ * Freno a la fuerza bruta: cuenta intentos fallidos por IP y por usuario, y
+ * bloquea temporalmente al llegar al límite. Vive en la base (no en memoria)
+ * para que un reinicio del proceso no limpie los contadores de un atacante.
+ */
+const MAX_FALLOS = 8;
+const BLOQUEO_MS = 10 * 60_000;
+
+export function bloqueado(db: Database.Database, clave: string): number {
+  const e = db.prepare('SELECT bloqueado_hasta FROM login_fallos WHERE clave = ?').get(clave) as { bloqueado_hasta: string | null } | undefined;
+  if (!e?.bloqueado_hasta) return 0;
+  const restante = new Date(e.bloqueado_hasta).getTime() - Date.now();
+  return restante > 0 ? Math.ceil(restante / 1000) : 0;
+}
+
+export function registrarFallo(db: Database.Database, clave: string) {
+  const fila = db.prepare('SELECT fallos FROM login_fallos WHERE clave = ?').get(clave) as { fallos: number } | undefined;
+  const fallos = (fila?.fallos ?? 0) + 1;
+  if (fallos >= MAX_FALLOS) {
+    db.prepare(
+      `INSERT INTO login_fallos (clave, fallos, bloqueado_hasta, actualizado) VALUES (?, 0, ?, ?)
+       ON CONFLICT(clave) DO UPDATE SET fallos = 0, bloqueado_hasta = excluded.bloqueado_hasta, actualizado = excluded.actualizado`,
+    ).run(clave, new Date(Date.now() + BLOQUEO_MS).toISOString(), new Date().toISOString());
+  } else {
+    db.prepare(
+      `INSERT INTO login_fallos (clave, fallos, actualizado) VALUES (?, ?, ?)
+       ON CONFLICT(clave) DO UPDATE SET fallos = excluded.fallos, actualizado = excluded.actualizado`,
+    ).run(clave, fallos, new Date().toISOString());
+  }
+}
+
+export function limpiarFallos(db: Database.Database, clave: string) {
+  db.prepare('DELETE FROM login_fallos WHERE clave = ?').run(clave);
+}
+
+/** Contadores que ya no sirven: sin bloqueo vigente y sin actividad reciente. */
+export function limpiarLoginFallos(db: Database.Database) {
+  db.prepare('DELETE FROM login_fallos WHERE COALESCE(bloqueado_hasta, \'\') < ? AND actualizado < ?').run(
+    new Date().toISOString(),
+    new Date(Date.now() - 864e5).toISOString(),
+  );
+}
+
+/* -------------------------------- auditoría -------------------------------- */
+
+/** Un evento por acción de auth. Nunca guarda tokens ni contraseñas; la
+ *  identidad es el nombre de usuario tal cual se lo intentó usar. */
+export function registrarAuth(
+  db: Database.Database,
+  evento: string,
+  identidad: string | null,
+  ctx?: { ip?: string | null; userAgent?: string | null; detalle?: string | null },
+) {
+  db.prepare('INSERT INTO auth_log (fecha, evento, identidad, ip, user_agent, detalle) VALUES (?, ?, ?, ?, ?, ?)').run(
+    new Date().toISOString(),
+    evento,
+    identidad,
+    ctx?.ip ?? null,
+    ctx?.userAgent ?? null,
+    ctx?.detalle ?? null,
+  );
+}
+
+/** Retención: los eventos viejos no tienen valor pasado este plazo. */
+export function limpiarAuthLog(db: Database.Database) {
+  db.prepare('DELETE FROM auth_log WHERE fecha < ?').run(new Date(Date.now() - 90 * 864e5).toISOString());
 }
 
 /** Crea el usuario inicial desde variables de entorno si todavía no hay ninguno. */
@@ -125,33 +243,4 @@ export async function sembrarAdmin(db: Database.Database): Promise<string | null
     'activo',
   );
   return usuario;
-}
-
-/**
- * Freno a la fuerza bruta: cuenta intentos fallidos por IP y por usuario, y
- * bloquea temporalmente al llegar al límite. En memoria a propósito — un
- * reinicio limpia los contadores, que para este tamaño de instalación alcanza.
- */
-const INTENTOS = new Map<string, { fallos: number; hasta: number }>();
-const MAX_FALLOS = 8;
-const BLOQUEO_MS = 10 * 60_000;
-
-export function bloqueado(clave: string): number {
-  const e = INTENTOS.get(clave);
-  if (!e || e.hasta < Date.now()) return 0;
-  return Math.ceil((e.hasta - Date.now()) / 1000);
-}
-
-export function registrarFallo(clave: string) {
-  const e = INTENTOS.get(clave) ?? { fallos: 0, hasta: 0 };
-  e.fallos += 1;
-  if (e.fallos >= MAX_FALLOS) {
-    e.hasta = Date.now() + BLOQUEO_MS;
-    e.fallos = 0;
-  }
-  INTENTOS.set(clave, e);
-}
-
-export function limpiarFallos(clave: string) {
-  INTENTOS.delete(clave);
 }

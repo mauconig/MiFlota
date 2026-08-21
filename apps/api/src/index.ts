@@ -14,9 +14,12 @@ import {
   bloqueado,
   borrarSesion,
   crearSesion,
+  limpiarAuthLog,
   limpiarFallos,
+  limpiarLoginFallos,
   limpiarSesionesVencidas,
   migrarAuth,
+  registrarAuth,
   registrarFallo,
   sembrarAdmin,
   usuarioDeSesion,
@@ -54,6 +57,8 @@ migrarAuth(db);
 migrarAuthChofer(db);
 limpiarSesionesVencidas(db);
 limpiarSesionesChoferVencidas(db);
+limpiarLoginFallos(db);
+limpiarAuthLog(db);
 const adminCreado = await sembrarAdmin(db);
 if (adminCreado) app.log.info({ usuario: adminCreado }, 'usuario inicial creado');
 
@@ -98,13 +103,22 @@ const cookieOpts = {
   path: '/',
 };
 
+/** Contexto de auditoría para eventos de auth: de dónde vino el intento. */
+const ctxAuth = (req: { ip: string; headers: { 'user-agent'?: string | string[] } }) => ({
+  ip: req.ip,
+  userAgent: Array.isArray(req.headers['user-agent']) ? req.headers['user-agent'][0] : req.headers['user-agent'] ?? null,
+});
+
 app.post<{ Body: { usuario?: string; password?: string } }>('/api/login', async (req, reply) => {
   const usuario = String(req.body?.usuario ?? '').trim();
   const password = String(req.body?.password ?? '');
   const clave = `${req.ip}|${usuario.toLowerCase()}`;
 
-  const espera = bloqueado(clave);
-  if (espera) return reply.code(429).send({ error: `Demasiados intentos. Probá de nuevo en ${Math.ceil(espera / 60)} minutos.` });
+  const espera = bloqueado(db, clave);
+  if (espera) {
+    registrarAuth(db, 'login_bloqueado', usuario || null, { ...ctxAuth(req), detalle: `${espera}s restantes` });
+    return reply.code(429).send({ error: `Demasiados intentos. Probá de nuevo en ${Math.ceil(espera / 60)} minutos.` });
+  }
   if (!usuario || !password) return reply.code(400).send({ error: 'Completá usuario y contraseña' });
 
   const fila = db.prepare('SELECT id, usuario, nombre, pass_hash, estado FROM users WHERE usuario = ?').get(usuario) as
@@ -115,18 +129,22 @@ app.post<{ Body: { usuario?: string; password?: string } }>('/api/login', async 
   // permitiría enumerar cuentas o saber cuáles están activas.
   const ok = fila && fila.estado === 'activo' ? await verifyPassword(password, fila.pass_hash) : false;
   if (!ok) {
-    registrarFallo(clave);
+    registrarFallo(db, clave);
+    registrarAuth(db, 'login_fallo', usuario || null, ctxAuth(req));
     return reply.code(401).send({ error: 'Usuario o contraseña incorrectos' });
   }
 
-  limpiarFallos(clave);
+  limpiarFallos(db, clave);
   const { token, maxAge } = crearSesion(db, fila!.id);
+  registrarAuth(db, 'login_ok', fila!.usuario, ctxAuth(req));
   reply.setCookie(COOKIE, token, { ...cookieOpts, maxAge });
   return { usuario: fila!.usuario, nombre: fila!.nombre };
 });
 
 app.post('/api/logout', async (req, reply) => {
+  const u = usuarioDeSesion(db, req.cookies[COOKIE]);
   borrarSesion(db, req.cookies[COOKIE]);
+  if (u) registrarAuth(db, 'logout', u.usuario, ctxAuth(req));
   reply.clearCookie(COOKIE, cookieOpts);
   return { ok: true };
 });
@@ -804,8 +822,11 @@ app.post<{ Body: { usuario?: string; password?: string } }>('/api/chofer/login',
   const password = String(req.body?.password ?? '');
   const clave = `${req.ip}|chofer|${usuario.toLowerCase()}`;
 
-  const espera = bloqueado(clave);
-  if (espera) return reply.code(429).send({ error: `Demasiados intentos. Probá de nuevo en ${Math.ceil(espera / 60)} minutos.` });
+  const espera = bloqueado(db, clave);
+  if (espera) {
+    registrarAuth(db, 'chofer_login_bloqueado', usuario || null, { ...ctxAuth(req), detalle: `${espera}s restantes` });
+    return reply.code(429).send({ error: `Demasiados intentos. Probá de nuevo en ${Math.ceil(espera / 60)} minutos.` });
+  }
   if (!usuario || !password) return reply.code(400).send({ error: 'Completá usuario y contraseña' });
 
   const fila = db.prepare(
@@ -819,12 +840,14 @@ app.post<{ Body: { usuario?: string; password?: string } }>('/api/chofer/login',
 
   const ok = fila?.driver_pass_hash ? await verifyPassword(password, fila.driver_pass_hash) : false;
   if (!ok) {
-    registrarFallo(clave);
+    registrarFallo(db, clave);
+    registrarAuth(db, 'chofer_login_fallo', usuario || null, ctxAuth(req));
     return reply.code(401).send({ error: 'Usuario o contraseña incorrectos' });
   }
 
-  limpiarFallos(clave);
+  limpiarFallos(db, clave);
   const { token } = crearSesionChofer(db, fila!.driver_id);
+  registrarAuth(db, 'chofer_login_ok', fila!.driver, { ...ctxAuth(req), detalle: `usuario=${usuario}` });
   return {
     token,
     driver: fila!.driver,
@@ -835,7 +858,11 @@ app.post<{ Body: { usuario?: string; password?: string } }>('/api/chofer/login',
 
 app.post('/api/chofer/logout', async (req) => {
   const auth = req.headers.authorization;
-  if (auth?.startsWith('Bearer ')) borrarSesionChofer(db, auth.slice('Bearer '.length).trim());
+  if (auth?.startsWith('Bearer ')) {
+    const s = quienChofer(db, req);
+    borrarSesionChofer(db, auth.slice('Bearer '.length).trim());
+    if (s) registrarAuth(db, 'chofer_logout', s.driver, ctxAuth(req));
+  }
   return { ok: true };
 });
 

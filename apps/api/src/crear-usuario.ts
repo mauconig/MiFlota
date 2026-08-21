@@ -13,7 +13,7 @@
  *   --adoptar  le asigna la flota que quedó sin dueño al migrar la base
  */
 import { randomInt } from 'node:crypto';
-import { hashPassword, migrarAuth } from './auth.js';
+import { hashPassword, migrarAuth, registrarAuth } from './auth.js';
 import { adoptarHuerfanos, openDb, sembrarFlota } from './db.js';
 
 // Sin caracteres que se confundan al leerlos en voz alta o al copiarlos a mano:
@@ -80,6 +80,7 @@ if (existente) {
   db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(hash, userId);
   // Cambiar la contraseña invalida lo que haya quedado abierto en otro lado.
   const { changes } = db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+  registrarAuth(db, 'password_reset', usuario, { detalle: `sesiones cerradas: ${changes}` });
   console.log(`Contraseña actualizada para "${usuario}". Sesiones cerradas: ${changes}.`);
 } else {
   const r = db.prepare('INSERT INTO users (usuario, nombre, pass_hash, creado, rol, estado) VALUES (?, ?, ?, ?, ?, ?)').run(
@@ -91,6 +92,7 @@ if (existente) {
     estado,
   );
   userId = Number(r.lastInsertRowid);
+  registrarAuth(db, 'usuario_creado', usuario, { detalle: `rol=${rol} estado=${estado}` });
   console.log(`Usuario "${usuario}" creado${flag('seed') ? '' : ' con la flota vacía'}.`);
 }
 
