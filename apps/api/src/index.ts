@@ -21,7 +21,10 @@ import {
   migrarAuth,
   registrarAuth,
   registrarFallo,
+  revocarOtrasSesiones,
+  revocarSesion,
   sembrarAdmin,
+  sesionesDeUsuario,
   usuarioDeSesion,
   verifyPassword,
   hashPassword,
@@ -135,7 +138,7 @@ app.post<{ Body: { usuario?: string; password?: string } }>('/api/login', async 
   }
 
   limpiarFallos(db, clave);
-  const { token, maxAge } = crearSesion(db, fila!.id);
+  const { token, maxAge } = crearSesion(db, fila!.id, ctxAuth(req));
   registrarAuth(db, 'login_ok', fila!.usuario, ctxAuth(req));
   reply.setCookie(COOKIE, token, { ...cookieOpts, maxAge });
   return { usuario: fila!.usuario, nombre: fila!.nombre };
@@ -146,6 +149,43 @@ app.post('/api/logout', async (req, reply) => {
   borrarSesion(db, req.cookies[COOKIE]);
   if (u) registrarAuth(db, 'logout', u.usuario, ctxAuth(req));
   reply.clearCookie(COOKIE, cookieOpts);
+  return { ok: true };
+});
+
+/* ------------------- gestión de sesiones activas (dueño) ------------------- */
+
+app.get('/api/sesiones', async (req) => {
+  const u = quien(req);
+  return sesionesDeUsuario(db, u.id, req.cookies[COOKIE]);
+});
+
+app.delete<{ Params: { id: string } }>('/api/sesiones/:id', async (req, reply) => {
+  const u = quien(req);
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return reply.code(400).send({ error: 'Id inválido' });
+  const actual = sesionesDeUsuario(db, u.id, req.cookies[COOKIE]).some((s) => s.id === id && s.actual);
+  if (!revocarSesion(db, u.id, id)) return reply.code(404).send({ error: 'Sesión inexistente' });
+  // Si se cerró la sesión con la que se pidió, la cookie ya no sirve: igual
+  // contestamos 200 y el cliente reacciona al próximo 401.
+  registrarAuth(db, 'sesion_revocada', u.usuario, { ...ctxAuth(req), detalle: `sesion=${id}${actual ? ' (actual)' : ''}` });
+  return { ok: true };
+});
+
+/** "Cerrar sesión en todos lados": revoca todas menos la actual. */
+app.delete('/api/sesiones', async (req) => {
+  const u = quien(req);
+  const n = revocarOtrasSesiones(db, u.id, req.cookies[COOKIE]);
+  if (n > 0) registrarAuth(db, 'sesiones_revocadas', u.usuario, { ...ctxAuth(req), detalle: `${n} sesión(es)` });
+  return { ok: true, cerradas: n };
+});
+
+/** El dueño cierra la app del chofer (todas sus sesiones). Útil cuando se
+ *  cambió el teléfono o hay que sacarle el acceso sin esperar al reset. */
+app.delete<{ Params: { id: string } }>('/api/choferes/:id/sesion', async (req, reply) => {
+  const u = quien(req);
+  const driver = db.prepare('SELECT id FROM drivers WHERE id = ? AND owner_id = ?').get(req.params.id, u.id) as { id: number } | undefined;
+  if (!driver) return reply.code(404).send({ error: 'Chofer inexistente' });
+  borrarSesionesDeDriver(db, driver.id);
   return { ok: true };
 });
 
@@ -846,7 +886,7 @@ app.post<{ Body: { usuario?: string; password?: string } }>('/api/chofer/login',
   }
 
   limpiarFallos(db, clave);
-  const { token } = crearSesionChofer(db, fila!.driver_id);
+  const { token } = crearSesionChofer(db, fila!.driver_id, ctxAuth(req));
   registrarAuth(db, 'chofer_login_ok', fila!.driver, { ...ctxAuth(req), detalle: `usuario=${usuario}` });
   return {
     token,

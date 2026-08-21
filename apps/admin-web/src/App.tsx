@@ -15,6 +15,7 @@ import { Cobros } from './screens/Cobros';
 import { DetailDrawer } from './components/DetailDrawer';
 import { DriverDetail } from './components/DriverDetail';
 import { Confirm } from './components/Confirm';
+import { Sesiones } from './components/Sesiones';
 import { TallerModal } from './components/TallerModal';
 import { CarModal } from './components/CarModal';
 import { DriverModal } from './components/DriverModal';
@@ -66,6 +67,7 @@ function App() {
 
 function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
   const [state, setState] = useState<UIState>(initialState);
+  const [sesionesOpen, setSesionesOpen] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const update = (patch: Partial<UIState> | ((s: UIState) => Partial<UIState>)) => {
@@ -87,7 +89,7 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '236px 1fr', height: '100vh', width: '100%', background: '#f4f0e8', position: 'relative', overflow: 'hidden' }}>
-      <Sidebar navItems={v.navItems} cierreMsg={v.cierreMsg} nombre={sesion.nombre} totalVehiculos={store.cars.length} onSalir={onSalir} />
+      <Sidebar navItems={v.navItems} cierreMsg={v.cierreMsg} nombre={sesion.nombre} totalVehiculos={store.cars.length} onSalir={onSalir} onSesiones={() => setSesionesOpen(true)} />
 
       <main style={{ padding: '14px 22px 16px', display: 'flex', flexDirection: 'column', gap: 9, minWidth: 0, height: '100%', overflowY: 'auto' }}>
         <Header
@@ -114,6 +116,7 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
 
       <DetailDrawer v={v} />
       <DriverDetail v={v} />
+      {sesionesOpen && <Sesiones onClose={() => setSesionesOpen(false)} onSalir={onSalir} />}
       <Confirm v={v} />
       <TallerModal v={v} />
       <CarModal v={v} />

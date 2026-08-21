@@ -72,6 +72,10 @@ export function migrarAuth(db: Database.Database) {
     db.exec('ALTER TABLE sessions ADD COLUMN ultimo_uso TEXT');
     db.exec('UPDATE sessions SET ultimo_uso = creada WHERE ultimo_uso IS NULL');
   }
+  // Origen de la sesión, para que el dueño pueda reconocer sus dispositivos en
+  // el panel de sesiones activas.
+  if (!cols('sessions').includes('ip')) db.exec('ALTER TABLE sessions ADD COLUMN ip TEXT');
+  if (!cols('sessions').includes('user_agent')) db.exec('ALTER TABLE sessions ADD COLUMN user_agent TEXT');
 }
 
 /** `scrypt$N$salt$hash`. Guarda el costo junto al hash para poder subirlo más
@@ -104,14 +108,23 @@ export interface Usuario {
   estado: string;
 }
 
-export function crearSesion(db: Database.Database, userId: number): { token: string; maxAge: number } {
+/** Origen de un pedido, tal como se guarda en la sesión: para que el dueño
+ *  reconozca el dispositivo en el panel de sesiones activas. */
+export interface OrigenSesion {
+  ip?: string | null;
+  userAgent?: string | null;
+}
+
+export function crearSesion(db: Database.Database, userId: number, origen?: OrigenSesion): { token: string; maxAge: number } {
   const token = randomBytes(32).toString('base64url');
   const expira = new Date(Date.now() + SESION_DIAS * 864e5);
-  db.prepare('INSERT INTO sessions (token_hash, user_id, creada, expira) VALUES (?, ?, ?, ?)').run(
+  db.prepare('INSERT INTO sessions (token_hash, user_id, creada, expira, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?)').run(
     hashToken(token),
     userId,
     new Date().toISOString(),
     expira.toISOString(),
+    origen?.ip ?? null,
+    origen?.userAgent ?? null,
   );
   return { token, maxAge: SESION_DIAS * 86400 };
 }
@@ -147,6 +160,54 @@ export function usuarioDeSesion(db: Database.Database, token: string | undefined
 
 export function borrarSesion(db: Database.Database, token: string | undefined) {
   if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
+}
+
+export interface SesionActiva {
+  /** rowid de la fila: identificador seguro para revocar (el hash del token no
+   *  sale de la base ni hace falta). */
+  id: number;
+  ip: string | null;
+  userAgent: string | null;
+  creada: string;
+  ultimoUso: string;
+  expira: string;
+  /** true si es la sesión con la que se hace este pedido. */
+  actual: boolean;
+}
+
+/** Sesiones vigentes del usuario, más reciente primero. Las vencidas no se
+ *  muestran: las barre limpiarSesionesVencidas en el arranque. */
+export function sesionesDeUsuario(db: Database.Database, userId: number, tokenActual: string | undefined): SesionActiva[] {
+  const ahora = new Date().toISOString();
+  const filas = db
+    .prepare(
+      `SELECT rowid AS id, ip, user_agent AS userAgent, creada,
+              COALESCE(ultimo_uso, creada) AS ultimo_uso, expira, token_hash
+         FROM sessions WHERE user_id = ? AND expira >= ?
+        ORDER BY COALESCE(ultimo_uso, creada) DESC`,
+    )
+    .all(userId, ahora) as { id: number; ip: string | null; userAgent: string | null; creada: string; ultimo_uso: string; expira: string; token_hash: string }[];
+  const hashActual = tokenActual ? hashToken(tokenActual) : null;
+  return filas.map((f) => ({
+    id: f.id,
+    ip: f.ip,
+    userAgent: f.userAgent,
+    creada: f.creada,
+    ultimoUso: f.ultimo_uso,
+    expira: f.expira,
+    actual: hashActual != null && f.token_hash === hashActual,
+  }));
+}
+
+/** Revoca una sesión propia por id. false si no existe o no es del usuario. */
+export function revocarSesion(db: Database.Database, userId: number, id: number): boolean {
+  return db.prepare('DELETE FROM sessions WHERE rowid = ? AND user_id = ?').run(id, userId).changes > 0;
+}
+
+/** Cierra todas las sesiones del usuario menos la actual ("salí en todos lados"). */
+export function revocarOtrasSesiones(db: Database.Database, userId: number, tokenActual: string | undefined): number {
+  if (!tokenActual) return 0;
+  return db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?').run(userId, hashToken(tokenActual)).changes;
 }
 
 export function limpiarSesionesVencidas(db: Database.Database) {

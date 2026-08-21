@@ -40,6 +40,21 @@ export interface Sesion {
   nombre: string;
 }
 
+/** Sesión activa del usuario, para el panel "Sesiones activas". */
+export interface SesionActiva {
+  id: number;
+  ip: string | null;
+  userAgent: string | null;
+  creada: string;
+  ultimoUso: string;
+  expira: string;
+  actual: boolean;
+}
+
+export const listarSesiones = () => req<SesionActiva[]>('/api/sesiones');
+export const revocarSesion = (id: number) => req<{ ok: boolean }>(`/api/sesiones/${id}`, { method: 'DELETE' });
+export const revocarOtrasSesiones = () => req<{ ok: boolean; cerradas: number }>('/api/sesiones', { method: 'DELETE' });
+
 export interface Auth {
   sesion: Sesion | null;
   cargando: boolean;

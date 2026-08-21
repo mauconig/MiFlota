@@ -25,23 +25,28 @@ export function migrarAuthChofer(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_chofer_sessions_driver ON chofer_sessions(driver_id);
   `);
-  // Último uso para la expiración por inactividad; las sesiones previas a la
-  // migración arrancan desde su creación.
+  // Migraciones por columna: ultimo_uso (expiración por inactividad; las
+  // sesiones previas arrancan desde su creación) e ip/user_agent (origen de la
+  // sesión para el panel del dueño).
   const cols = (db.prepare('PRAGMA table_info(chofer_sessions)').all() as { name: string }[]).map((c) => c.name);
   if (!cols.includes('ultimo_uso')) {
     db.exec('ALTER TABLE chofer_sessions ADD COLUMN ultimo_uso TEXT');
     db.exec('UPDATE chofer_sessions SET ultimo_uso = creada WHERE ultimo_uso IS NULL');
   }
+  if (!cols.includes('ip')) db.exec('ALTER TABLE chofer_sessions ADD COLUMN ip TEXT');
+  if (!cols.includes('user_agent')) db.exec('ALTER TABLE chofer_sessions ADD COLUMN user_agent TEXT');
 }
 
-export function crearSesionChofer(db: Database.Database, driverId: number): { token: string; maxAge: number } {
+export function crearSesionChofer(db: Database.Database, driverId: number, origen?: { ip?: string | null; userAgent?: string | null }): { token: string; maxAge: number } {
   const token = randomBytes(32).toString('base64url');
   const expira = new Date(Date.now() + SESION_DIAS * 864e5);
-  db.prepare('INSERT INTO chofer_sessions (token_hash, driver_id, creada, expira) VALUES (?, ?, ?, ?)').run(
+  db.prepare('INSERT INTO chofer_sessions (token_hash, driver_id, creada, expira, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?)').run(
     hashToken(token),
     driverId,
     new Date().toISOString(),
     expira.toISOString(),
+    origen?.ip ?? null,
+    origen?.userAgent ?? null,
   );
   return { token, maxAge: SESION_DIAS * 86400 };
 }

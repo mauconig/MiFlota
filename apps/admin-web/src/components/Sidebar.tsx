@@ -9,12 +9,14 @@ export function Sidebar({
   nombre,
   totalVehiculos,
   onSalir,
+  onSesiones,
 }: {
   navItems: NavItem[];
   cierreMsg: string;
   nombre: string;
   totalVehiculos: number;
   onSalir: () => void;
+  onSesiones: () => void;
 }) {
   return (
     <aside style={{ background: '#16150f', color: '#fffdf8', padding: '26px 18px', display: 'flex', flexDirection: 'column', gap: 26 }}>
@@ -73,6 +75,14 @@ export function Sidebar({
               {totalVehiculos} {totalVehiculos === 1 ? 'vehículo' : 'vehículos'}
             </div>
           </div>
+          <Btn
+            onClick={onSesiones}
+            ariaLabel="Sesiones activas"
+            style={{ border: '1px solid #333024', background: 'transparent', color: '#bdb6a4', borderRadius: 10, width: 30, height: 30, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', padding: 0 }}
+            hoverStyle={{ background: '#242219', color: '#fffdf8' }}
+          >
+            <IconPath d="M3 5h18v11H3zM8 20h8" size={15} />
+          </Btn>
           <Btn
             onClick={onSalir}
             ariaLabel="Cerrar sesión"
