@@ -11,21 +11,21 @@ export function migrarAuthChofer(db: Database.Database) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS chofer_sessions (
       token_hash TEXT PRIMARY KEY,
-      car_id     TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+      driver_id  INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
       creada     TEXT NOT NULL,
       expira     TEXT NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS idx_chofer_sessions_car ON chofer_sessions(car_id);
+    CREATE INDEX IF NOT EXISTS idx_chofer_sessions_driver ON chofer_sessions(driver_id);
   `);
 }
 
-export function crearSesionChofer(db: Database.Database, carId: string): { token: string; maxAge: number } {
+export function crearSesionChofer(db: Database.Database, driverId: number): { token: string; maxAge: number } {
   const token = randomBytes(32).toString('base64url');
   const expira = new Date(Date.now() + SESION_DIAS * 864e5);
-  db.prepare('INSERT INTO chofer_sessions (token_hash, car_id, creada, expira) VALUES (?, ?, ?, ?)').run(
+  db.prepare('INSERT INTO chofer_sessions (token_hash, driver_id, creada, expira) VALUES (?, ?, ?, ?)').run(
     hashToken(token),
-    carId,
+    driverId,
     new Date().toISOString(),
     expira.toISOString(),
   );
@@ -33,16 +33,16 @@ export function crearSesionChofer(db: Database.Database, carId: string): { token
 }
 
 export interface SesionChofer {
-  carId: string;
+  driverId: number;
+  carId: string | null;
   driver: string;
   ownerId: number;
 }
 
-/** A diferencia de `usuarioDeSesion`, resuelve `driver`/`ownerId` en vivo
- *  contra `cars` en cada pedido, no desde una copia guardada al loguearse:
- *  así, si el dueño reasigna el auto (lo que además borra esta sesión, ver
- *  `borrarSesionesDeCar`), no queda una sesión vieja resolviendo a datos de
- *  otro chofer. */
+/** Resuelve en vivo contra `drivers` y el auto activo actual del chofer:
+ *  la sesión sigue a la persona (no al auto), así que cambiarle el vehículo
+ *  ya no la invalida. Si el chofer no tiene un auto activo, la sesión no
+ *  sirve para la app (no hay chapa ni cuota que mostrar). */
 export function quienChofer(db: Database.Database, req: { headers: { authorization?: string } }): SesionChofer | null {
   const auth = req.headers.authorization;
   if (!auth?.startsWith('Bearer ')) return null;
@@ -51,28 +51,31 @@ export function quienChofer(db: Database.Database, req: { headers: { authorizati
 
   const fila = db
     .prepare(
-      `SELECT c.id AS car_id, c.driver, c.owner_id, s.expira
-         FROM chofer_sessions s JOIN cars c ON c.id = s.car_id
-        WHERE s.token_hash = ?`,
+      `SELECT d.id AS driver_id, d.nombre AS driver, d.owner_id, c.id AS car_id, s.expira
+          FROM chofer_sessions s
+          JOIN drivers d ON d.id = s.driver_id
+          LEFT JOIN cars c ON c.driver_id = d.id AND c.estado <> 'baja'
+         WHERE s.token_hash = ?
+         LIMIT 1`,
     )
-    .get(hashToken(token)) as { car_id: string; driver: string; owner_id: number; expira: string } | undefined;
+    .get(hashToken(token)) as { driver_id: number; driver: string; owner_id: number; car_id: string | null; expira: string } | undefined;
   if (!fila) return null;
   if (new Date(fila.expira) < new Date()) {
     db.prepare('DELETE FROM chofer_sessions WHERE token_hash = ?').run(hashToken(token));
     return null;
   }
-  return { carId: fila.car_id, driver: fila.driver, ownerId: fila.owner_id };
+  if (!fila.car_id) return null;
+  return { driverId: fila.driver_id, carId: fila.car_id, driver: fila.driver, ownerId: fila.owner_id };
 }
 
 export function borrarSesionChofer(db: Database.Database, token: string | undefined) {
   if (token) db.prepare('DELETE FROM chofer_sessions WHERE token_hash = ?').run(hashToken(token));
 }
 
-/** Se llama al reasignar el chofer de un auto y al regenerar credenciales:
- *  en ambos casos, cualquier sesión que quedara abierta tiene que dejar de
- *  servir de inmediato. */
-export function borrarSesionesDeCar(db: Database.Database, carId: string) {
-  db.prepare('DELETE FROM chofer_sessions WHERE car_id = ?').run(carId);
+/** Se llama al desasignar un chofer de un auto y al regenerar credenciales:
+ *  cualquier sesión que quedara abierta deja de servir de inmediato. */
+export function borrarSesionesDeDriver(db: Database.Database, driverId: number) {
+  db.prepare('DELETE FROM chofer_sessions WHERE driver_id = ?').run(driverId);
 }
 
 export function limpiarSesionesChoferVencidas(db: Database.Database) {
@@ -101,7 +104,7 @@ function usernameBase(driverName: string): string {
  *  dueños distintos no podrían distinguirse al entrar. */
 export function generarUsername(db: Database.Database, driverName: string): string {
   const base = usernameBase(driverName);
-  const existe = db.prepare('SELECT 1 FROM cars WHERE driver_username = ?');
+  const existe = db.prepare('SELECT 1 FROM drivers WHERE driver_username = ?');
   let candidato = base;
   let n = 2;
   while (existe.get(candidato)) candidato = base + n++;

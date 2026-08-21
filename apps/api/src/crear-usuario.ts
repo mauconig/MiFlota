@@ -60,6 +60,17 @@ if (password.length < 12) {
   process.exit(1);
 }
 
+const rol = arg('rol') ?? 'owner';
+const estado = arg('estado') ?? 'activo';
+if (!['owner', 'admin'].includes(rol)) {
+  console.error('El rol debe ser "owner" o "admin".');
+  process.exit(1);
+}
+if (!['activo', 'deshabilitado'].includes(estado)) {
+  console.error('El estado debe ser "activo" o "deshabilitado".');
+  process.exit(1);
+}
+
 const hash = await hashPassword(password);
 
 let userId: number;
@@ -71,11 +82,13 @@ if (existente) {
   const { changes } = db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
   console.log(`Contraseña actualizada para "${usuario}". Sesiones cerradas: ${changes}.`);
 } else {
-  const r = db.prepare('INSERT INTO users (usuario, nombre, pass_hash, creado) VALUES (?, ?, ?, ?)').run(
+  const r = db.prepare('INSERT INTO users (usuario, nombre, pass_hash, creado, rol, estado) VALUES (?, ?, ?, ?, ?, ?)').run(
     usuario,
     arg('nombre') || usuario,
     hash,
     new Date().toISOString(),
+    rol,
+    estado,
   );
   userId = Number(r.lastInsertRowid);
   console.log(`Usuario "${usuario}" creado${flag('seed') ? '' : ' con la flota vacía'}.`);

@@ -16,14 +16,14 @@ export interface Aplicacion {
   monto: number;
   fecha: string;
   carId: string;
-  driver: string;
+  driver: string | number;
   tipo: string;
 }
 
 export interface Imputacion {
   aplicaciones: Aplicacion[];
   cobrado: Map<number, number>;
-  saldoAFavor: Map<string, number>;
+  saldoAFavor: Map<string | number, number>;
 }
 
 interface Cuenta {
@@ -36,20 +36,25 @@ interface Cuenta {
  * @param pagos   Pagos y ajustes registrados.
  * @param choferDe  A quién le corresponde una cuota. Se pasa de afuera porque
  *   depende del chofer que tenía el auto ese día, no del que lo tiene hoy.
+ *   Devuelve el id estable del chofer (o el nombre como fallback).
  */
-export function imputar(cargos: MovRow[], pagos: PagoRow[], choferDe: (m: MovRow) => string): Imputacion {
+export function imputar(cargos: MovRow[], pagos: PagoRow[], choferDe: (m: MovRow) => string | number): Imputacion {
   const aplicaciones: Aplicacion[] = [];
   const cobrado = new Map<number, number>();
-  const saldoAFavor = new Map<string, number>();
+  const saldoAFavor = new Map<string | number, number>();
 
-  const cuentas = new Map<string, Cuenta>();
-  const cuenta = (d: string) => {
+  const cuentas = new Map<string | number, Cuenta>();
+  const cuenta = (d: string | number) => {
     let c = cuentas.get(d);
     if (!c) cuentas.set(d, (c = { cargos: [], pagos: [] }));
     return c;
   };
   for (const m of cargos) cuenta(choferDe(m)).cargos.push(m);
-  for (const p of pagos) cuenta(p.driver).pagos.push(p);
+  // Los pagos se agrupan por la misma identidad estable que los cargos: el
+  // `driver_id` si lo traen, o el nombre como fallback en datos previos a ese
+  // campo. Así un pago de un chofer que cambió de auto sí cancela las cuotas
+  // que le corresponden a su id, no a su nombre de hoy.
+  for (const p of pagos) cuenta(p.driver_id != null ? p.driver_id : p.driver).pagos.push(p);
 
   for (const [driver, c] of cuentas) {
     c.cargos.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id));

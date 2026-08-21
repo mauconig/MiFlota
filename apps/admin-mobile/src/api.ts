@@ -127,7 +127,9 @@ export interface NuevoCarPayload {
 }
 
 export interface NuevoPagoPayload {
-  driver: string;
+  /** Identidad del chofer: su `driverId`, o el nombre como fallback en datos
+   *  viejos. El servidor resuelve cualquiera de los dos contra `drivers`. */
+  driver: string | number;
   carId: string | null;
   fecha: string;
   monto: number;

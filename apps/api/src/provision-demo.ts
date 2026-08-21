@@ -35,10 +35,10 @@ function passwordFor(username: string): string {
   return `M${username.replace('.', '').slice(0, 8)}`;
 }
 
-function uniqueUsername(db: ReturnType<typeof openDb>, base: string, carId: string): string {
+function uniqueUsername(db: ReturnType<typeof openDb>, base: string): string {
   let candidate = base;
   let suffix = 2;
-  while (db.prepare('SELECT 1 FROM cars WHERE driver_username = ? AND id <> ?').get(candidate, carId)) {
+  while (db.prepare('SELECT 1 FROM drivers WHERE driver_username = ?').get(candidate)) {
     candidate = `${base.slice(0, 38)}${suffix++}`;
   }
   return candidate;
@@ -62,15 +62,17 @@ try {
   const seeded = carsBefore === 0 ? sembrarFlota(db, admin.id) : { cars: 0, movs: 0 };
 
   const cars = db
-    .prepare("SELECT id, plate, driver FROM cars WHERE owner_id = ? AND driver <> 'Sin chofer' ORDER BY id")
-    .all(admin.id) as { id: string; plate: string; driver: string }[];
+    .prepare(
+      "SELECT c.id AS car_id, c.plate, c.driver, d.id AS driver_id FROM cars c JOIN drivers d ON d.id = c.driver_id WHERE c.owner_id = ? AND c.driver <> 'Sin chofer' ORDER BY c.id",
+    )
+    .all(admin.id) as { car_id: string; plate: string; driver: string; driver_id: number }[];
   const credentials: Credential[] = [];
-  const updateCredential = db.prepare('UPDATE cars SET driver_username = ?, driver_pass_hash = ? WHERE id = ? AND owner_id = ?');
+  const updateDriverCred = db.prepare('UPDATE drivers SET driver_username = ?, driver_pass_hash = ? WHERE id = ?');
 
   for (const car of cars) {
-    const username = uniqueUsername(db, usernameFor(car.driver), car.id);
+    const username = uniqueUsername(db, usernameFor(car.driver));
     const password = passwordFor(username);
-    updateCredential.run(username, await hashPassword(password), car.id, admin.id);
+    updateDriverCred.run(username, await hashPassword(password), car.driver_id);
     credentials.push({ plate: car.plate, driver: car.driver, username, password });
   }
 
@@ -79,9 +81,10 @@ try {
     if (db.prepare('SELECT 1 FROM meta WHERE key = ?').get(DEMO_VERSION)) return false;
 
     const byPlate = (plate: string) => {
-      const car = db.prepare('SELECT id, driver FROM cars WHERE owner_id = ? AND plate = ?').get(admin.id, plate) as
-        | { id: string; driver: string }
-        | undefined;
+      const car = db.prepare('SELECT c.id, c.driver, d.id AS driver_id FROM cars c LEFT JOIN drivers d ON d.id = c.driver_id WHERE c.owner_id = ? AND c.plate = ?').get(
+        admin.id,
+        plate,
+      ) as { id: string; driver: string; driver_id: number | null } | undefined;
       if (!car) throw new Error(`No se encontró el vehículo demo ${plate}.`);
       return car;
     };
@@ -91,17 +94,17 @@ try {
     const today = '2026-08-14';
 
     db.prepare(
-      `INSERT INTO pagos (owner_id, car_id, driver, fecha, monto, tipo, medio, nota)
-       VALUES (?, ?, ?, ?, ?, 'pago', 'Transferencia', 'Demo provisionada v1')`,
-    ).run(admin.id, c0.id, c0.driver, today, 190000);
+      `INSERT INTO pagos (owner_id, car_id, driver, driver_id, fecha, monto, tipo, medio, nota)
+       VALUES (?, ?, ?, ?, ?, ?, 'pago', 'Transferencia', 'Demo provisionada v1')`,
+    ).run(admin.id, c0.id, c0.driver, c0.driver_id, today, 190000);
 
     const report = db.prepare(
-      `INSERT INTO reportes_falla (owner_id, car_id, driver, cat, urgencia, texto, estado, fecha)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO reportes_falla (owner_id, car_id, driver, driver_id, cat, urgencia, texto, estado, fecha)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    report.run(admin.id, c0.id, c0.driver, 'Frenos', 'urgente', 'La luz de freno queda encendida después de apagar.', 'enviada', today);
-    report.run(admin.id, c1.id, c1.driver, 'Motor', 'puedo', 'El motor vibra al arrancar en frío.', 'vista', today);
-    report.run(admin.id, c2.id, c2.driver, 'Neumáticos', 'urgente', 'La rueda trasera pierde aire durante el turno.', 'en_taller', today);
+    report.run(admin.id, c0.id, c0.driver, c0.driver_id, 'Frenos', 'urgente', 'La luz de freno queda encendida después de apagar.', 'enviada', today);
+    report.run(admin.id, c1.id, c1.driver, c1.driver_id, 'Motor', 'puedo', 'El motor vibra al arrancar en frío.', 'vista', today);
+    report.run(admin.id, c2.id, c2.driver, c2.driver_id, 'Neumáticos', 'urgente', 'La rueda trasera pierde aire durante el turno.', 'en_taller', today);
 
     db.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(DEMO_VERSION, new Date().toISOString());
     return true;

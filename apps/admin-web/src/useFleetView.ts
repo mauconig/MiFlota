@@ -149,10 +149,11 @@ export interface PagoFull {
 }
 
 export interface PagoFormView {
-  driver: string;
+  /** Identidad del chofer elegido: su `driverId`, o el nombre en datos viejos. */
+  driver: string | number;
   setDriver: (e: React.ChangeEvent<HTMLSelectElement>) => void;
   /** Choferes de la flota, con lo que debe cada uno al lado. */
-  opciones: { id: string; label: string }[];
+  opciones: { id: string | number; label: string }[];
   fecha: string;
   setFecha: (iso: string) => void;
   hoy: string;
@@ -554,11 +555,27 @@ const PTAG: Record<string, [string, string]> = {
 };
 
 
-/** Chofer al que corresponde un cobro. Si el auto cambió de chofer después de
+/** Nombre del chofer para mostrar. Si el auto cambió de chofer después de
  *  generado, el cobro se queda con quien lo generó, no con quien maneja el
  *  auto hoy: por eso `m.driver` manda, y el chofer actual del auto es solo el
  *  valor por defecto para movimientos anteriores a este campo. */
-const paidBy = (m: Mov, c: Car) => m.driver || c.driver;
+const nombreChofer = (m: Mov, c?: Car) => m.driver || c?.driver || 'Sin chofer';
+
+/** Identidad estable del chofer: su `driverId` si lo tiene, o el nombre como
+ *  fallback en datos previos a ese campo. Siempre string, porque el valor
+ *  viaja en un <select> y los números se serializan a texto; así la clave del
+ *  Map y la del formulario siempre coinciden. Sirve para agrupar deuda e
+ *  imputar pagos por chofer aunque éste cambie de vehículo. */
+const claveChofer = (m: Mov, c?: Car): string => {
+  const id = m.driverId != null ? m.driverId : c?.driverId != null ? c.driverId : null;
+  return id != null ? String(id) : m.driver || c?.driver || 'Sin chofer';
+};
+
+/** Clave del chofer de un auto: su `driverId`, o el nombre como fallback. */
+const claveDeCar = (c: Car): string => (c.driverId != null ? String(c.driverId) : c.driver);
+
+/** Chofer al que corresponde un cobro, en texto, para mostrar. */
+const paidBy = (m: Mov, c: Car) => nombreChofer(m, c);
 
 /**
  * `fact` y `egr` salen de los movimientos —lo emitido y lo gastado—, pero `ing`
@@ -823,14 +840,18 @@ export function useFleetView(
     if (!monto) return toast('Ingresá cuánto pagó');
     if (f.fecha > isoLocal(TODAY)) return toast('El pago no puede tener fecha futura');
 
+    // El auto es contexto, no destino: se guarda el que maneja hoy, resuelto por
+    // la identidad del chofer (su `driverId`), no por el nombre escrito.
+    const carSel = cars.find((c) => claveDeCar(c) === f.driver);
+    const nombre = carSel?.driver ?? String(f.driver);
+
     // A qué cuotas se imputa lo decide el servidor recién en la próxima lectura,
     // así que no hay nada que aplicar en optimista: se marca guardando y se espera.
     update((s) => ({ npago: s.npago && { ...s.npago, guardando: true } }));
     persist
       .addPago({
         driver: f.driver,
-        // El auto es contexto, no destino: se guarda el que maneja hoy.
-        carId: cars.find((c) => c.driver === f.driver)?.id ?? null,
+        carId: carSel?.id ?? null,
         fecha: f.fecha,
         monto,
         tipo: f.tipo,
@@ -838,7 +859,7 @@ export function useFleetView(
       })
       .then(() => {
         update({ npago: null });
-        toast((f.tipo === 'ajuste' ? 'Ajuste registrado · ' : 'Pago registrado · ') + f.driver + ' · ' + fmt(monto));
+        toast((f.tipo === 'ajuste' ? 'Ajuste registrado · ' : 'Pago registrado · ') + nombre + ' · ' + fmt(monto));
       })
       .catch((e: Error) => {
         update((s) => ({ npago: s.npago && { ...s.npago, guardando: false } }));
@@ -865,7 +886,7 @@ export function useFleetView(
   const cuotas = movs.filter((m) => m.type === 'ingreso');
   const { aplicaciones, cobrado, saldoAFavor } = imputar(cuotas, pagos, (m) => {
     const c = carDe.get(m.carId);
-    return c ? paidBy(m, c) : (m.driver ?? 'Sin chofer');
+    return claveChofer(m, c);
   });
   const cobradoDe = (m: Mov) => cobrado.get(m.id) ?? 0;
   const deudaDe = (m: Mov) => m.amount - cobradoDe(m);
@@ -892,12 +913,12 @@ export function useFleetView(
 
   const choferDeCuota = (m: Mov) => {
     const c = carDe.get(m.carId);
-    return c ? paidBy(m, c) : (m.driver ?? 'Sin chofer');
+    return claveChofer(m, c);
   };
   // La deuda de un chofer es sobre todo su historial, no sobre el período: un
   // saldo es una foto de hoy, no un flujo del mes. Filtrarla por período haría
   // desaparecer lo que debe de junio con solo mirar agosto.
-  const deudaPorChofer = new Map<string, number>();
+  const deudaPorChofer = new Map<string | number, number>();
   cuotas.forEach((m) => {
     const falta = deudaDe(m);
     if (falta <= 0) return;
@@ -1029,7 +1050,7 @@ export function useFleetView(
   const SUBS: Record<string, string> = {
     resumen: active.length + ' vehículos activos · ' + (cars.length - active.length) + ' fuera de servicio · datos al ' + dLbl(TODAY),
     flota: sorted.length + ' vehículos en la vista · tocá una columna para ordenar',
-    choferes: active.filter((c) => c.driver !== 'Sin chofer').length + ' choferes asignados · cobros de ' + r.short,
+    choferes: new Set(active.filter((c) => c.driver !== 'Sin chofer').map((c) => claveDeCar(c))).size + ' choferes asignados · cobros de ' + r.short,
     alertas: alertList.length + ' avisos de mantenimiento y documentos',
     reportes: movsSorted.length + ' movimientos en ' + r.short,
     cobros: 'Cobrado ' + fmt(tot.ing, st.hide) + ' de ' + fmt(tot.fact, st.hide) + ' facturado en ' + r.short + (pendTotal ? ' · deben ' + fmt(pendTotal, st.hide) : ''),
@@ -1095,7 +1116,7 @@ export function useFleetView(
     // chofer, las cuotas de quien lo manejaba antes no cuentan acá.
     // Si una cuota está saldada se decide por lo imputado, nunca por el `estado`
     // que trae la fila: ese campo no se entera de un pago posterior.
-    const suyas = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && paidBy(m, c) === c.driver && inR(m));
+    const suyas = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && claveChofer(m, c) === claveDeCar(c) && inR(m));
     const cuotasCobradas = suyas.filter((m) => deudaDe(m) === 0).length;
     const cuotasPend = suyas.filter((m) => deudaDe(m) > 0);
 
@@ -1240,7 +1261,7 @@ export function useFleetView(
   })();
 
   const driverDetail: DriverDetailView = (() => {
-    const x = st.driverId ? perCar.find((p) => p.c.id === st.driverId) : undefined;
+    const x = st.detailCarId ? perCar.find((p) => p.c.id === st.detailCarId) : undefined;
     if (!x)
       return {
         initials: '',
@@ -1273,7 +1294,7 @@ export function useFleetView(
     const c = x.c;
     // Solo las cuotas que le tocan a él: si el auto cambió de chofer, las del
     // anterior son de su ficha, no de esta.
-    const cuotas = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && paidBy(m, c) === c.driver && inR(m));
+    const cuotas = movs.filter((m) => m.carId === c.id && m.type === 'ingreso' && claveChofer(m, c) === claveDeCar(c) && inR(m));
     const impagas = cuotas.filter((m) => m.amount - cobradoDe(m) > 0);
     const facturado = cuotas.reduce((a, m) => a + m.amount, 0);
     const adeudado = cuotas.reduce((a, m) => a + (m.amount - cobradoDe(m)), 0);
@@ -1294,7 +1315,7 @@ export function useFleetView(
       cumplimiento: cumpl + '%',
       cumplimientoPct: Math.max(2, Math.min(100, cumpl)) + '%',
       cumplimientoFg: cumpl >= 95 ? COLORS.pos : cumpl >= 80 ? COLORS.warn : COLORS.neg,
-      aFavor: saldoAFavor.get(c.driver) ? fmt(saldoAFavor.get(c.driver)!, st.hide) : '',
+      aFavor: saldoAFavor.get(claveDeCar(c)) ? fmt(saldoAFavor.get(claveDeCar(c))!, st.hide) : '',
       plate: c.plate,
       rawModel: c.model,
       model: c.model + ' · ' + c.year,
@@ -1324,16 +1345,16 @@ export function useFleetView(
           };
         }),
       sinPagos: !cuotas.length,
-      verVehiculo: () => update({ driverId: null, detailId: c.id }),
+      verVehiculo: () => update({ detailCarId: null, detailId: c.id }),
       editar: () =>
         update({
-          driverId: null,
+          detailCarId: null,
           modal: 'drv',
           ndrv: { name: c.driver, carId: c.id, cuota: c.cuota ? miles(String(c.cuota)) : '' },
           driverCredentials: null,
           driverCredentialsLoading: false,
         }),
-      quitar: () => update({ driverId: null, confirm: { tipo: 'quitarChofer', carId: c.id } }),
+      quitar: () => update({ detailCarId: null, confirm: { tipo: 'quitarChofer', carId: c.id } }),
     };
   })();
 
@@ -1526,7 +1547,7 @@ export function useFleetView(
           // La ficha es del chofer actual del auto: si el auto cambió de manos
           // y esta fila es de un cobro viejo, abre la ficha de quien lo maneja
           // hoy, no la de `drv`, porque no existe una ficha por ex-chofer.
-          open: () => update({ driverId: c.id }),
+          open: () => update({ detailCarId: c.id }),
         };
       }),
     pendKindChips: (['todas', ...Object.keys(PTAG)] as string[]).map((k) => ({
@@ -1577,16 +1598,28 @@ export function useFleetView(
       const f = st.npago;
       if (!f) return null;
       const setF = (patch: Partial<NonNullable<UIState['npago']>>) => update((s) => ({ npago: s.npago && { ...s.npago, ...patch } }));
+      // Choferes por su identidad estable (`driverId`), no por el nombre del
+      // auto de hoy: un mismo chofer puede aparecer en varios autos si alguna
+      // vez se lo reasignó, pero es una sola ficha.
+      const choferKey = new Map<string | number, string>();
+      cars.forEach((c) => {
+        if (c.driver === 'Sin chofer') return;
+        const k = claveDeCar(c);
+        if (!choferKey.has(k)) choferKey.set(k, c.driver);
+      });
+      deudaPorChofer.forEach((_, k) => {
+        if (!choferKey.has(k)) choferKey.set(k, String(k));
+      });
       // Los que deben van primero: son a los que les vas a estar cargando pagos.
-      const nombres = [...new Set([...deudaPorChofer.keys(), ...cars.filter((c) => c.driver !== 'Sin chofer').map((c) => c.driver)])].sort(
-        (a, b) => (deudaPorChofer.get(b) ?? 0) - (deudaPorChofer.get(a) ?? 0) || a.localeCompare(b),
+      const opciones = [...choferKey.entries()].sort(
+        (a, b) => (deudaPorChofer.get(b[0]) ?? 0) - (deudaPorChofer.get(a[0]) ?? 0) || a[1].localeCompare(b[1]),
       );
       const debe = deudaPorChofer.get(f.driver) ?? 0;
       const monto = numFromInput(f.monto);
       return {
         driver: f.driver,
         setDriver: (e) => setF({ driver: e.target.value }),
-        opciones: nombres.map((n) => ({ id: n, label: n + (deudaPorChofer.get(n) ? ' — debe ' + fmtShort(deudaPorChofer.get(n)!) : ' — al día') })),
+        opciones: opciones.map(([k, nombre]) => ({ id: k, label: nombre + (deudaPorChofer.get(k) ? ' — debe ' + fmtShort(deudaPorChofer.get(k)!) : ' — al día') })),
         fecha: f.fecha,
         setFecha: (iso) => setF({ fecha: iso }),
         hoy: isoLocal(TODAY),
@@ -1622,32 +1655,41 @@ export function useFleetView(
       .slice(0, 5)
       .map((x, i) => ({ pos: String(i + 1), plate: x.c.plate, driver: x.c.driver, net: fmtShort(x.net, st.hide) })),
 
-    choferes: perCar
-      .filter((x) => x.c.driver !== 'Sin chofer' && matches(st.chQ, x.c.driver, x.c.plate, x.c.model, x.c.gpsTag))
-      .map((x) => {
-        // Si el auto cambió de chofer, esta tarjeta es del chofer actual: solo
-        // cuentan los cobros que le corresponden a él, no todo el historial del
-        // auto (el chofer anterior tiene los suyos en su propia tarjeta, si
-        // todavía maneja alguno).
-        const propios = (m: Mov) => m.carId === x.c.id && paidBy(m, x.c) === x.c.driver;
-        const dStats = stats(movs, aplicaciones, (m) => propios(m) && inR(m), (a) => a.driver === x.c.driver && a.carId === x.c.id && inRA(a));
-        const pend = pendMovs.filter(propios).reduce((a, m) => a + deudaDe(m), 0);
-        const ok = pend === 0;
-        return {
-          initials: initials(x.c.driver),
-          name: x.c.driver,
-          carLbl: x.c.plate + ' · ' + x.c.model + ' · ' + (x.c.gpsTag || 'Sin GPS'),
-          cuota: fmtShort(x.c.cuota, st.hide),
-          cobrado: fmtShort(dStats.ing, st.hide),
-          pend: pend ? fmtShort(pend, st.hide) : '—',
-          pendFg: pend ? '#c0553f' : '#6b665c',
-          tag: ok ? 'Al día' : 'Debe',
-          tagBg: ok ? '#eef4f0' : '#fdeeea',
-          tagFg: ok ? '#2e7d5b' : '#a8412f',
-          open: () => update({ driverId: x.c.id }),
-        };
-      })
-      .filter((x) => (st.chKind === 'todas' ? true : st.chKind === 'aldia' ? x.tag === 'Al día' : x.tag === 'Debe')),
+    choferes: (() => {
+      // Una ficha por chofer, no por auto: agrupa todos los autos que tuvo el
+      // mismo `driverId` (porque alguna vez se lo reasignó) en una sola tarjeta.
+      const porChofer = new Map<string, Car[]>();
+      cars.forEach((c) => {
+        if (c.driver === 'Sin chofer') return;
+        const k = claveDeCar(c);
+        const g = porChofer.get(k);
+        if (g) g.push(c);
+        else porChofer.set(k, [c]);
+      });
+      return [...porChofer.entries()]
+        .map(([key, grupo]) => {
+          const c = grupo[0];
+          const propios = (m: Mov) => claveChofer(m, carDe.get(m.carId)) === key;
+          const dStats = stats(movs, aplicaciones, (m) => propios(m) && inR(m), (a) => a.driver === key && inRA(a));
+          const pend = grupo.reduce((acc, car) => acc + pendMovs.filter((m) => m.carId === car.id && propios(m)).reduce((a, m) => a + deudaDe(m), 0), 0);
+          const ok = pend === 0;
+          return {
+            name: c.driver,
+            initials: initials(c.driver),
+            carLbl: grupo.length === 1 ? c.plate + ' · ' + c.model + ' · ' + (c.gpsTag || 'Sin GPS') : grupo.length + ' vehículos',
+            cuota: fmtShort(c.cuota, st.hide),
+            cobrado: fmtShort(dStats.ing, st.hide),
+            pend: pend ? fmtShort(pend, st.hide) : '—',
+            pendFg: pend ? '#c0553f' : '#6b665c',
+            tag: ok ? 'Al día' : 'Debe',
+            tagBg: ok ? '#eef4f0' : '#fdeeea',
+            tagFg: ok ? '#2e7d5b' : '#a8412f',
+            open: () => update({ detailCarId: c.id }),
+          };
+        })
+        .filter((x) => matches(st.chQ, x.name, x.carLbl))
+        .filter((x) => (st.chKind === 'todas' ? true : st.chKind === 'aldia' ? x.tag === 'Al día' : x.tag === 'Debe'));
+    })(),
     chKind: st.chKind,
     chKindChips: (
       [
@@ -1842,9 +1884,9 @@ export function useFleetView(
       };
     })(),
 
-    hasDriverDetail: !!st.driverId,
+    hasDriverDetail: !!st.detailCarId,
     driverDetail,
-    closeDriverDetail: () => update({ driverId: null }),
+    closeDriverDetail: () => update({ detailCarId: null }),
 
     carModal: st.modal === 'car',
     drvModal: st.modal === 'drv',

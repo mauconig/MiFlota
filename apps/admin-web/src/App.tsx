@@ -51,7 +51,7 @@ const initialState: UIState = {
   taller: null,
   cobrosTab: 'cuotas',
   npago: null,
-  driverId: null,
+  detailCarId: null,
   confirm: null,
 };
 

@@ -24,6 +24,16 @@ const svcDaysLeft = (c: Car) => daysBetween(TODAY, svcNextDate(c));
  *  maneja hoy: si el auto cambió de chofer, los cobros viejos no cambian de dueño. */
 const paidBy = (m: Mov, c: Car) => m.driver || c.driver;
 
+/** Identidad estable del chofer: su `driverId` si lo tiene, o el nombre como
+ *  fallback en datos previos a ese campo. Siempre string (los números viajan
+ *  serializados en los selects), para que la clave del Map y la del formulario
+ *  coincidan. Agrupa deuda e imputa pagos por chofer aunque cambie de vehículo. */
+const claveChofer = (m: Mov, c?: Car): string => {
+  const id = m.driverId != null ? m.driverId : c?.driverId != null ? c.driverId : null;
+  return id != null ? String(id) : m.driver || c?.driver || 'Sin chofer';
+};
+const claveDeCar = (c: Car): string => (c.driverId != null ? String(c.driverId) : c.driver);
+
 function stats(movs: Mov[], aplicaciones: Aplicacion[], fm: (m: Mov) => boolean, fa: (a: Aplicacion) => boolean) {
   let fact = 0;
   let egr = 0;
@@ -566,7 +576,7 @@ export function useMobileView(
   const cuotas = movs.filter((m) => m.type === 'ingreso');
   const choferDeCuota = (m: Mov) => {
     const c = carDe.get(m.carId);
-    return c ? paidBy(m, c) : (m.driver ?? 'Sin chofer');
+    return claveChofer(m, c);
   };
   const { aplicaciones, cobrado } = imputar(cuotas, pagos, choferDeCuota);
   const cobradoDe = (m: Mov) => cobrado.get(m.id) ?? 0;
@@ -603,6 +613,17 @@ export function useMobileView(
     const d = choferDeCuota(m);
     if (d === 'Sin chofer') return;
     deudaPorChofer.set(d, (deudaPorChofer.get(d) ?? 0) + falta);
+  });
+  // Choferes por identidad estable, para el formulario de pago y la pantalla de
+  // choferes: un mismo `driverId` puede aparecer en varios autos si se reasignó.
+  const choferKeys = new Map<string, Car>();
+  cars.forEach((c) => {
+    if (c.driver === 'Sin chofer') return;
+    const k = claveDeCar(c);
+    if (!choferKeys.has(k)) choferKeys.set(k, c);
+  });
+  deudaPorChofer.forEach((_, k) => {
+    if (!choferKeys.has(String(k))) choferKeys.set(String(k), { ...({} as Car), driver: String(k) });
   });
 
   const car = state.carId ? cars.find((c) => c.id === state.carId) : undefined;
@@ -775,14 +796,14 @@ export function useMobileView(
 
     let cobro: NonNullable<MobileView['registrar']>['cobro'] = null;
     if (f.tab === 'cobro') {
-      const nombres = [...new Set([...deudaPorChofer.keys(), ...cars.filter((c) => c.driver !== 'Sin chofer').map((c) => c.driver)])].sort(
-        (a, b) => (deudaPorChofer.get(b) ?? 0) - (deudaPorChofer.get(a) ?? 0) || a.localeCompare(b),
+      const opciones = [...choferKeys.entries()].sort(
+        (a, b) => (deudaPorChofer.get(b[0]) ?? 0) - (deudaPorChofer.get(a[0]) ?? 0) || a[1].driver.localeCompare(b[1].driver),
       );
       const debe = deudaPorChofer.get(f.driver) ?? 0;
       cobro = {
         driver: f.driver,
         setDriver: (v) => setF({ driver: v }),
-        opciones: nombres.map((n) => ({ id: n, label: n + (deudaPorChofer.get(n) ? ' — debe ' + fmtShort(deudaPorChofer.get(n)!) : ' — al día') })),
+        opciones: opciones.map(([k, c]) => ({ id: k, label: c.driver + (deudaPorChofer.get(k) ? ' — debe ' + fmtShort(deudaPorChofer.get(k)!) : ' — al día') })),
         tipoOpts: (['pago', 'ajuste'] as const).map((k) => ({ label: k === 'pago' ? 'Pago' : 'Ajuste', ...chipStyle(f.tipo === k), pick: () => setF({ tipo: k }) })),
         destino: !f.driver
           ? 'Elegí un chofer para ver a qué se imputa'
@@ -816,10 +837,12 @@ export function useMobileView(
       if (f.tab === 'cobro') {
         if (!f.driver) return toast('Elegí de qué chofer es el pago');
         setF({ guardando: true });
+        const carSel = cars.find((c) => claveDeCar(c) === f.driver);
+        const nombre = carSel?.driver ?? f.driver;
         persist
-          .addPago({ driver: f.driver, carId: cars.find((c) => c.driver === f.driver)?.id ?? null, fecha: f.fecha, monto: amountNum, tipo: f.tipo, nota: f.nota.trim() || undefined })
+          .addPago({ driver: f.driver, carId: carSel?.id ?? null, fecha: f.fecha, monto: amountNum, tipo: f.tipo, nota: f.nota.trim() || undefined })
           .then(() => {
-            toast((f.tipo === 'ajuste' ? 'Ajuste registrado · ' : 'Pago registrado · ') + f.driver + ' · ' + fmt(amountNum));
+            toast((f.tipo === 'ajuste' ? 'Ajuste registrado · ' : 'Pago registrado · ') + nombre + ' · ' + fmt(amountNum));
             back();
           })
           .catch((e: Error) => {

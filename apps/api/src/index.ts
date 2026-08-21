@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { CarRow, LocationRow, MovRow, PagoRow, ReporteRow } from './db.js';
-import { COMPROBANTES_DIR, DB_PATH, carToJson, locationToJson, movToJson, openDb, pagoToJson, reporteToJson } from './db.js';
+import { COMPROBANTES_DIR, DB_PATH, carToJson, ensureDriver, locationToJson, movToJson, openDb, pagoToJson, reporteToJson } from './db.js';
 import {
   COOKIE,
   bloqueado,
@@ -25,7 +25,7 @@ import {
 } from './auth.js';
 import {
   borrarSesionChofer,
-  borrarSesionesDeCar,
+  borrarSesionesDeDriver,
   crearSesionChofer,
   generarPassword,
   generarUsername,
@@ -107,12 +107,13 @@ app.post<{ Body: { usuario?: string; password?: string } }>('/api/login', async 
   if (espera) return reply.code(429).send({ error: `Demasiados intentos. Probá de nuevo en ${Math.ceil(espera / 60)} minutos.` });
   if (!usuario || !password) return reply.code(400).send({ error: 'Completá usuario y contraseña' });
 
-  const fila = db.prepare('SELECT id, usuario, nombre, pass_hash FROM users WHERE usuario = ?').get(usuario) as
-    | { id: number; usuario: string; nombre: string; pass_hash: string }
+  const fila = db.prepare('SELECT id, usuario, nombre, pass_hash, estado FROM users WHERE usuario = ?').get(usuario) as
+    | { id: number; usuario: string; nombre: string; pass_hash: string; estado: string }
     | undefined;
 
-  // Mismo mensaje exista o no el usuario: distinguirlos permitiría enumerar cuentas.
-  const ok = fila ? await verifyPassword(password, fila.pass_hash) : false;
+  // Mismo mensaje exista o no el usuario, o esté deshabilitado: distinguirlos
+  // permitiría enumerar cuentas o saber cuáles están activas.
+  const ok = fila && fila.estado === 'activo' ? await verifyPassword(password, fila.pass_hash) : false;
   if (!ok) {
     registrarFallo(clave);
     return reply.code(401).send({ error: 'Usuario o contraseña incorrectos' });
@@ -132,7 +133,9 @@ app.post('/api/logout', async (req, reply) => {
 
 app.get('/api/me', async (req) => {
   const u = usuarioDeSesion(db, req.cookies[COOKIE]);
-  return u ? { autenticado: true, usuario: u.usuario, nombre: u.nombre } : { autenticado: false };
+  return u
+    ? { autenticado: true, usuario: u.usuario, nombre: u.nombre, rol: u.rol, estado: u.estado }
+    : { autenticado: false };
 });
 
 /* ------------------------------- API ------------------------------- */
@@ -286,10 +289,9 @@ interface CarPatch {
 }
 
 /** Mapea los campos que el cliente puede tocar a su columna, validando cada uno.
- *  Lo que no esté acá no es actualizable, aunque venga en el body. */
-const CAMPOS: Record<keyof CarPatch, { col: string; ok: (v: unknown) => boolean }> = {
-  driver: { col: 'driver', ok: (v) => typeof v === 'string' && v.trim().length > 0 && v.length <= 80 },
-  cuota: { col: 'cuota', ok: (v) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 100_000_000 },
+ *  `driver` y `cuota` se manejan aparte (la asignación de chofer ahora enlaza
+ *  una fila de `drivers`, no solo un texto). */
+const CAMPOS: Record<string, { col: string; ok: (v: unknown) => boolean }> = {
   estado: { col: 'estado', ok: (v) => typeof v === 'string' && ESTADOS.has(v) },
   gpsTag: { col: 'gps_tag', ok: (v) => typeof v === 'string' && v.length <= 40 },
   serviceCada: { col: 'service_cada', ok: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 3650 },
@@ -301,6 +303,42 @@ const CAMPOS: Record<keyof CarPatch, { col: string; ok: (v: unknown) => boolean 
   seguroCada: { col: 'seguro_cada', ok: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= SEG_CADA_MAX },
 };
 
+/**
+ * Asigna (o desasigna) el chofer de un auto y deja `cuota` en coherencia.
+ * La identidad del chofer vive en `drivers`: reasignar el auto no borra al
+ * chofer ni sus credenciales, solo mueve el vínculo. Se cumple "un auto por
+ * chofer": si el chofer ya estaba en otro auto activo, ese otro queda libre.
+ * Mata las sesiones de los choferes que terminan sin auto activo.
+ * Devuelve false si el auto no existe para ese dueño.
+ */
+function aplicarDriverEnAuto(db: ReturnType<typeof openDb>, ownerId: number, carId: string, nombre: string | null, cuota: number): boolean {
+  const car = db.prepare('SELECT driver_id FROM cars WHERE id = ? AND owner_id = ?').get(carId, ownerId) as { driver_id: number | null } | undefined;
+  if (!car) return false;
+
+  const liberados = new Set<number>();
+  const targetId = nombre && nombre !== 'Sin chofer' ? ensureDriver(db, ownerId, nombre) : null;
+
+  const oldOccupant = car.driver_id;
+  if (oldOccupant != null && oldOccupant !== targetId) liberados.add(oldOccupant);
+
+  if (targetId == null) {
+    db.prepare("UPDATE cars SET driver_id = NULL, driver = 'Sin chofer', cuota = 0 WHERE id = ? AND owner_id = ?").run(carId, ownerId);
+  } else {
+    // Un solo auto activo por chofer: sacarlo de cualquier otro auto activo.
+    db.prepare("UPDATE cars SET driver_id = NULL, driver = 'Sin chofer', cuota = 0 WHERE owner_id = ? AND driver_id = ? AND id <> ? AND estado <> 'baja'").run(
+      ownerId,
+      targetId,
+      carId,
+    );
+    db.prepare('UPDATE cars SET driver_id = ?, driver = ?, cuota = ? WHERE id = ? AND owner_id = ?').run(targetId, nombre, cuota, carId, ownerId);
+  }
+
+  for (const did of liberados) {
+    if (!db.prepare("SELECT 1 FROM cars WHERE driver_id = ? AND estado <> 'baja' LIMIT 1").get(did)) borrarSesionesDeDriver(db, did);
+  }
+  return true;
+}
+
 app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (req, reply) => {
   const u = quien(req);
   // Un vehículo de otro dueño responde igual que uno inexistente: distinguirlos
@@ -310,14 +348,13 @@ app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (re
 
   const sets: string[] = [];
   const vals: unknown[] = [];
-  for (const [campo, def] of Object.entries(CAMPOS) as [keyof CarPatch, (typeof CAMPOS)[keyof CarPatch]][]) {
-    const v = req.body?.[campo];
+  for (const [campo, def] of Object.entries(CAMPOS) as [string, { col: string; ok: (v: unknown) => boolean }][]) {
+    const v = req.body?.[campo as keyof CarPatch];
     if (v === undefined) continue;
     if (!def.ok(v)) return reply.code(400).send({ error: `Valor inválido para ${campo}` });
     sets.push(`${def.col} = ?`);
     vals.push(v);
   }
-  if (!sets.length) return reply.code(400).send({ error: 'Nada para actualizar' });
 
   // Sin chofer no hay cuota. Se resuelve acá y no solo en el cliente para que
   // la regla valga también para cualquier otra vía de escritura.
@@ -331,15 +368,15 @@ app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (re
     vals.push(0);
   }
 
-  // Reasignar el chofer invalida sus credenciales de apps/driver: si no, el
-  // chofer nuevo heredaría el login del anterior.
-  const cambiaChofer = req.body?.driver !== undefined && req.body.driver !== actual.driver;
-  if (cambiaChofer) {
-    sets.push('driver_username = NULL', 'driver_pass_hash = NULL');
+  db.prepare(`UPDATE cars SET ${sets.join(', ')} WHERE id = ? AND owner_id = ?`).run(...vals, req.params.id, u.id);
+
+  // El chofer (y su cuota) se manejan enlazando la fila de drivers.
+  if (req.body?.driver !== undefined) {
+    aplicarDriverEnAuto(db, u.id, req.params.id, req.body.driver === 'Sin chofer' ? null : req.body.driver, req.body?.cuota ?? 0);
+  } else if (req.body?.cuota !== undefined) {
+    db.prepare('UPDATE cars SET cuota = ? WHERE id = ? AND owner_id = ?').run(req.body.cuota, req.params.id, u.id);
   }
 
-  db.prepare(`UPDATE cars SET ${sets.join(', ')} WHERE id = ? AND owner_id = ?`).run(...vals, req.params.id, u.id);
-  if (cambiaChofer) borrarSesionesDeCar(db, req.params.id);
   return carToJson(selCar.get(req.params.id, u.id) as CarRow);
 });
 
@@ -352,12 +389,14 @@ app.post<{ Params: { id: string }; Body: { driver?: string } }>('/api/cars/:id/c
   if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
 
   const driver = String(req.body?.driver ?? '').trim();
-  if (driver === 'Sin chofer' || !CAMPOS.driver.ok(driver)) {
+  if (driver === 'Sin chofer' || !driver || driver.length > 80) {
     return reply.code(400).send({ error: 'Nombre de chofer inválido' });
   }
 
+  const driverId = ensureDriver(db, u.id, driver);
+  const existente = db.prepare('SELECT driver_username FROM drivers WHERE id = ?').get(driverId) as { driver_username: string | null } | undefined;
   return {
-    username: car.driver === driver && car.driver_username ? car.driver_username : generarUsername(db, driver),
+    username: existente?.driver_username ?? generarUsername(db, driver),
     password: generarPassword(),
   };
 });
@@ -382,7 +421,7 @@ app.post<{ Params: { id: string }; Body: AsignarChoferBody }>('/api/cars/:id/asi
   const username = String(req.body?.username ?? '').trim().toLowerCase();
   const password = String(req.body?.password ?? '');
 
-  if (driver === 'Sin chofer' || !CAMPOS.driver.ok(driver)) return reply.code(400).send({ error: 'Nombre de chofer inválido' });
+  if (driver === 'Sin chofer' || !driver || driver.length > 80) return reply.code(400).send({ error: 'Nombre de chofer inválido' });
   if (typeof cuota !== 'number' || !Number.isInteger(cuota) || cuota <= 0 || cuota > 100_000_000) return reply.code(400).send({ error: 'Cuota diaria inválida' });
   if (!/^[a-z0-9.]{1,40}$/.test(username)) return reply.code(400).send({ error: 'Usuario de chofer inválido' });
   if (!/^[A-Za-z2-9]{9}$/.test(password)) return reply.code(400).send({ error: 'Contraseña de chofer inválida' });
@@ -390,19 +429,13 @@ app.post<{ Params: { id: string }; Body: AsignarChoferBody }>('/api/cars/:id/asi
   const passHash = await hashPassword(password);
   // Se comprueba después del hash: ese es el único await de la ruta y otra
   // asignación podría haber ocupado el usuario mientras se calculaba.
-  const usado = db.prepare('SELECT id FROM cars WHERE driver_username = ? AND id <> ?').get(username, car.id) as { id: string } | undefined;
+  const usado = db.prepare('SELECT 1 FROM drivers WHERE driver_username = ? AND NOT (owner_id = ? AND nombre = ?)').get(username, u.id, driver);
   if (usado) return reply.code(409).send({ error: 'Ese usuario acaba de ser ocupado. Volvé atrás y generá datos nuevos.' });
 
-  const guardado = db.prepare('UPDATE cars SET driver = ?, cuota = ?, driver_username = ?, driver_pass_hash = ? WHERE id = ? AND owner_id = ?').run(
-    driver,
-    cuota,
-    username,
-    passHash,
-    car.id,
-    u.id,
-  );
-  if (!guardado.changes) return reply.code(404).send({ error: 'Vehículo inexistente' });
-  borrarSesionesDeCar(db, car.id);
+  aplicarDriverEnAuto(db, u.id, car.id, driver, cuota);
+  const driverId = ensureDriver(db, u.id, driver);
+  db.prepare('UPDATE drivers SET driver_username = ?, driver_pass_hash = ? WHERE id = ?').run(username, passHash, driverId);
+  borrarSesionesDeDriver(db, driverId);
   req.log.info({ car: car.plate, driver }, 'chofer asignado con credenciales');
   return { car: carToJson(selCar.get(car.id, u.id) as CarRow) };
 });
@@ -415,13 +448,18 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/chofer-credenciales', async 
   const u = quien(req);
   const car = selCar.get(req.params.id, u.id) as CarRow | undefined;
   if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
-  if (car.driver === 'Sin chofer') return reply.code(400).send({ error: 'Asigná un chofer antes de generar credenciales' });
+  if (!car.driver_id) return reply.code(400).send({ error: 'Asigná un chofer antes de generar credenciales' });
 
-  const username = car.driver_username ?? generarUsername(db, car.driver);
+  const driver = db.prepare('SELECT id, nombre, driver_username FROM drivers WHERE id = ?').get(car.driver_id) as
+    | { id: number; nombre: string; driver_username: string | null }
+    | undefined;
+  if (!driver) return reply.code(404).send({ error: 'Chofer inexistente' });
+
+  const username = driver.driver_username ?? generarUsername(db, driver.nombre);
   const password = generarPassword();
-  db.prepare('UPDATE cars SET driver_username = ?, driver_pass_hash = ? WHERE id = ? AND owner_id = ?').run(username, await hashPassword(password), car.id, u.id);
-  borrarSesionesDeCar(db, car.id);
-  req.log.info({ car: car.plate, driver: car.driver }, 'credenciales de chofer regeneradas');
+  db.prepare('UPDATE drivers SET driver_username = ?, driver_pass_hash = ? WHERE id = ?').run(username, await hashPassword(password), driver.id);
+  borrarSesionesDeDriver(db, driver.id);
+  req.log.info({ car: car.plate, driver: driver.nombre }, 'credenciales de chofer regeneradas');
   return { username, password };
 });
 
@@ -446,6 +484,11 @@ app.delete<{ Params: { id: string } }>('/api/cars/:id', async (req, reply) => {
   ];
 
   db.prepare('DELETE FROM cars WHERE id = ? AND owner_id = ?').run(req.params.id, u.id);
+  // El chofer sobrevive (su fila en drivers no se borra), pero si este era su
+  // único auto activo, su sesión ya no tiene con qué abrir la app.
+  if (car.driver_id != null && !db.prepare("SELECT 1 FROM cars WHERE driver_id = ? AND estado <> 'baja' LIMIT 1").get(car.driver_id)) {
+    borrarSesionesDeDriver(db, car.driver_id);
+  }
 
   for (const a of adjuntos) {
     // Que falle un borrado de archivo no puede tumbar la respuesta: la fila ya
@@ -695,9 +738,11 @@ interface NuevoPago {
  *  Sin esto un nombre mal tipeado crea un saldo a favor fantasma que nunca se
  *  imputa a nada y desaparece de la vista del dueño. */
 const conoceChofer = db.prepare(`
-  SELECT 1 FROM cars WHERE owner_id = ? AND driver = ?
+  SELECT 1 FROM drivers WHERE owner_id = ? AND nombre = ?
   UNION ALL
   SELECT 1 FROM movs WHERE owner_id = ? AND driver = ?
+  UNION ALL
+  SELECT 1 FROM pagos WHERE owner_id = ? AND driver = ?
   LIMIT 1
 `);
 
@@ -707,7 +752,7 @@ app.post<{ Body: NuevoPago }>('/api/pagos', async (req, reply) => {
 
   const driver = String(b.driver ?? '').trim();
   if (!driver || driver === 'Sin chofer') return reply.code(400).send({ error: 'Indicá de qué chofer es el pago' });
-  if (!conoceChofer.get(u.id, driver, u.id, driver)) return reply.code(404).send({ error: 'Ese chofer no es de tu flota' });
+  if (!conoceChofer.get(u.id, driver, u.id, driver, u.id, driver)) return reply.code(404).send({ error: 'Ese chofer no es de tu flota' });
 
   const monto = Number(b.monto);
   if (!Number.isInteger(monto) || monto <= 0 || monto > 1_000_000_000) return reply.code(400).send({ error: 'El monto tiene que ser un número mayor a cero' });
@@ -729,9 +774,10 @@ app.post<{ Body: NuevoPago }>('/api/pagos', async (req, reply) => {
     carId = b.carId;
   }
 
+  const driverId = (db.prepare('SELECT id FROM drivers WHERE owner_id = ? AND nombre = ?').get(u.id, driver) as { id: number } | undefined)?.id ?? null;
   const info = db
-    .prepare('INSERT INTO pagos (owner_id, car_id, driver, fecha, monto, tipo, medio, nota) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(u.id, carId, driver, fecha, monto, tipo, String(b.medio ?? '').trim().slice(0, 40) || null, String(b.nota ?? '').trim().slice(0, 200) || null);
+    .prepare('INSERT INTO pagos (owner_id, car_id, driver, driver_id, fecha, monto, tipo, medio, nota) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(u.id, carId, driver, driverId, fecha, monto, tipo, String(b.medio ?? '').trim().slice(0, 40) || null, String(b.nota ?? '').trim().slice(0, 200) || null);
 
   req.log.info({ driver, monto, tipo, fecha }, 'pago registrado');
   return reply.code(201).send(pagoToJson(db.prepare('SELECT * FROM pagos WHERE id = ?').get(info.lastInsertRowid) as PagoRow));
@@ -762,8 +808,13 @@ app.post<{ Body: { usuario?: string; password?: string } }>('/api/chofer/login',
   if (espera) return reply.code(429).send({ error: `Demasiados intentos. Probá de nuevo en ${Math.ceil(espera / 60)} minutos.` });
   if (!usuario || !password) return reply.code(400).send({ error: 'Completá usuario y contraseña' });
 
-  const fila = db.prepare('SELECT id, driver, cuota, plate, model, year, driver_pass_hash FROM cars WHERE driver_username = ?').get(usuario) as
-    | { id: string; driver: string; cuota: number; plate: string; model: string; year: number; driver_pass_hash: string | null }
+  const fila = db.prepare(
+    `SELECT d.id AS driver_id, d.nombre AS driver, d.driver_pass_hash, c.id AS car_id, c.cuota, c.plate, c.model, c.year
+       FROM drivers d
+       JOIN cars c ON c.driver_id = d.id AND c.estado <> 'baja'
+      WHERE d.driver_username = ?`,
+  ).get(usuario) as
+    | { driver_id: number; driver: string; driver_pass_hash: string | null; car_id: string; cuota: number; plate: string; model: string; year: number }
     | undefined;
 
   const ok = fila?.driver_pass_hash ? await verifyPassword(password, fila.driver_pass_hash) : false;
@@ -773,7 +824,7 @@ app.post<{ Body: { usuario?: string; password?: string } }>('/api/chofer/login',
   }
 
   limpiarFallos(clave);
-  const { token } = crearSesionChofer(db, fila!.id);
+  const { token } = crearSesionChofer(db, fila!.driver_id);
   return {
     token,
     driver: fila!.driver,
@@ -849,14 +900,18 @@ app.get('/api/chofer/resumen', async (req, reply) => {
 
   const flota = db.prepare('SELECT id, driver, cuota FROM cars WHERE owner_id = ?').all(s.ownerId) as { id: string; driver: string; cuota: number }[];
   const driverDeCar = new Map(flota.map((c) => [c.id, c.driver]));
-  const choferDe = (m: MovRow) => m.driver || driverDeCar.get(m.car_id) || 'Sin chofer';
+  // Todo lo que sigue es de un solo chofer; la clave de imputación es su id.
+  const choferDe = () => s.driverId;
+  const esEste = (m: MovRow) => (m.driver_id != null ? m.driver_id === s.driverId : (m.driver ?? driverDeCar.get(m.car_id)) === s.driver);
 
-  const cargos = (db.prepare("SELECT * FROM movs WHERE owner_id = ? AND type = 'ingreso'").all(s.ownerId) as MovRow[]).filter((m) => choferDe(m) === s.driver);
-  const pagos = db.prepare('SELECT * FROM pagos WHERE owner_id = ? AND driver = ?').all(s.ownerId, s.driver) as PagoRow[];
+  const cargos = (db.prepare("SELECT * FROM movs WHERE owner_id = ? AND type = 'ingreso'").all(s.ownerId) as MovRow[]).filter(esEste);
+  const pagos = (db.prepare('SELECT * FROM pagos WHERE owner_id = ?').all(s.ownerId) as PagoRow[]).filter((p) =>
+    p.driver_id != null ? p.driver_id === s.driverId : p.driver === s.driver,
+  );
   const { cobrado, saldoAFavor } = imputar(cargos, pagos, choferDe);
 
   const deuda = cargos.reduce((a, m) => a + (m.amount - (cobrado.get(m.id) ?? 0)), 0);
-  const aFavor = saldoAFavor.get(s.driver) ?? 0;
+  const aFavor = saldoAFavor.get(s.driverId) ?? 0;
   const estado = deuda > 0 ? 'atrasado' : aFavor > 0 ? 'adelantado' : 'al_dia';
 
   const pendientes = cargos
@@ -883,9 +938,10 @@ app.get<{ Querystring: { dias?: string } }>('/api/chofer/pagos', async (req, rep
   const dias = Number(req.query.dias);
   const desde = Number.isFinite(dias) && dias > 0 ? new Date(Date.now() - dias * 864e5).toISOString().slice(0, 10) : null;
 
-  const filas = desde
-    ? (db.prepare('SELECT * FROM pagos WHERE owner_id = ? AND driver = ? AND fecha >= ? ORDER BY fecha DESC, id DESC').all(s.ownerId, s.driver, desde) as PagoRow[])
-    : (db.prepare('SELECT * FROM pagos WHERE owner_id = ? AND driver = ? ORDER BY fecha DESC, id DESC').all(s.ownerId, s.driver) as PagoRow[]);
+  const all = db.prepare('SELECT * FROM pagos WHERE owner_id = ?').all(s.ownerId) as PagoRow[];
+  let filas = all.filter((p) => (p.driver_id != null ? p.driver_id === s.driverId : p.driver === s.driver));
+  if (desde) filas = filas.filter((p) => p.fecha >= desde);
+  filas.sort((a, b) => b.fecha.localeCompare(a.fecha) || b.id - a.id);
 
   return filas.map(pagoToJson);
 });
@@ -930,14 +986,14 @@ app.post<{ Params: never }>('/api/chofer/pagos', async (req, reply) => {
 
   const hoy = hoyISO();
   const info = db
-    .prepare('INSERT INTO pagos (owner_id, car_id, driver, fecha, monto, tipo, medio, comprobante, comprobante_nombre, comprobante_tipo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(s.ownerId, s.carId, s.driver, hoy, monto, 'pago', medio || null, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
+    .prepare('INSERT INTO pagos (owner_id, car_id, driver, driver_id, fecha, monto, tipo, medio, comprobante, comprobante_nombre, comprobante_tipo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(s.ownerId, s.carId, s.driver, s.driverId, hoy, monto, 'pago', medio || null, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
 
   req.log.info({ driver: s.driver, monto, medio, comprobante: !!archivo }, 'pago de chofer registrado');
   void sendOwnerPush(db, s.ownerId, {
     title: 'Pago recibido',
     body: `${s.driver} registró un pago de ₲ ${Math.round(monto).toLocaleString('es-PY')}.`,
-    data: { type: 'driver_payment', paymentId: Number(info.lastInsertRowid), carId: s.carId },
+    data: { type: 'driver_payment', paymentId: Number(info.lastInsertRowid), carId: s.carId ?? '' },
   }).catch((e: Error) => req.log.warn({ err: e, ownerId: s.ownerId }, 'no se pudo enviar push de pago'));
   return reply.code(201).send(pagoToJson(db.prepare('SELECT * FROM pagos WHERE id = ?').get(info.lastInsertRowid) as PagoRow));
 });
@@ -948,7 +1004,9 @@ const CATS_REPORTE = new Set(['Frenos', 'Motor', 'Neumáticos', 'Aire acondicion
 app.get('/api/chofer/reportes', async (req, reply) => {
   const s = quienChofer(db, req);
   if (!s) return reply.code(401).send({ error: 'Sesión requerida' });
-  const filas = db.prepare('SELECT * FROM reportes_falla WHERE car_id = ? AND driver = ? ORDER BY fecha DESC, id DESC').all(s.carId, s.driver) as ReporteRow[];
+  const filas = db
+    .prepare('SELECT * FROM reportes_falla WHERE car_id = ? AND owner_id = ? AND (driver_id = ? OR driver = ?) ORDER BY fecha DESC, id DESC')
+    .all(s.carId, s.ownerId, s.driverId, s.driver) as ReporteRow[];
   return filas.map(reporteToJson);
 });
 
@@ -964,15 +1022,15 @@ app.post<{ Body: { cat?: string; urgencia?: string; texto?: string } }>('/api/ch
   if (!texto) return reply.code(400).send({ error: 'Contá qué le pasa al auto' });
 
   const info = db
-    .prepare('INSERT INTO reportes_falla (owner_id, car_id, driver, cat, urgencia, texto, fecha) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(s.ownerId, s.carId, s.driver, cat, urgencia, texto, hoyISO());
+    .prepare('INSERT INTO reportes_falla (owner_id, car_id, driver, driver_id, cat, urgencia, texto, fecha) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(s.ownerId, s.carId, s.driver, s.driverId, cat, urgencia, texto, hoyISO());
 
   req.log.info({ driver: s.driver, cat, urgencia }, 'reporte de falla registrado');
   const car = db.prepare('SELECT plate FROM cars WHERE id = ?').get(s.carId) as { plate: string } | undefined;
   void sendOwnerPush(db, s.ownerId, {
     title: urgencia === 'urgente' ? 'Queja urgente' : 'Nueva queja del chofer',
     body: `${s.driver} reportó ${cat} en ${car?.plate ?? s.carId}: ${texto}`.slice(0, 180),
-    data: { type: 'driver_report', reportId: Number(info.lastInsertRowid), carId: s.carId, urgency: urgencia },
+    data: { type: 'driver_report', reportId: Number(info.lastInsertRowid), carId: s.carId ?? '', urgency: urgencia },
   }).catch((e: Error) => req.log.warn({ err: e, ownerId: s.ownerId }, 'no se pudo enviar push de reporte'));
   return reply.code(201).send(reporteToJson(db.prepare('SELECT * FROM reportes_falla WHERE id = ?').get(info.lastInsertRowid) as ReporteRow));
 });

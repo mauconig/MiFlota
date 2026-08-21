@@ -16,7 +16,9 @@ export function migrarAuth(db: Database.Database) {
       usuario    TEXT NOT NULL UNIQUE COLLATE NOCASE,
       nombre     TEXT NOT NULL,
       pass_hash  TEXT NOT NULL,
-      creado     TEXT NOT NULL
+      creado     TEXT NOT NULL,
+      rol        TEXT NOT NULL DEFAULT 'owner' CHECK (rol IN ('owner','admin')),
+      estado     TEXT NOT NULL DEFAULT 'activo' CHECK (estado IN ('activo','deshabilitado'))
     );
 
     -- Se guarda el hash del token, no el token: si alguien lee la base no
@@ -30,6 +32,10 @@ export function migrarAuth(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
   `);
+
+  const cols = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
+  if (!cols('users').includes('rol')) db.exec("ALTER TABLE users ADD COLUMN rol TEXT NOT NULL DEFAULT 'owner' CHECK (rol IN ('owner','admin'))");
+  if (!cols('users').includes('estado')) db.exec("ALTER TABLE users ADD COLUMN estado TEXT NOT NULL DEFAULT 'activo' CHECK (estado IN ('activo','deshabilitado'))");
 }
 
 /** `scrypt$N$salt$hash`. Guarda el costo junto al hash para poder subirlo más
@@ -58,6 +64,8 @@ export interface Usuario {
   id: number;
   usuario: string;
   nombre: string;
+  rol: string;
+  estado: string;
 }
 
 export function crearSesion(db: Database.Database, userId: number): { token: string; maxAge: number } {
@@ -76,9 +84,9 @@ export function usuarioDeSesion(db: Database.Database, token: string | undefined
   if (!token) return null;
   const fila = db
     .prepare(
-      `SELECT u.id, u.usuario, u.nombre, s.expira
-         FROM sessions s JOIN users u ON u.id = s.user_id
-        WHERE s.token_hash = ?`,
+      `SELECT u.id, u.usuario, u.nombre, u.rol, u.estado, s.expira
+          FROM sessions s JOIN users u ON u.id = s.user_id
+         WHERE s.token_hash = ?`,
     )
     .get(hashToken(token)) as (Usuario & { expira: string }) | undefined;
   if (!fila) return null;
@@ -86,7 +94,8 @@ export function usuarioDeSesion(db: Database.Database, token: string | undefined
     db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
     return null;
   }
-  return { id: fila.id, usuario: fila.usuario, nombre: fila.nombre };
+  if (fila.estado !== 'activo') return null;
+  return { id: fila.id, usuario: fila.usuario, nombre: fila.nombre, rol: fila.rol, estado: fila.estado };
 }
 
 export function borrarSesion(db: Database.Database, token: string | undefined) {
@@ -107,11 +116,13 @@ export async function sembrarAdmin(db: Database.Database): Promise<string | null
   if (!usuario || !pass) throw new Error('No hay usuarios y faltan MIFLOTA_ADMIN_USER / MIFLOTA_ADMIN_PASSWORD para crear el primero');
   if (pass.length < 12) throw new Error('MIFLOTA_ADMIN_PASSWORD debe tener al menos 12 caracteres');
 
-  db.prepare('INSERT INTO users (usuario, nombre, pass_hash, creado) VALUES (?, ?, ?, ?)').run(
+  db.prepare('INSERT INTO users (usuario, nombre, pass_hash, creado, rol, estado) VALUES (?, ?, ?, ?, ?, ?)').run(
     usuario,
     process.env.MIFLOTA_ADMIN_NOMBRE || usuario,
     await hashPassword(pass),
     new Date().toISOString(),
+    'owner',
+    'activo',
   );
   return usuario;
 }

@@ -10,6 +10,8 @@ export interface Car {
   model: string;
   year: number;
   driver: string;
+  /** Identidad estable del chofer (id de la fila en `drivers`). Null = sin chofer. */
+  driverId?: string | number | null;
   cuota: number;
   estado: Estado;
   /** Identificador del equipo de rastreo instalado. Vacío = sin GPS. */
@@ -47,6 +49,8 @@ export interface Mov {
       hace de valor por defecto. Si el auto cambia de chofer, los cobros ya
       registrados no cambian de dueño — quedan con quien los generó. */
   driver?: string;
+  /** Identidad estable del chofer (id de `drivers`). Null = sin chofer. */
+  driverId?: number | null;
   /** Adjunto del gasto. El archivo se pide por `/api/comprobantes/:id`. */
   comprobante?: { id: string; nombre: string; tipo: string };
 }
@@ -65,6 +69,8 @@ export interface Pago {
       y lo sigue aunque cambie de vehículo. */
   carId: string | null;
   driver: string;
+  /** Identidad estable del chofer (id de `drivers`). Null si no se pudo resolver. */
+  driverId?: number | null;
   fecha: Date;
   monto: number;
   tipo: PagoTipo;

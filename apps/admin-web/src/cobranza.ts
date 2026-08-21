@@ -24,7 +24,9 @@ export interface Aplicacion {
   fecha: Date;
   /** Del cargo, no del pago: es el auto que generó esa cuota. */
   carId: string;
-  driver: string;
+  /** Identidad del chofer (id de `drivers`) o, en datos viejos sin id, su
+   *  nombre. Sirve para agrupar la imputación por chofer estable. */
+  driver: string | number;
   tipo: PagoTipo;
 }
 
@@ -35,7 +37,7 @@ export interface Imputacion {
   /** Chofer → plata suya que todavía no se imputó a ninguna cuota. Aparece
    *  cuando paga de más o por adelantado; se consume sola con la cuota que
    *  viene, porque la imputación se rehace entera en cada lectura. */
-  saldoAFavor: Map<string, number>;
+  saldoAFavor: Map<string | number, number>;
 }
 
 interface Cuenta {
@@ -46,24 +48,25 @@ interface Cuenta {
 /**
  * @param cargos  Movimientos de tipo ingreso: las cuotas emitidas.
  * @param pagos   Pagos y ajustes registrados.
- * @param choferDe  A quién le corresponde una cuota. Se pasa de afuera porque
- *   depende del chofer que tenía el auto ese día, no del que lo tiene hoy.
+ * @param choferDe  A quién le corresponde una cuota. Devuelve el id estable
+ *   del chofer (o el nombre como fallback en datos viejos), no el del auto de
+ *   hoy: un chofer conserva su deuda aunque cambie de vehículo.
  */
-export function imputar(cargos: Mov[], pagos: Pago[], choferDe: (m: Mov) => string): Imputacion {
+export function imputar(cargos: Mov[], pagos: Pago[], choferDe: (m: Mov) => string | number): Imputacion {
   const aplicaciones: Aplicacion[] = [];
   const cobrado = new Map<number, number>();
-  const saldoAFavor = new Map<string, number>();
+  const saldoAFavor = new Map<string | number, number>();
 
   // La deuda es del chofer, no del auto: si cambió de vehículo, lo que pague
   // tiene que poder cancelar lo que quedó debiendo en el anterior.
-  const cuentas = new Map<string, Cuenta>();
-  const cuenta = (d: string) => {
+  const cuentas = new Map<string | number, Cuenta>();
+  const cuenta = (d: string | number) => {
     let c = cuentas.get(d);
     if (!c) cuentas.set(d, (c = { cargos: [], pagos: [] }));
     return c;
   };
   for (const m of cargos) cuenta(choferDe(m)).cargos.push(m);
-  for (const p of pagos) cuenta(p.driver).pagos.push(p);
+  for (const p of pagos) cuenta(p.driverId != null ? p.driverId : p.driver).pagos.push(p);
 
   for (const [driver, c] of cuentas) {
     // El id desempata las fechas iguales para que la imputación sea estable:

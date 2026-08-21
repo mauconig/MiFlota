@@ -15,6 +15,10 @@ export interface CarRow {
   plate: string;
   model: string;
   year: number;
+  /** Identidad estable del chofer. Null = 'Sin chofer'. El nombre va aparte
+   *  en `driver` como copia para mostrar, pero la relación y la historia viajan
+   *  por acá: así un chofer conserva su historial aunque cambie de vehículo. */
+  driver_id: number | null;
   driver: string;
   cuota: number;
   estado: string;
@@ -47,6 +51,8 @@ export interface MovRow {
   /** Chofer al que corresponde el cobro. Null = usar el chofer actual del
    *  auto (movimientos viejos, o egresos que no llevan chofer). */
   driver: string | null;
+  /** Identidad estable del chofer (FK a drivers). Null = 'Sin chofer'. */
+  driver_id: number | null;
   /** Id del archivo en COMPROBANTES_DIR. Null = el movimiento no tiene adjunto. */
   comprobante: string | null;
   /** Nombre original, solo para mostrar y para la descarga. */
@@ -67,6 +73,9 @@ export interface PagoRow {
    *  es por chofer, porque la deuda lo sigue a él aunque cambie de vehículo. */
   car_id: string | null;
   driver: string;
+  /** Identidad estable del chofer (FK a drivers). Null en pagos migrados que no
+   *  pudieron resolverse a una fila de drivers. */
+  driver_id: number | null;
   fecha: string;
   monto: number;
   /** `pago` entró plata de verdad; `ajuste` cancela deuda sin caja (una
@@ -88,6 +97,8 @@ export interface ReporteRow {
   owner_id: number;
   car_id: string;
   driver: string;
+  /** Identidad estable del chofer (FK a drivers). */
+  driver_id: number | null;
   cat: string;
   urgencia: string;
   texto: string;
@@ -117,12 +128,31 @@ export function openDb() {
   db.pragma('foreign_keys = ON');
 
   db.exec(`
+    -- Identidad estable del chofer, separada del vehículo. Antes el nombre y
+    -- las credenciales vivían en cars; al cambiar de auto el chofer perdía
+    -- login e historia. Ahora la persona existe acá y el auto solo la
+    -- referencia, así conserva ambas al rotar de vehículo.
+    CREATE TABLE IF NOT EXISTS drivers (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner_id          INTEGER NOT NULL DEFAULT 0,
+      nombre            TEXT NOT NULL CHECK (length(nombre) > 0 AND length(nombre) <= 80),
+      estado            TEXT NOT NULL DEFAULT 'activo' CHECK (estado IN ('activo','baja')),
+      driver_username   TEXT,
+      driver_pass_hash  TEXT,
+      creado            TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_drivers_owner ON drivers(owner_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_drivers_username ON drivers(driver_username) WHERE driver_username IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_drivers_owner_nombre ON drivers(owner_id, nombre);
+
     CREATE TABLE IF NOT EXISTS cars (
       id                 TEXT PRIMARY KEY,
       owner_id           INTEGER NOT NULL DEFAULT 0,
       plate              TEXT NOT NULL,
       model              TEXT NOT NULL,
       year               INTEGER NOT NULL,
+      driver_id          INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
       driver             TEXT NOT NULL DEFAULT 'Sin chofer',
       cuota              INTEGER NOT NULL DEFAULT 0,
       estado             TEXT NOT NULL CHECK (estado IN ('activo','taller','baja')),
@@ -147,6 +177,7 @@ export function openDb() {
       cat         TEXT,
       estado      TEXT CHECK (estado IN ('pagado','pendiente','parcial')),
       driver      TEXT,
+      driver_id   INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
       comprobante        TEXT,
       comprobante_nombre TEXT,
       comprobante_tipo   TEXT
@@ -157,6 +188,7 @@ export function openDb() {
       owner_id INTEGER NOT NULL DEFAULT 0,
       car_id   TEXT REFERENCES cars(id) ON DELETE SET NULL,
       driver   TEXT NOT NULL,
+      driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
       fecha    TEXT NOT NULL,
       monto    INTEGER NOT NULL CHECK (monto > 0),
       tipo     TEXT NOT NULL DEFAULT 'pago' CHECK (tipo IN ('pago','ajuste')),
@@ -172,6 +204,7 @@ export function openDb() {
       owner_id INTEGER NOT NULL,
       car_id   TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
       driver   TEXT NOT NULL,
+      driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
       cat      TEXT NOT NULL,
       urgencia TEXT NOT NULL CHECK (urgencia IN ('puedo','urgente')),
       texto    TEXT NOT NULL,
@@ -232,6 +265,7 @@ export function openDb() {
  *  Las filas viejas quedan en 0, que no es de nadie, hasta que se reasignen. */
 function migrarOwner(db: Database.Database) {
   const cols = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
+  const tableExists = (t: string) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
   if (!cols('cars').includes('owner_id')) db.exec('ALTER TABLE cars ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0');
   if (!cols('movs').includes('owner_id')) db.exec('ALTER TABLE movs ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0');
   db.exec('CREATE INDEX IF NOT EXISTS idx_cars_owner ON cars(owner_id); CREATE INDEX IF NOT EXISTS idx_movs_owner ON movs(owner_id);');
@@ -356,6 +390,140 @@ function migrarOwner(db: Database.Database) {
       db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('cobrado_migrado', '1')").run();
     }).immediate();
   }
+
+  // Migración a la identidad estable de chofer (tabla `drivers`). Crea una fila
+  // por cada (owner_id, nombre) distinto que aparezca en la flota, mueve las
+  // credenciales que hoy viven en cars, y deja driver_id en cars/movs/pagos/
+  // reportes. Es idempotente y corre una sola vez.
+  const yaMigroDrivers = () => !!db.prepare("SELECT 1 FROM meta WHERE key = 'drivers_migrado_v1'").get();
+  if (!yaMigroDrivers()) {
+    db.transaction(() => {
+      if (yaMigroDrivers()) return;
+
+      // Columnas en tablas ya existentes. En una base nueva ya vienen en el
+      // CREATE del arranque, así que estos ALTER no hacen nada.
+      if (!cols('cars').includes('driver_id')) db.exec('ALTER TABLE cars ADD COLUMN driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL');
+      if (!cols('movs').includes('driver_id')) db.exec('ALTER TABLE movs ADD COLUMN driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL');
+      if (!cols('pagos').includes('driver_id')) db.exec('ALTER TABLE pagos ADD COLUMN driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL');
+      if (!cols('reportes_falla').includes('driver_id')) db.exec('ALTER TABLE reportes_falla ADD COLUMN driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL');
+
+      // Una fila de driver por (owner, nombre) que exista en cualquier tabla.
+      db.exec(`
+        INSERT OR IGNORE INTO drivers (owner_id, nombre, estado, creado)
+        SELECT owner_id, driver, 'activo', '1970-01-01'
+          FROM cars WHERE driver IS NOT NULL AND driver <> 'Sin chofer'
+        UNION
+        SELECT owner_id, driver, 'activo', '1970-01-01'
+          FROM movs WHERE driver IS NOT NULL AND driver <> 'Sin chofer'
+        UNION
+        SELECT owner_id, driver, 'activo', '1970-01-01'
+          FROM pagos WHERE driver IS NOT NULL AND driver <> 'Sin chofer'
+        UNION
+        SELECT owner_id, driver, 'activo', '1970-01-01'
+          FROM reportes_falla WHERE driver IS NOT NULL AND driver <> 'Sin chofer'
+      `);
+
+      // Las credenciales estaban en cars: se mueven a la fila de driver que
+      // corresponde (mismo dueño y nombre).
+      db.exec(`
+        UPDATE drivers SET
+          driver_username = COALESCE(driver_username, (
+            SELECT c.driver_username FROM cars c
+             WHERE c.owner_id = drivers.owner_id AND c.driver = drivers.nombre AND c.driver_username IS NOT NULL
+             LIMIT 1
+          )),
+          driver_pass_hash = COALESCE(driver_pass_hash, (
+            SELECT c.driver_pass_hash FROM cars c
+             WHERE c.owner_id = drivers.owner_id AND c.driver = drivers.nombre AND c.driver_pass_hash IS NOT NULL
+             LIMIT 1
+          ))
+        WHERE driver_username IS NULL OR driver_pass_hash IS NULL
+      `);
+
+      // cars.driver_id: el chofer actual del auto.
+      db.exec(`
+        UPDATE cars SET driver_id = (
+          SELECT d.id FROM drivers d WHERE d.owner_id = cars.owner_id AND d.nombre = cars.driver
+        ) WHERE cars.driver <> 'Sin chofer' AND cars.driver_id IS NULL
+      `);
+
+      db.exec(`
+        UPDATE movs SET driver_id = (
+          SELECT d.id FROM drivers d WHERE d.owner_id = movs.owner_id AND d.nombre = movs.driver
+        ) WHERE movs.driver IS NOT NULL AND movs.driver_id IS NULL
+      `);
+      db.exec(`
+        UPDATE movs SET driver_id = (
+          SELECT driver_id FROM cars c WHERE c.id = movs.car_id
+        ) WHERE movs.driver IS NULL AND movs.driver_id IS NULL
+      `);
+
+      // pagos/reportes: siempre traen nombre, así que basta cruzar por él.
+      db.exec(`
+        UPDATE pagos SET driver_id = (
+          SELECT d.id FROM drivers d WHERE d.owner_id = pagos.owner_id AND d.nombre = pagos.driver
+        ) WHERE pagos.driver_id IS NULL
+      `);
+      db.exec(`
+        UPDATE reportes_falla SET driver_id = (
+          SELECT d.id FROM drivers d WHERE d.owner_id = reportes_falla.owner_id AND d.nombre = reportes_falla.driver
+        ) WHERE reportes_falla.driver_id IS NULL
+      `);
+
+      // chofer_sessions: se re-keyea de car_id a driver_id para que la sesión
+      // sobreviva a un cambio de auto. La tabla la crea `migrarAuthChofer`
+      // (que corre después de este bloque, en index.ts), ya con la columna
+      // driver_id: por eso el re-key solo aplica si la tabla ya existía.
+      if (tableExists('chofer_sessions') && !cols('chofer_sessions').includes('driver_id')) {
+        db.exec('ALTER TABLE chofer_sessions ADD COLUMN driver_id INTEGER REFERENCES drivers(id) ON DELETE CASCADE');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_chofer_sessions_driver ON chofer_sessions(driver_id)');
+        // Re-key de car_id a driver_id: la sesión sigue a la persona, no al auto.
+        db.exec(`
+          UPDATE chofer_sessions SET driver_id = (
+            SELECT c.driver_id FROM cars c WHERE c.id = chofer_sessions.car_id
+          ) WHERE chofer_sessions.driver_id IS NULL
+        `);
+      }
+
+      // Las columnas de credenciales ya no viven en cars. El índice parcial
+      // depende de driver_username, así que se suelta antes de la columna: en
+      // SQLite 3.35+ (better-sqlite3 v12) borrar la columna primero intenta
+      // reconstruir el índice y falla con "no such column".
+      db.exec('DROP INDEX IF EXISTS idx_cars_driver_username');
+      if (cols('cars').includes('driver_username')) db.exec('ALTER TABLE cars DROP COLUMN driver_username');
+      if (cols('cars').includes('driver_pass_hash')) db.exec('ALTER TABLE cars DROP COLUMN driver_pass_hash');
+
+      db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('drivers_migrado_v1', '1')").run();
+    }).immediate();
+  }
+
+  // La sesión de chofer ahora se keyea por driver_id (sigue a la persona, no al
+  // auto), así que la columna `car_id` de `chofer_sessions` quedó de más y con
+  // NOT NULL impedía crear sesiones con el nuevo `crearSesionChofer`. Se suelta
+  // acá, en una bandera aparte de `drivers_migrado_v1` (que ya corrió en las
+  // bases existentes), para no tener que re-ejecutar toda aquella migración.
+  const yaDropsCar = () => !!db.prepare("SELECT 1 FROM meta WHERE key = 'chofer_sessions_car_drop_v1'").get();
+  if (!yaDropsCar()) {
+    db.transaction(() => {
+      if (yaDropsCar()) return;
+      if (tableExists('chofer_sessions') && cols('chofer_sessions').includes('car_id')) {
+        db.exec('DROP INDEX IF EXISTS idx_chofer_sessions_car');
+        db.exec('ALTER TABLE chofer_sessions DROP COLUMN car_id');
+      }
+      db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('chofer_sessions_car_drop_v1', '1')").run();
+    }).immediate();
+  }
+}
+
+/** Crea (si hace falta) y devuelve el id del chofer de un dueño dado su nombre.
+ *  Idempotente gracias al índice único (owner_id, nombre). */
+export function ensureDriver(db: Database.Database, ownerId: number, nombre: string): number {
+  db.prepare("INSERT OR IGNORE INTO drivers (owner_id, nombre, estado, creado) VALUES (?, ?, 'activo', ?)").run(
+    ownerId,
+    nombre,
+    new Date().toISOString(),
+  );
+  return (db.prepare('SELECT id FROM drivers WHERE owner_id = ? AND nombre = ?').get(ownerId, nombre) as { id: number }).id;
 }
 
 /** Reasigna toda la flota huérfana (owner_id = 0) a un usuario. */
@@ -376,28 +544,40 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
   const idDe = (carId: string) => `u${ownerId}${carId}`;
 
   const insCar = db.prepare(`
-    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, gps_tag, service_cada, service_unidad, last_service_date, seguro_date, seguro_costo, seguro_periodo, seguro_cada)
-    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @gps_tag, @service_cada, @service_unidad, @last_service_date, @seguro_date, @seguro_costo, @seguro_periodo, @seguro_cada)
+    INSERT INTO cars (id, owner_id, plate, model, year, driver_id, driver, cuota, estado, gps_tag, service_cada, service_unidad, last_service_date, seguro_date, seguro_costo, seguro_periodo, seguro_cada)
+    VALUES (@id, @owner_id, @plate, @model, @year, @driver_id, @driver, @cuota, @estado, @gps_tag, @service_cada, @service_unidad, @last_service_date, @seguro_date, @seguro_costo, @seguro_periodo, @seguro_cada)
   `);
   const insMov = db.prepare(`
-    INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, driver)
-    VALUES (@owner_id, @car_id, @type, @amount, @date, @descripcion, @cat, @estado, @driver)
+    INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, driver, driver_id)
+    VALUES (@owner_id, @car_id, @type, @amount, @date, @descripcion, @cat, @estado, @driver, @driver_id)
   `);
   // Lo que el generador marca como cobrado entra como pago con la fecha de la
   // cuota: es la flota de demostración, donde cada cuota se pagó en el día.
   const insPago = db.prepare(`
-    INSERT INTO pagos (owner_id, car_id, driver, fecha, monto, tipo)
-    VALUES (@owner_id, @car_id, @driver, @fecha, @monto, 'pago')
+    INSERT INTO pagos (owner_id, car_id, driver, driver_id, fecha, monto, tipo)
+    VALUES (@owner_id, @car_id, @driver, @driver_id, @fecha, @monto, 'pago')
   `);
 
   db.transaction(() => {
+    const driverDe = new Map<string, number>();
+    const driverId = (nombre: string) => {
+      let id = driverDe.get(nombre);
+      if (id === undefined) {
+        id = ensureDriver(db, ownerId, nombre);
+        driverDe.set(nombre, id);
+      }
+      return id;
+    };
+
     for (const c of cars) {
+      const did = c.driver === 'Sin chofer' ? null : driverId(c.driver);
       insCar.run({
         id: idDe(c.id),
         owner_id: ownerId,
         plate: c.plate,
         model: c.model,
         year: c.year,
+        driver_id: did,
         driver: c.driver,
         cuota: c.cuota,
         estado: c.estado,
@@ -412,6 +592,8 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
       });
     }
     for (const m of movs) {
+      const nombre = m.driver ?? 'Sin chofer';
+      const did = m.driver ? driverId(nombre) : null;
       insMov.run({
         owner_id: ownerId,
         car_id: idDe(m.carId),
@@ -422,12 +604,14 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
         cat: m.cat ?? null,
         estado: m.estado ?? null,
         driver: m.driver ?? null,
+        driver_id: did,
       });
       if (m.cobrado) {
         insPago.run({
           owner_id: ownerId,
           car_id: idDe(m.carId),
-          driver: m.driver ?? 'Sin chofer',
+          driver: nombre,
+          driver_id: did,
           fecha: iso(m.date),
           monto: m.cobrado,
         });
@@ -446,6 +630,7 @@ export function carToJson(r: CarRow) {
     model: r.model,
     year: r.year,
     driver: r.driver,
+    driverId: r.driver_id ?? null,
     cuota: r.cuota,
     estado: r.estado,
     gpsTag: r.gps_tag,
@@ -470,6 +655,7 @@ export function movToJson(r: MovRow) {
     ...(r.cat ? { cat: r.cat } : {}),
     ...(r.estado ? { estado: r.estado } : {}),
     ...(r.driver ? { driver: r.driver } : {}),
+    ...(r.driver_id != null ? { driverId: r.driver_id } : {}),
     // El cliente nunca ve la ruta del archivo, solo si hay uno y cómo se llama.
     ...(r.comprobante ? { comprobante: { id: r.comprobante, nombre: r.comprobante_nombre ?? 'comprobante', tipo: r.comprobante_tipo ?? '' } } : {}),
   };
@@ -480,6 +666,7 @@ export function pagoToJson(r: PagoRow) {
     id: r.id,
     carId: r.car_id,
     driver: r.driver,
+    driverId: r.driver_id ?? null,
     fecha: r.fecha,
     monto: r.monto,
     tipo: r.tipo,
@@ -494,6 +681,7 @@ export function reporteToJson(r: ReporteRow) {
     id: r.id,
     carId: r.car_id,
     driver: r.driver,
+    driverId: r.driver_id ?? null,
     cat: r.cat,
     urgencia: r.urgencia,
     texto: r.texto,
