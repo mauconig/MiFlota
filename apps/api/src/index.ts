@@ -141,12 +141,16 @@ app.post<{ Body: { usuario?: string; password?: string } }>('/api/login', async 
   const { token, maxAge } = crearSesion(db, fila!.id, ctxAuth(req));
   registrarAuth(db, 'login_ok', fila!.usuario, ctxAuth(req));
   reply.setCookie(COOKIE, token, { ...cookieOpts, maxAge });
-  return { usuario: fila!.usuario, nombre: fila!.nombre };
+  // El token también va en el cuerpo: admin-mobile lo guarda en SecureStore y
+  // lo manda como Bearer (la cookie de RN no sobrevive un reinicio de la app).
+  // El navegador lo ignora: sigue usando la cookie httpOnly.
+  return { usuario: fila!.usuario, nombre: fila!.nombre, token };
 });
 
 app.post('/api/logout', async (req, reply) => {
-  const u = usuarioDeSesion(db, req.cookies[COOKIE]);
-  borrarSesion(db, req.cookies[COOKIE]);
+  const token = tokenDueno(req);
+  const u = usuarioDeSesion(db, token);
+  borrarSesion(db, token);
   if (u) registrarAuth(db, 'logout', u.usuario, ctxAuth(req));
   reply.clearCookie(COOKIE, cookieOpts);
   return { ok: true };
@@ -190,7 +194,7 @@ app.delete<{ Params: { id: string } }>('/api/choferes/:id/sesion', async (req, r
 });
 
 app.get('/api/me', async (req) => {
-  const u = usuarioDeSesion(db, req.cookies[COOKIE]);
+  const u = usuarioDeSesion(db, tokenDueno(req));
   return u
     ? { autenticado: true, usuario: u.usuario, nombre: u.nombre, rol: u.rol, estado: u.estado }
     : { autenticado: false };
@@ -213,7 +217,16 @@ const selLocations = db.prepare(`
 `);
 
 /** El preHandler ya rechazó las peticiones sin sesión, así que acá siempre hay usuario. */
-const quien = (req: { cookies: Record<string, string | undefined> }) => usuarioDeSesion(db, req.cookies[COOKIE])!;
+/** Token de dueño del pedido: la cookie del navegador o, en admin-mobile, el
+ *  bearer que la app guarda en SecureStore (misma tabla de sesiones para
+ *  ambos: revocar desde un lado cierra los dos). */
+const tokenDueno = (req: { cookies: Record<string, string | undefined>; headers: { authorization?: string | string[] } }): string | undefined => {
+  const auth = Array.isArray(req.headers.authorization) ? req.headers.authorization[0] : req.headers.authorization;
+  if (auth?.startsWith('Bearer ')) return auth.slice('Bearer '.length).trim();
+  return req.cookies[COOKIE];
+};
+
+const quien = (req: { cookies: Record<string, string | undefined>; headers: { authorization?: string | string[] } }) => usuarioDeSesion(db, tokenDueno(req))!;
 
 app.get('/api/health', async () => ({ ok: true, db: DB_PATH }));
 
@@ -306,13 +319,13 @@ app.post<{ Body: AssistantQueryBody }>('/api/assistant/query', async (req, reply
   assistantInFlight.add(u.id);
   try {
     return await answerAssistant(question, history, snapshot, {
-      apiKey: process.env.DEEPSEEK_API_KEY,
-      baseUrl: process.env.DEEPSEEK_BASE_URL,
-      model: process.env.DEEPSEEK_MODEL,
+      apiKey: process.env.OPENROUTER_API_KEY,
+      baseUrl: process.env.OPENROUTER_BASE_URL,
+      model: process.env.OPENROUTER_MODEL,
       signal: controller.signal,
     });
   } catch (error) {
-    req.log.warn({ error }, 'falló la consulta a DeepSeek');
+    req.log.warn({ error }, 'falló la consulta a OpenRouter');
     return unavailableAssistantReply(snapshot);
   } finally {
     clearTimeout(timeout);

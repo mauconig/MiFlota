@@ -50,12 +50,13 @@ datos reales.
 
 El botón de asistente consulta `POST /api/assistant/query`. La API calcula
 deudas, cobros, gastos y rentabilidad directamente sobre la flota del usuario;
-DeepSeek solo interpreta y redacta consultas que no cubren esos cálculos
+OpenRouter solo interpreta y redacta consultas que no cubren esos cálculos
 directos. Nunca se le da acceso a SQL ni se envían credenciales, sesiones, GPS
 o comprobantes.
 
-Para habilitar preguntas libres, completá `DEEPSEEK_API_KEY=` en el `.env` de
-la raíz. El modelo predeterminado es `deepseek-v4-flash`. `npm --prefix
+Para habilitar preguntas libres, completá `OPENROUTER_API_KEY=` en el `.env` de
+la raíz. El modelo predeterminado es
+`cognitivecomputations/dolphin-mistral-24b-venice-edition`. `npm --prefix
 apps/api start` carga ese archivo automáticamente; Docker Compose propaga las
 mismas variables al contenedor. Las consultas directas sugeridas en la pantalla
 funcionan aun con la clave vacía.

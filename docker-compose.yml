@@ -21,9 +21,9 @@ services:
       MIFLOTA_ADMIN_PASSWORD: ${MIFLOTA_ADMIN_PASSWORD:?falta MIFLOTA_ADMIN_PASSWORD en .env}
       MIFLOTA_ADMIN_NOMBRE: ${MIFLOTA_ADMIN_NOMBRE:-Dueño}
       # La clave queda del lado del servidor; los clientes nunca la reciben.
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
-      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-cognitivecomputations/dolphin-mistral-24b-venice-edition}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
 
 volumes:
   miflota-data:

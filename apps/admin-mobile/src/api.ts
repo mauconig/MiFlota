@@ -28,16 +28,36 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
   // que la ruta llegue a ejecutarse. Con FormData tampoco se declara: lo pone
   // el navegador, que es el único que sabe el separador que va a usar.
   const headers = init?.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : undefined;
+  // La sesión viaja como Bearer (token en SecureStore), no como cookie: las
+  // cookies de React Native no sobreviven un reinicio de la app, y así el
+  // token usa exactamente el mismo camino que el de la app del chofer.
+  const authHeaders = authToken ? { Authorization: `Bearer ${authToken}` } : {};
   // A diferencia del browser, React Native no tiene un origin de página contra
   // el que resolver una URL relativa: sin este prefijo, `/api/...` termina
   // pegándole al propio servidor de Metro en vez de a la API.
-  const res = await fetch(API_BASE + url, { credentials: 'same-origin', ...init, headers: { ...headers, ...init?.headers } });
+  const res = await fetch(API_BASE + url, { ...init, headers: { ...headers, ...authHeaders, ...init?.headers } });
   if (!res.ok) {
     const cuerpo = await res.json().catch(() => null);
     const msg = (cuerpo as { error?: string } | null)?.error ?? `Error ${res.status}`;
     throw res.status === 401 ? new SinSesion(msg) : new Error(msg);
   }
   return res.json() as Promise<T>;
+}
+
+/** Token de sesión del dueño. Vive en memoria para los pedidos y en
+ *  SecureStore para sobrevivir reinicios de la app. */
+const TOKEN_KEY = 'miflota_admin_token';
+let authToken: string | null = null;
+
+async function guardarToken(token: string | null): Promise<void> {
+  authToken = token;
+  try {
+    if (token) await SecureStore.setItemAsync(TOKEN_KEY, token);
+    else await SecureStore.deleteItemAsync(TOKEN_KEY);
+  } catch {
+    // Sin SecureStore (web/Expo Go viejo), la sesión simplemente no persiste
+    // entre reinicios: no es motivo para romper el login.
+  }
 }
 
 export interface Sesion {
@@ -78,25 +98,44 @@ export function clearPersistedPushToken(): Promise<void> {
   return SecureStore.deleteItemAsync('miflota_admin_push_token');
 }
 
-/** Sesión de la app. La cookie es httpOnly, así que el cliente nunca ve el
- *  token: solo le pregunta al servidor si sigue siendo válida. */
+/** Sesión de la app. El token viene del login (el server lo devuelve en el
+ *  cuerpo además de la cookie), se guarda en SecureStore y viaja como Bearer.
+ *  Al arrancar se intenta restaurar: si el token ya no sirve, cae al login. */
 export function useAuth(): Auth {
   const [sesion, setSesion] = useState<Sesion | null>(null);
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
     let vivo = true;
-    req<{ autenticado: boolean; usuario?: string; nombre?: string }>('/api/me')
-      .then((m) => vivo && setSesion(m.autenticado ? { usuario: m.usuario!, nombre: m.nombre! } : null))
-      .catch(() => vivo && setSesion(null))
-      .finally(() => vivo && setCargando(false));
+    (async () => {
+      const guardado = await SecureStore.getItemAsync(TOKEN_KEY).catch(() => null);
+      if (guardado) authToken = guardado;
+      try {
+        const m = await req<{ autenticado: boolean; usuario?: string; nombre?: string }>('/api/me');
+        if (!vivo) return;
+        if (m.autenticado) setSesion({ usuario: m.usuario!, nombre: m.nombre! });
+        else await guardarToken(null);
+      } catch {
+        if (vivo) {
+          await guardarToken(null);
+          setSesion(null);
+        }
+      } finally {
+        if (vivo) setCargando(false);
+      }
+    })();
     return () => {
       vivo = false;
     };
   }, []);
 
   const entrar = useCallback(async (usuario: string, password: string) => {
-    setSesion(await req<Sesion>('/api/login', { method: 'POST', body: JSON.stringify({ usuario, password }) }));
+    // La cookie que el server también manda es irrelevante acá: la sesión de
+    // esta app va por Bearer.
+    const r = await req<Sesion & { token?: string }>('/api/login', { method: 'POST', body: JSON.stringify({ usuario, password }) });
+    if (!r.token) throw new Error('El servidor no devolvió token de sesión');
+    await guardarToken(r.token);
+    setSesion({ usuario: r.usuario, nombre: r.nombre });
   }, []);
 
   const salir = useCallback(async () => {
@@ -105,7 +144,10 @@ export function useAuth(): Auth {
       await unregisterAdminPushToken(pushToken).catch(() => {});
       await clearPersistedPushToken().catch(() => {});
     }
+    // Logout con el bearer puesto para que el server borre ESTA sesión; recién
+    // después se limpia el token local.
     await req('/api/logout', { method: 'POST' }).catch(() => {});
+    await guardarToken(null);
     setSesion(null);
   }, []);
 
@@ -177,7 +219,7 @@ export interface AssistantReply {
   table?: AssistantTable;
   filters?: AssistantFilter[];
   asOf: string;
-  mode: 'local' | 'deepseek' | 'fallback';
+  mode: 'local' | 'openrouter' | 'fallback';
   notice?: string;
 }
 
