@@ -83,7 +83,7 @@ export interface Pago {
 // un frame de teléfono, no un dashboard de pestañas siempre montadas como
 // admin-web, así que este estado no se parece al `UIState` de ahí.
 
-export type Screen = 'dashboard' | 'flota' | 'detalle' | 'nuevoVehiculo' | 'registrar' | 'reportes' | 'ranking' | 'assistant';
+export type Screen = 'dashboard' | 'flota' | 'detalle' | 'nuevoVehiculo' | 'registrar' | 'reportes' | 'ranking' | 'assistant' | 'perfil';
 export type Period = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
 export type RegistrarTab = 'cobro' | 'gasto';
 
@@ -172,4 +172,13 @@ export interface MobileState {
   toast: string;
   fleetFilter: FleetFilter;
   rankBy: RankBy;
+  /** Formulario de cambio de contraseña de la pantalla Perfil. */
+  perfil: PerfilForm;
+}
+
+export interface PerfilForm {
+  actual: string;
+  nueva: string;
+  repetir: string;
+  guardando: boolean;
 }

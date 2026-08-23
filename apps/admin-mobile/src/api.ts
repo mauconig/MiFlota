@@ -70,6 +70,9 @@ export interface Auth {
   cargando: boolean;
   entrar: (usuario: string, password: string) => Promise<void>;
   salir: () => Promise<void>;
+  /** Cambia la contraseña del dueño. El servidor cierra las sesiones de los
+   *  otros dispositivos; la actual queda activa. */
+  cambiarPassword: (actual: string, nueva: string) => Promise<void>;
 }
 
 export function registerAdminPushToken(token: string, platform: string): Promise<{ ok: true }> {
@@ -151,7 +154,11 @@ export function useAuth(): Auth {
     setSesion(null);
   }, []);
 
-  return { sesion, cargando, entrar, salir };
+  const cambiarPassword = useCallback(async (actual: string, nueva: string) => {
+    await req<{ ok: true }>('/api/me/password', { method: 'POST', body: JSON.stringify({ actual, nueva }) });
+  }, []);
+
+  return { sesion, cargando, entrar, salir, cambiarPassword };
 }
 
 export interface NuevoCarPayload {

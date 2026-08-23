@@ -42,30 +42,32 @@ export default function App() {
     );
   }
 
-  return <AuthedApp nombre={auth.sesion.nombre} onLogout={auth.salir} state={state} update={update} store={store} />;
+return <AuthedApp sesion={auth.sesion} onLogout={auth.salir} cambiarPassword={auth.cambiarPassword} state={state} update={update} store={store} />;
 }
 
 function AuthedApp({
-  nombre,
+  sesion,
   onLogout,
+  cambiarPassword,
   state,
   update,
   store,
 }: {
-  nombre: string;
+  sesion: { usuario: string; nombre: string };
   onLogout: () => void | Promise<void>;
+  cambiarPassword: (actual: string, nueva: string) => Promise<void>;
   state: MobileState;
   update: (patch: Partial<MobileState> | ((s: MobileState) => Partial<MobileState>)) => void;
   store: FleetStore;
 }) {
-  const v = useMobileView(store.cars, store.movs, store.pagos, state, update, store);
+  const v = useMobileView(store.cars, store.movs, store.pagos, state, update, store, cambiarPassword);
   if (store.cargando) return <Spinner />;
   return (
     // Sin el borde "bottom": ese inset lo absorbe BottomNav (su fondo tiene
     // que llegar hasta el borde real de la pantalla), no un padding en blanco
     // acá arriba de él — si los dos lo reservaran, quedaba un hueco doble.
     <SafeAreaView style={{ flex: 1, backgroundColor: '#f4f0e8' }} edges={['top', 'left', 'right']}>
-      <Shell v={v} nombre={nombre} onLogout={onLogout} />
+      <Shell v={v} nombre={sesion.nombre} usuario={sesion.usuario} onLogout={onLogout} />
     </SafeAreaView>
   );
 }

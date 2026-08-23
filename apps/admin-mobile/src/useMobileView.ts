@@ -165,6 +165,7 @@ export function initialMobileState(): MobileState {
     toast: '',
     fleetFilter: 'todos',
     rankBy: 'auto',
+    perfil: { actual: '', nueva: '', repetir: '', guardando: false },
   };
 }
 
@@ -268,6 +269,7 @@ export interface MobileView {
   goNuevoVehiculo: () => void;
   goRegistrarCobro: (carId?: string) => void;
   goRegistrarGasto: (carId?: string) => void;
+  goPerfil: () => void;
 
   hide: boolean;
 
@@ -427,6 +429,17 @@ export interface MobileView {
     desvincular: () => void;
   };
 
+  perfil: {
+    actual: string;
+    setActual: (v: string) => void;
+    nueva: string;
+    setNueva: (v: string) => void;
+    repetir: string;
+    setRepetir: (v: string) => void;
+    guardando: boolean;
+    guardar: () => void;
+  };
+
   toast: string;
 }
 
@@ -437,6 +450,7 @@ export function useMobileView(
   state: MobileState,
   update: (patch: Partial<MobileState> | ((s: MobileState) => Partial<MobileState>)) => void,
   persist: Pick<FleetStore, 'patchCar' | 'previewDriverCredentials' | 'assignDriver' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller'>,
+  cambiarPassword: (actual: string, nueva: string) => Promise<void>,
 ): MobileView {
   const toast = (msg: string) => update({ toast: msg });
   useEffect(() => {
@@ -953,10 +967,11 @@ export function useMobileView(
     nuevoVehiculo: ['Nuevo vehículo', ''],
     registrar: [f?.tab === 'gasto' ? 'Registrar gasto' : 'Registrar cobro', ''],
     assistant: ['MiFlota IA', ''],
+    perfil: ['Perfil', ''],
   };
 
   const isTab = ['dashboard', 'flota', 'ranking', 'reportes'].includes(state.screen);
-  const isSub = ['detalle', 'nuevoVehiculo', 'registrar'].includes(state.screen);
+  const isSub = ['detalle', 'nuevoVehiculo', 'registrar', 'perfil'].includes(state.screen);
   const isAssistant = state.screen === 'assistant';
 
   return {
@@ -978,6 +993,7 @@ export function useMobileView(
       push('nuevoVehiculo', { carId: null, nuevoVehiculo: blankNuevoVehiculo(), nuevoVehiculoConfirm: false, nuevoVehiculoGuardando: false }),
     goRegistrarCobro,
     goRegistrarGasto,
+    goPerfil: () => push('perfil', { perfil: { actual: '', nueva: '', repetir: '', guardando: false } }),
     hide: false,
 
     period: {
@@ -1232,6 +1248,33 @@ export function useMobileView(
         persist.patchCar(car.id, { driver: 'Sin chofer', cuota: 0 });
         update({ choferSheet: false, choferCredentials: null, choferCredentialsLoading: false });
         toast('Chofer desvinculado');
+      },
+    },
+
+    perfil: {
+      actual: state.perfil.actual,
+      setActual: (v) => update((s) => ({ perfil: { ...s.perfil, actual: v } })),
+      nueva: state.perfil.nueva,
+      setNueva: (v) => update((s) => ({ perfil: { ...s.perfil, nueva: v } })),
+      repetir: state.perfil.repetir,
+      setRepetir: (v) => update((s) => ({ perfil: { ...s.perfil, repetir: v } })),
+      guardando: state.perfil.guardando,
+      guardar: () => {
+        const p = state.perfil;
+        if (p.guardando) return;
+        if (!p.actual) return toast('Ingresá tu contraseña actual');
+        if (p.nueva.length < 12) return toast('La contraseña nueva debe tener al menos 12 caracteres');
+        if (p.nueva !== p.repetir) return toast('La contraseña nueva no coincide en los dos campos');
+        update((s) => ({ perfil: { ...s.perfil, guardando: true } }));
+        cambiarPassword(p.actual, p.nueva)
+          .then(() => {
+            update({ perfil: { actual: '', nueva: '', repetir: '', guardando: false } });
+            toast('Contraseña actualizada');
+          })
+          .catch((e: Error) => {
+            update((s) => ({ perfil: { ...s.perfil, guardando: false } }));
+            toast('No se pudo cambiar: ' + e.message);
+          });
       },
     },
 

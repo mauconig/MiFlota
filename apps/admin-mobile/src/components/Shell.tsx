@@ -14,8 +14,9 @@ import { Registrar } from '../screens/registrar/Registrar';
 import { Reportes } from '../screens/Reportes';
 import { Ranking } from '../screens/Ranking';
 import { Assistant } from '../screens/Assistant';
+import { Perfil } from '../screens/Perfil';
 
-export function Shell({ v, nombre, onLogout }: { v: MobileView; nombre: string; onLogout: () => void }) {
+export function Shell({ v, nombre, usuario, onLogout }: { v: MobileView; nombre: string; usuario: string; onLogout: () => void }) {
   return (
     // BottomNav queda AFUERA del KeyboardAvoidingView a propósito: si quedara
     // adentro, cualquier hueco en que se trabe el padding del teclado (pasó
@@ -24,7 +25,7 @@ export function Shell({ v, nombre, onLogout }: { v: MobileView; nombre: string; 
     // lo puede mover — solo el contenido de arriba se corre para el teclado.
     <View style={{ flex: 1, backgroundColor: '#f4f0e8' }}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
-        {v.isTab && <TabHeader title={v.headerTitle} sub={v.headerSub} onAssistant={v.openAssistant} onProfile={onLogout} nombre={nombre} />}
+        {v.isTab && <TabHeader title={v.headerTitle} sub={v.headerSub} onAssistant={v.openAssistant} onProfile={v.goPerfil} nombre={nombre} />}
         {v.isSub && <SubHeader title={v.headerTitle} onBack={v.back} />}
         {v.isAssistant && <SubHeader title={v.headerTitle} onBack={v.back} />}
 
@@ -41,6 +42,7 @@ export function Shell({ v, nombre, onLogout }: { v: MobileView; nombre: string; 
             {v.screen === 'registrar' && <Registrar v={v} />}
             {v.screen === 'reportes' && <Reportes v={v} />}
             {v.screen === 'ranking' && <Ranking v={v} />}
+            {v.screen === 'perfil' && <Perfil v={v} nombre={nombre} usuario={usuario} onLogout={onLogout} />}
           </ScrollView>
         )}
       </KeyboardAvoidingView>

@@ -200,6 +200,28 @@ app.get('/api/me', async (req) => {
     : { autenticado: false };
 });
 
+/** Cambio de contraseña del dueño desde el panel. Pide la actual para que un
+ *  teléfono perdido no sirva para secuestrar la cuenta, y al confirmar cierra
+ *  las sesiones de los otros dispositivos (la actual queda activa). */
+app.post<{ Body: { actual?: string; nueva?: string } }>('/api/me/password', async (req, reply) => {
+  const u = quien(req);
+  const actual = String(req.body?.actual ?? '');
+  const nueva = String(req.body?.nueva ?? '');
+  if (!actual || !nueva) return reply.code(400).send({ error: 'Completá la contraseña actual y la nueva' });
+  if (nueva.length < 12) return reply.code(400).send({ error: 'La contraseña nueva debe tener al menos 12 caracteres' });
+
+  const fila = db.prepare('SELECT pass_hash FROM users WHERE id = ?').get(u.id) as { pass_hash: string };
+  if (!(await verifyPassword(actual, fila.pass_hash))) {
+    registrarAuth(db, 'password_cambio_fallo', u.usuario, ctxAuth(req));
+    return reply.code(401).send({ error: 'La contraseña actual es incorrecta' });
+  }
+
+  db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(await hashPassword(nueva), u.id);
+  const cerradas = revocarOtrasSesiones(db, u.id, tokenDueno(req));
+  registrarAuth(db, 'password_cambio', u.usuario, { ...ctxAuth(req), detalle: `sesiones cerradas: ${cerradas}` });
+  return { ok: true, sesionesCerradas: cerradas };
+});
+
 /* ------------------------------- API ------------------------------- */
 
 // Toda lectura y escritura de flota lleva el owner en el WHERE: es lo único que
