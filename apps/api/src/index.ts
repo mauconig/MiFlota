@@ -3,7 +3,7 @@ import fastifyStatic from '@fastify/static';
 import fastifyCookie from '@fastify/cookie';
 import fastifyMultipart from '@fastify/multipart';
 import { createReadStream, existsSync } from 'node:fs';
-import { rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -40,8 +40,10 @@ import {
   quienChofer,
 } from './authChofer.js';
 import { imputar } from './cobranza.js';
-import { answerAssistant, buildAssistantSnapshot, unavailableAssistantReply, type AssistantHistoryItem } from './assistant.js';
+import { answerAssistant, buildAssistantSnapshot, unavailableAssistantReply, type AssistantFile, type AssistantHistoryItem, type AssistantReportRequest } from './assistant.js';
 import { sendOwnerPush } from './push.js';
+import * as XLSX from 'xlsx';
+import PDFDocument from 'pdfkit';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = process.env.MIFLOTA_PUBLIC ?? join(HERE, '..', 'public');
@@ -53,6 +55,16 @@ const PORT = Number(process.env.PORT ?? 3000);
  *  no se define y manda el reloj real. */
 const hoyISO = () => process.env.MIFLOTA_HOY ?? new Date().toISOString().slice(0, 10);
 const diasEntreISO = (desde: string | null, hasta = hoyISO()) => (desde ? Math.floor((Date.parse(`${hasta}T12:00:00Z`) - Date.parse(`${desde}T12:00:00Z`)) / 86400000) : Number.POSITIVE_INFINITY);
+const ASSISTANT_REPORTS_DIR = process.env.MIFLOTA_ASSISTANT_REPORTS ?? join(dirname(DB_PATH), 'assistant-reports');
+await mkdir(ASSISTANT_REPORTS_DIR, { recursive: true });
+
+interface AssistantReportFileRecord extends AssistantFile {
+  path: string;
+  ownerId: number;
+  expiresAt: number;
+}
+
+const assistantReportFiles = new Map<string, AssistantReportFileRecord>();
 
 const db = openDb();
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
@@ -103,6 +115,9 @@ app.addHook('preHandler', async (req, reply) => {
   // El chofer no tiene sesión de dueño: estas rutas validan su propio Bearer
   // token adentro, con quienChofer(), en vez de la cookie de acá.
   if (req.url.startsWith('/api/chofer/')) return;
+  // Los archivos de reportes llevan un token aleatorio con vencimiento propio;
+  // eso permite abrirlos desde el navegador del teléfono sin copiar la sesión.
+  if (req.url.startsWith('/api/assistant/files/')) return;
   if (ABIERTAS.has(req.url.split('?')[0])) return;
   if (!usuarioDeSesion(db, tokenDueno(req))) return reply.code(401).send({ error: 'Sesión requerida' });
 });
@@ -250,6 +265,96 @@ const selLocations = db.prepare(`
 `);
 
 /** El preHandler ya rechazó las peticiones sin sesión, así que acá siempre hay usuario. */
+function isoOffset(iso: string, days: number): string {
+  const date = new Date(`${iso}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function reportRange(period: AssistantReportRequest['period'], to: string): string | null {
+  if (period === 'week') return isoOffset(to, -6);
+  if (period === 'month') return `${to.slice(0, 7)}-01`;
+  return null;
+}
+
+function reportMoney(value: number): string {
+  return '₲ ' + new Intl.NumberFormat('es-PY').format(Math.round(value));
+}
+
+async function pdfFromLines(lines: string[]): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margin: 42 });
+    const chunks: Buffer[] = [];
+    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+    doc.fontSize(18).text('MiFlota');
+    doc.moveDown(0.4);
+    doc.fontSize(10).fillColor('#6b665c');
+    lines.forEach((line) => {
+      if (doc.y > 760) doc.addPage();
+      doc.text(line, { width: 510 });
+    });
+    doc.end();
+  });
+}
+
+async function createAssistantReport(ownerId: number, request: AssistantReportRequest): Promise<AssistantFile> {
+  const to = hoyISO();
+  const from = reportRange(request.period, to);
+  const cars = selCars.all(ownerId) as CarRow[];
+  const carById = new Map(cars.map((car) => [car.id, car]));
+  const movements = (selMovs.all(ownerId) as MovRow[]).filter((mov) => {
+    if (mov.type !== 'egreso' || mov.date > to || (from && mov.date < from)) return false;
+    const car = carById.get(mov.car_id);
+    if (request.vehicle && !car?.plate.toUpperCase().includes(request.vehicle.toUpperCase())) return false;
+    if (request.category && (mov.cat ?? 'Otro').toLowerCase() !== request.category.toLowerCase()) return false;
+    return true;
+  });
+  const rows = movements.map((mov) => {
+    const car = carById.get(mov.car_id);
+    const items = selItems.all(mov.id) as GastoItemRow[];
+    const repuestos = items.reduce((sum, item) => sum + item.subtotal, 0);
+    return {
+      fecha: mov.date,
+      vehiculo: car?.plate ?? 'Vehículo eliminado',
+      categoria: mov.cat ?? 'Otro',
+      detalle: mov.descripcion,
+      repuestos,
+      manoObra: mov.mano_obra ?? 0,
+      total: mov.amount,
+      items: items.map((item) => `${item.cantidad} x ${item.nombre} (${reportMoney(item.costo_unitario)})`).join('; '),
+    };
+  });
+  const title = request.report === 'resumen' ? 'Resumen de gastos' : 'Gastos detallados';
+  const periodLabel = from ? `${from} a ${to}` : `Hasta ${to}`;
+  const extension = request.format === 'xlsx' ? 'xlsx' : 'pdf';
+  const id = randomUUID();
+  const name = `miflota-${request.report}-${to}-${id}.${extension}`;
+  const path = join(ASSISTANT_REPORTS_DIR, name);
+  let data: Buffer;
+  if (request.format === 'xlsx') {
+    const sheetRows = rows.map((row) => [row.fecha, row.vehiculo, row.categoria, row.detalle, row.items, row.repuestos, row.manoObra, row.total]);
+    const sheet = XLSX.utils.aoa_to_sheet([['Fecha', 'Vehículo', 'Categoría', 'Detalle', 'Repuestos / ítems', 'Repuestos', 'Mano de obra', 'Total'], ...sheetRows]);
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, sheet, 'Gastos');
+    data = XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  } else {
+    const lines = [`${title} · ${periodLabel}`, `Generado: ${to}`, ''];
+    if (!rows.length) lines.push('No hay gastos para los filtros elegidos.');
+    rows.forEach((row) => lines.push(`${row.fecha} · ${row.vehiculo} · ${row.categoria} · ${row.detalle} · Total ${reportMoney(row.total)}`, `  Repuestos: ${reportMoney(row.repuestos)} · Mano de obra: ${reportMoney(row.manoObra)}${row.items ? ` · ${row.items}` : ''}`));
+    data = await pdfFromLines(lines);
+  }
+  await writeFile(path, data);
+  const record: AssistantReportFileRecord = { name: `${title}.${extension}`, url: `/api/assistant/files/${id}`, mimeType: extension === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf', path, ownerId, expiresAt: Date.now() + 30 * 60_000 };
+  assistantReportFiles.set(id, record);
+  setTimeout(() => {
+    assistantReportFiles.delete(id);
+    void rm(path, { force: true }).catch(() => {});
+  }, 30 * 60_000).unref();
+  return { name: record.name, url: record.url, mimeType: record.mimeType };
+}
+
 const quien = (req: { cookies: Record<string, string | undefined>; headers: { authorization?: string | string[] } }) => usuarioDeSesion(db, tokenDueno(req))!;
 
 app.get('/api/health', async () => ({ ok: true, db: DB_PATH }));
@@ -347,14 +452,22 @@ app.post<{ Body: AssistantQueryBody }>('/api/assistant/query', async (req, reply
       baseUrl: process.env.OPENROUTER_BASE_URL,
       model: process.env.OPENROUTER_MODEL,
       signal: controller.signal,
+      generateReport: (request) => createAssistantReport(u.id, request),
     });
   } catch (error) {
     req.log.warn({ error }, 'falló la consulta a OpenRouter');
-    return unavailableAssistantReply(snapshot);
+    return unavailableAssistantReply(snapshot, error instanceof Error ? error.message : undefined);
   } finally {
     clearTimeout(timeout);
     assistantInFlight.delete(u.id);
   }
+});
+
+app.get<{ Params: { id: string } }>('/api/assistant/files/:id', async (req, reply) => {
+  const file = assistantReportFiles.get(req.params.id);
+  if (!file || file.expiresAt <= Date.now() || !existsSync(file.path)) return reply.code(404).send({ error: 'El archivo ya no está disponible' });
+  reply.header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+  return reply.type(file.mimeType).send(createReadStream(file.path));
 });
 
 /** Ultimas posiciones conocidas, separadas del estado historico para que el

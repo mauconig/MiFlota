@@ -56,7 +56,8 @@ o comprobantes.
 
 Para habilitar preguntas libres, completá `OPENROUTER_API_KEY=` en el `.env` de
 la raíz. El modelo predeterminado es
-`cognitivecomputations/dolphin-mistral-24b-venice-edition`. `npm --prefix
+`inclusionai/ling-3.0-flash`. El asistente también puede llamar una herramienta
+del servidor para generar reportes descargables en PDF o Excel. `npm --prefix
 apps/api start` carga ese archivo automáticamente; Docker Compose propaga las
 mismas variables al contenedor. Las consultas directas sugeridas en la pantalla
 funcionan aun con la clave vacía.

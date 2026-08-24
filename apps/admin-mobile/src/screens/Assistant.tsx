@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Keyboard, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { askAssistant, SinSesion, type AssistantAction, type AssistantCard, type AssistantHistoryItem, type AssistantTable } from '../api';
+import { API_BASE } from '../config';
 
 interface ChatMessage {
   id: string;
@@ -12,6 +13,7 @@ interface ChatMessage {
   filters?: { label: string; question: string }[];
   asOf?: string;
   notice?: string;
+  files?: { name: string; url: string; mimeType: string }[];
   error?: boolean;
   retryQuestion?: string;
 }
@@ -110,6 +112,7 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
           filters: reply.filters,
           asOf: reply.asOf,
           notice: reply.notice,
+          files: reply.files,
         },
       ]);
     } catch (error) {
@@ -168,6 +171,7 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
             <Text style={styles.noticeText}>{item.notice}</Text>
           </View>
         )}
+        {!!item.files?.length && <View style={styles.files}>{item.files.map((file) => <Pressable key={file.url} onPress={() => void Linking.openURL(API_BASE.replace(/\/+$/, '') + file.url)} style={styles.fileButton} accessibilityRole="button"><Text style={styles.fileButtonText}>Abrir {file.name}</Text></Pressable>)}</View>}
         {!!item.asOf && <Text style={styles.asOf}>Datos actualizados al {dateLabel(item.asOf)}</Text>}
         {!!item.retryQuestion && (
           <Pressable onPress={() => void send(item.retryQuestion!)} disabled={sending} accessibilityRole="button" style={styles.retryButton}>
@@ -273,6 +277,9 @@ const styles = StyleSheet.create({
   filterText: { color: '#6e4a13', fontSize: 10, fontWeight: '700' },
   notice: { maxWidth: '92%', borderRadius: 12, backgroundColor: '#fdf0dd', paddingHorizontal: 10, paddingVertical: 7 },
   noticeText: { color: '#835c18', fontSize: 10, lineHeight: 14 },
+  files: { alignSelf: 'stretch', gap: 7, marginTop: 2 },
+  fileButton: { borderRadius: 14, backgroundColor: '#e7f2ec', borderWidth: 1, borderColor: '#cfe4d7', paddingHorizontal: 12, paddingVertical: 10 },
+  fileButtonText: { color: '#256b4d', fontSize: 12, fontWeight: '800' },
   asOf: { color: '#817b71', fontSize: 9, marginLeft: 3 },
   retryButton: { borderRadius: 14, borderWidth: 1, borderColor: '#d7aa99', paddingHorizontal: 12, paddingVertical: 7 },
   retryText: { color: '#914531', fontSize: 11, fontWeight: '700' },

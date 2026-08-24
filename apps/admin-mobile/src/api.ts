@@ -270,6 +270,7 @@ export interface AssistantReply {
   asOf: string;
   mode: 'local' | 'openrouter' | 'fallback';
   notice?: string;
+  files?: { name: string; url: string; mimeType: string }[];
 }
 
 /** La pregunta viaja al backend autenticado. La clave y el acceso a los datos
