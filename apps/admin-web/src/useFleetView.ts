@@ -722,6 +722,7 @@ export function useFleetView(
       return;
     }
     const cada = numFromInput(n.serviceCada);
+    const kilometraje = numFromInput(n.kilometraje);
     if (n.lastService && n.lastService > isoLocal(TODAY)) {
       toast('El último service no puede ser una fecha futura');
       return;
@@ -1091,7 +1092,8 @@ export function useFleetView(
       };
     }
     const cs = stats(movs, aplicaciones, (m) => m.carId === c.id && inR(m), (a) => a.carId === c.id && inRA(a));
-    const dLeft = svcDaysLeft(c);
+    const configuredService = svcConfigured(c);
+    const dLeft = configuredService ? svcDaysLeft(c) : 0;
     const svcTotalDias = Math.max(1, daysBetween(c.lastServiceDate, svcNextDate(c)));
     const MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
     const months: { label: string; ing: number; egr: number; net: number }[] = [];
