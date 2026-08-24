@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Keyboard, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { askAssistant, SinSesion, type AssistantAction, type AssistantCard, type AssistantHistoryItem, type AssistantTable } from '../api';
 import { API_BASE } from '../config';
+import { Pagination } from '../components/Pagination';
 
 interface ChatMessage {
   id: string;
@@ -55,26 +56,43 @@ function ResultCard({ card, onAction }: { card: AssistantCard; onAction: (action
 }
 
 function ResultTable({ table, onAction }: { table: AssistantTable; onAction: (action: AssistantAction) => void }) {
+  const PAGE_SIZE = 5;
+  const [page, setPage] = useState(0);
+  const resetKey = useMemo(() => table.rows.map((row) => row.id).join('|'), [table.rows]);
+  const pageCount = Math.max(1, Math.ceil(table.rows.length / PAGE_SIZE));
+  const visibleRows = table.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(0);
+  }, [resetKey]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount - 1));
+  }, [pageCount]);
+
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tableScroll}>
-      <View style={styles.table}>
-        <View style={styles.tableRow}>
-          {table.columns.map((column) => <Text key={column.key} style={[styles.tableCell, styles.tableHeader]}>{column.label}</Text>)}
+    <View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tableScroll}>
+        <View style={styles.table}>
+          <View style={styles.tableRow}>
+            {table.columns.map((column) => <Text key={column.key} style={[styles.tableCell, styles.tableHeader]}>{column.label}</Text>)}
+          </View>
+          {visibleRows.map((row) => {
+            const content = (
+              <View style={styles.tableRow}>
+                {table.columns.map((column) => <Text key={column.key} style={styles.tableCell} numberOfLines={2}>{row.cells[column.key] || '—'}</Text>)}
+              </View>
+            );
+            return row.action ? (
+              <Pressable key={row.id} onPress={() => onAction(row.action!)} accessibilityRole="button" accessibilityLabel={row.action.label}>
+                {content}
+              </Pressable>
+            ) : <View key={row.id}>{content}</View>;
+          })}
         </View>
-        {table.rows.map((row) => {
-          const content = (
-            <View style={styles.tableRow}>
-              {table.columns.map((column) => <Text key={column.key} style={styles.tableCell} numberOfLines={2}>{row.cells[column.key] || '—'}</Text>)}
-            </View>
-          );
-          return row.action ? (
-            <Pressable key={row.id} onPress={() => onAction(row.action!)} accessibilityRole="button" accessibilityLabel={row.action.label}>
-              {content}
-            </Pressable>
-          ) : <View key={row.id}>{content}</View>;
-        })}
-      </View>
-    </ScrollView>
+      </ScrollView>
+      <Pagination page={page} pageSize={PAGE_SIZE} total={table.rows.length} itemLabel="filas" onPageChange={setPage} />
+    </View>
   );
 }
 
