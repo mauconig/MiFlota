@@ -56,3 +56,6 @@ apps/driver/expo-env.d.ts
 # Local Gradle/Android caches created outside the generated android project
 .gradle-*/
 .android-*/
+
+# EAS local staging copies
+.eas-staging-*/
