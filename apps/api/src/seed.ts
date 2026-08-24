@@ -18,6 +18,8 @@ export interface SeedCar {
   estado: Estado;
   /** Identificador del rastreador GPS instalado. Vacío en las bajas. */
   gpsTag: string;
+  kilometraje: number;
+  seguroNombre: string;
   serviceCadaMeses: number;
   lastServiceDate: Date;
   seguroDate: Date;
@@ -110,6 +112,8 @@ export function generateFleetData(): { cars: SeedCar[]; movs: SeedMov[] } {
       cuota: b[4],
       estado,
       gpsTag: estado === 'baja' ? '' : gpsLabel(gpsIdx++),
+      kilometraje: 82000 + i * 6700,
+      seguroNombre: ['Mapfre', 'Sancor', 'Aseguradora Paraguaya'][i % 3],
       serviceCadaMeses: 6,
       lastServiceDate: addD(SEED_TODAY, -gapDias),
       // Los offsets son los que tenía la versión anterior en días restantes,

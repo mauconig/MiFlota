@@ -26,9 +26,12 @@ export interface CarRow {
   service_cada: number;
   service_unidad: string;
   last_service_date: string;
+  kilometraje: number;
+  kilometraje_actualizado: string | null;
   seguro_date: string;
   seguro_costo: number;
   seguro_periodo: string;
+  seguro_nombre: string;
   seguro_cada: number;
   /** Credenciales para entrar a apps/driver. Nulas hasta que el dueño las
    *  genera; nunca se exponen en carToJson. */
@@ -58,6 +61,16 @@ export interface MovRow {
   /** Nombre original, solo para mostrar y para la descarga. */
   comprobante_nombre: string | null;
   comprobante_tipo: string | null;
+  mano_obra: number;
+}
+
+export interface GastoItemRow {
+  id: number;
+  mov_id: number;
+  nombre: string;
+  cantidad: number;
+  costo_unitario: number;
+  subtotal: number;
 }
 
 /**
@@ -159,11 +172,21 @@ export function openDb() {
       gps_tag            TEXT NOT NULL DEFAULT '',
       service_cada       INTEGER NOT NULL DEFAULT 6,
       service_unidad     TEXT NOT NULL DEFAULT 'meses' CHECK (service_unidad IN ('dias','meses')),
-      last_service_date  TEXT NOT NULL,
-      seguro_date        TEXT NOT NULL,
+      last_service_date  TEXT NOT NULL DEFAULT '',
+      kilometraje        INTEGER NOT NULL DEFAULT 0,
+      kilometraje_actualizado TEXT,
+      seguro_date        TEXT NOT NULL DEFAULT '',
       seguro_costo       INTEGER NOT NULL DEFAULT 0,
       seguro_periodo     TEXT NOT NULL DEFAULT 'mensual' CHECK (seguro_periodo IN ('mensual','anual')),
+      seguro_nombre      TEXT NOT NULL DEFAULT '',
       seguro_cada        INTEGER NOT NULL DEFAULT 12
+    );
+
+    CREATE TABLE IF NOT EXISTS kilometraje_alertas (
+      owner_id       INTEGER NOT NULL,
+      car_id         TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+      notified_date  TEXT NOT NULL,
+      PRIMARY KEY (owner_id, car_id, notified_date)
     );
 
     CREATE TABLE IF NOT EXISTS movs (
@@ -178,9 +201,19 @@ export function openDb() {
       estado      TEXT CHECK (estado IN ('pagado','pendiente','parcial')),
       driver      TEXT,
       driver_id   INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+      mano_obra   INTEGER NOT NULL DEFAULT 0,
       comprobante        TEXT,
       comprobante_nombre TEXT,
       comprobante_tipo   TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS gasto_items (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      mov_id          INTEGER NOT NULL REFERENCES movs(id) ON DELETE CASCADE,
+      nombre          TEXT NOT NULL CHECK (length(nombre) > 0 AND length(nombre) <= 120),
+      cantidad        REAL NOT NULL CHECK (cantidad > 0),
+      costo_unitario  INTEGER NOT NULL CHECK (costo_unitario > 0),
+      subtotal        INTEGER NOT NULL CHECK (subtotal > 0)
     );
 
     CREATE TABLE IF NOT EXISTS pagos (
@@ -247,6 +280,7 @@ export function openDb() {
 
     CREATE INDEX IF NOT EXISTS idx_movs_car       ON movs(car_id);
     CREATE INDEX IF NOT EXISTS idx_movs_date      ON movs(date);
+    CREATE INDEX IF NOT EXISTS idx_gasto_items_mov ON gasto_items(mov_id);
     CREATE INDEX IF NOT EXISTS idx_pagos_owner    ON pagos(owner_id);
     CREATE INDEX IF NOT EXISTS idx_pagos_drv      ON pagos(driver);
     CREATE INDEX IF NOT EXISTS idx_reportes_owner ON reportes_falla(owner_id);
@@ -271,7 +305,9 @@ function migrarOwner(db: Database.Database) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_cars_owner ON cars(owner_id); CREATE INDEX IF NOT EXISTS idx_movs_owner ON movs(owner_id);');
   // El kilometraje dejó de usarse: ya no lo pide el alta ni lo muestra ninguna
   // pantalla, y mantenerlo al día era trabajo manual sin nada que lo consuma.
-  if (cols('cars').includes('km')) db.exec('ALTER TABLE cars DROP COLUMN km');
+  if (cols('cars').includes('km') && !cols('cars').includes('kilometraje')) db.exec('ALTER TABLE cars RENAME COLUMN km TO kilometraje');
+  if (!cols('cars').includes('kilometraje')) db.exec('ALTER TABLE cars ADD COLUMN kilometraje INTEGER NOT NULL DEFAULT 0');
+  if (!cols('cars').includes('kilometraje_actualizado')) db.exec('ALTER TABLE cars ADD COLUMN kilometraje_actualizado TEXT');
   // El intervalo de service deja de ser siempre en meses: pasa a valor + unidad.
   // Las filas viejas eran meses por definición, así que se copian tal cual.
   if (!cols('cars').includes('gps_tag')) db.exec("ALTER TABLE cars ADD COLUMN gps_tag TEXT NOT NULL DEFAULT ''");
@@ -317,6 +353,26 @@ function migrarOwner(db: Database.Database) {
          AND (id GLOB 'u*c*' OR id GLOB 'c[0-9]' OR id GLOB 'c[0-9][0-9]')
     `);
   }
+  if (!cols('cars').includes('seguro_nombre')) db.exec("ALTER TABLE cars ADD COLUMN seguro_nombre TEXT NOT NULL DEFAULT ''");
+  if (!cols('movs').includes('mano_obra')) db.exec('ALTER TABLE movs ADD COLUMN mano_obra INTEGER NOT NULL DEFAULT 0');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS gasto_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mov_id INTEGER NOT NULL REFERENCES movs(id) ON DELETE CASCADE,
+      nombre TEXT NOT NULL CHECK (length(nombre) > 0 AND length(nombre) <= 120),
+      cantidad REAL NOT NULL CHECK (cantidad > 0),
+      costo_unitario INTEGER NOT NULL CHECK (costo_unitario > 0),
+      subtotal INTEGER NOT NULL CHECK (subtotal > 0)
+    );
+    CREATE INDEX IF NOT EXISTS idx_gasto_items_mov ON gasto_items(mov_id);
+    CREATE TABLE IF NOT EXISTS kilometraje_alertas (
+      owner_id INTEGER NOT NULL,
+      car_id TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+      notified_date TEXT NOT NULL,
+      PRIMARY KEY (owner_id, car_id, notified_date)
+    );
+  `);
+
   // Chofer al que corresponde cada cobro. Null en las filas viejas: el
   // chofer actual del auto sigue siendo el valor por defecto para esas, así
   // que la migración no necesita rellenarlas.
@@ -544,8 +600,8 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
   const idDe = (carId: string) => `u${ownerId}${carId}`;
 
   const insCar = db.prepare(`
-    INSERT INTO cars (id, owner_id, plate, model, year, driver_id, driver, cuota, estado, gps_tag, service_cada, service_unidad, last_service_date, seguro_date, seguro_costo, seguro_periodo, seguro_cada)
-    VALUES (@id, @owner_id, @plate, @model, @year, @driver_id, @driver, @cuota, @estado, @gps_tag, @service_cada, @service_unidad, @last_service_date, @seguro_date, @seguro_costo, @seguro_periodo, @seguro_cada)
+    INSERT INTO cars (id, owner_id, plate, model, year, driver_id, driver, cuota, estado, gps_tag, kilometraje, kilometraje_actualizado, service_cada, service_unidad, last_service_date, seguro_date, seguro_nombre, seguro_costo, seguro_periodo, seguro_cada)
+    VALUES (@id, @owner_id, @plate, @model, @year, @driver_id, @driver, @cuota, @estado, @gps_tag, @kilometraje, @kilometraje_actualizado, @service_cada, @service_unidad, @last_service_date, @seguro_date, @seguro_nombre, @seguro_costo, @seguro_periodo, @seguro_cada)
   `);
   const insMov = db.prepare(`
     INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, driver, driver_id)
@@ -582,10 +638,13 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
         cuota: c.cuota,
         estado: c.estado,
         gps_tag: c.gpsTag,
+        kilometraje: c.kilometraje,
+        kilometraje_actualizado: iso(c.lastServiceDate),
         service_cada: c.serviceCadaMeses,
         service_unidad: 'meses',
         last_service_date: iso(c.lastServiceDate),
         seguro_date: iso(c.seguroDate),
+        seguro_nombre: c.seguroNombre,
         seguro_costo: c.seguroCosto,
         seguro_periodo: 'mensual',
         seguro_cada: 12,
@@ -594,7 +653,7 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
     for (const m of movs) {
       const nombre = m.driver ?? 'Sin chofer';
       const did = m.driver ? driverId(nombre) : null;
-      insMov.run({
+      const movInfo = insMov.run({
         owner_id: ownerId,
         car_id: idDe(m.carId),
         type: m.type,
@@ -606,6 +665,9 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
         driver: m.driver ?? null,
         driver_id: did,
       });
+      if (m.type === 'egreso') {
+        db.prepare('INSERT INTO gasto_items (mov_id, nombre, cantidad, costo_unitario, subtotal) VALUES (?, ?, 1, ?, ?)').run(movInfo.lastInsertRowid, m.desc, m.amount, m.amount);
+      }
       if (m.cobrado) {
         insPago.run({
           owner_id: ownerId,
@@ -636,15 +698,16 @@ export function carToJson(r: CarRow) {
     gpsTag: r.gps_tag,
     serviceCada: r.service_cada,
     serviceUnidad: r.service_unidad,
-    lastServiceDate: r.last_service_date,
-    seguroDate: r.seguro_date,
-    seguroCosto: r.seguro_costo,
-    seguroPeriodo: r.seguro_periodo,
+    lastServiceDate: r.last_service_date || '',
+    kilometraje: r.kilometraje,
+    kilometrajeActualizado: r.kilometraje_actualizado,
+    seguroDate: r.seguro_date || '',
+    seguroNombre: r.seguro_nombre,
     seguroCada: r.seguro_cada,
   };
 }
 
-export function movToJson(r: MovRow) {
+export function movToJson(r: MovRow, items: GastoItemRow[] = []) {
   return {
     id: r.id,
     carId: r.car_id,
@@ -656,6 +719,7 @@ export function movToJson(r: MovRow) {
     ...(r.estado ? { estado: r.estado } : {}),
     ...(r.driver ? { driver: r.driver } : {}),
     ...(r.driver_id != null ? { driverId: r.driver_id } : {}),
+    ...(r.type === 'egreso' ? { manoObra: r.mano_obra ?? 0, items: items.map((item) => ({ id: item.id, nombre: item.nombre, cantidad: item.cantidad, costoUnitario: item.costo_unitario, subtotal: item.subtotal })) } : {}),
     // El cliente nunca ve la ruta del archivo, solo si hay uno y cómo se llama.
     ...(r.comprobante ? { comprobante: { id: r.comprobante, nombre: r.comprobante_nombre ?? 'comprobante', tipo: r.comprobante_tipo ?? '' } } : {}),
   };

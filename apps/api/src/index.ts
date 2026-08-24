@@ -7,7 +7,7 @@ import { rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { CarRow, LocationRow, MovRow, PagoRow, ReporteRow } from './db.js';
+import type { CarRow, GastoItemRow, LocationRow, MovRow, PagoRow, ReporteRow } from './db.js';
 import { COMPROBANTES_DIR, DB_PATH, carToJson, ensureDriver, locationToJson, movToJson, openDb, pagoToJson, reporteToJson } from './db.js';
 import {
   COOKIE,
@@ -52,6 +52,7 @@ const PORT = Number(process.env.PORT ?? 3000);
  *  rechazaría por "futuro" todo lo que se cargue desde esa app. En producción
  *  no se define y manda el reloj real. */
 const hoyISO = () => process.env.MIFLOTA_HOY ?? new Date().toISOString().slice(0, 10);
+const diasEntreISO = (desde: string | null, hasta = hoyISO()) => (desde ? Math.floor((Date.parse(`${hasta}T12:00:00Z`) - Date.parse(`${desde}T12:00:00Z`)) / 86400000) : Number.POSITIVE_INFINITY);
 
 const db = openDb();
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
@@ -85,6 +86,15 @@ app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body,
 
 /* ------------------------------ sesión ------------------------------ */
 
+/** Token de dueño del pedido: la cookie del navegador o, en admin-mobile, el
+ *  bearer que la app guarda en SecureStore (misma tabla de sesiones para
+ *  ambos: revocar desde un lado cierra los dos). */
+const tokenDueno = (req: { cookies: Record<string, string | undefined>; headers: { authorization?: string | string[] } }): string | undefined => {
+  const auth = Array.isArray(req.headers.authorization) ? req.headers.authorization[0] : req.headers.authorization;
+  if (auth?.startsWith('Bearer ')) return auth.slice('Bearer '.length).trim();
+  return req.cookies[COOKIE];
+};
+
 /** Rutas que se pueden pedir sin sesión. Todo lo demás bajo /api la exige. */
 const ABIERTAS = new Set(['/api/health', '/api/login', '/api/me']);
 
@@ -94,7 +104,7 @@ app.addHook('preHandler', async (req, reply) => {
   // token adentro, con quienChofer(), en vez de la cookie de acá.
   if (req.url.startsWith('/api/chofer/')) return;
   if (ABIERTAS.has(req.url.split('?')[0])) return;
-  if (!usuarioDeSesion(db, req.cookies[COOKIE])) return reply.code(401).send({ error: 'Sesión requerida' });
+  if (!usuarioDeSesion(db, tokenDueno(req))) return reply.code(401).send({ error: 'Sesión requerida' });
 });
 
 const cookieOpts = {
@@ -230,6 +240,7 @@ const selCars = db.prepare('SELECT * FROM cars WHERE owner_id = ? ORDER BY rowid
 const selMovs = db.prepare('SELECT * FROM movs WHERE owner_id = ? ORDER BY date DESC, id DESC');
 const selPagos = db.prepare('SELECT * FROM pagos WHERE owner_id = ? ORDER BY fecha DESC, id DESC');
 const selCar = db.prepare('SELECT * FROM cars WHERE id = ? AND owner_id = ?');
+const selItems = db.prepare('SELECT * FROM gasto_items WHERE mov_id = ? ORDER BY id');
 const selLocations = db.prepare(`
   SELECT l.*
     FROM driver_locations l
@@ -239,15 +250,6 @@ const selLocations = db.prepare(`
 `);
 
 /** El preHandler ya rechazó las peticiones sin sesión, así que acá siempre hay usuario. */
-/** Token de dueño del pedido: la cookie del navegador o, en admin-mobile, el
- *  bearer que la app guarda en SecureStore (misma tabla de sesiones para
- *  ambos: revocar desde un lado cierra los dos). */
-const tokenDueno = (req: { cookies: Record<string, string | undefined>; headers: { authorization?: string | string[] } }): string | undefined => {
-  const auth = Array.isArray(req.headers.authorization) ? req.headers.authorization[0] : req.headers.authorization;
-  if (auth?.startsWith('Bearer ')) return auth.slice('Bearer '.length).trim();
-  return req.cookies[COOKIE];
-};
-
 const quien = (req: { cookies: Record<string, string | undefined>; headers: { authorization?: string | string[] } }) => usuarioDeSesion(db, tokenDueno(req))!;
 
 app.get('/api/health', async () => ({ ok: true, db: DB_PATH }));
@@ -258,7 +260,7 @@ app.get('/api/state', async (req) => {
   const u = quien(req);
   return {
     cars: (selCars.all(u.id) as CarRow[]).map(carToJson),
-    movs: (selMovs.all(u.id) as MovRow[]).map(movToJson),
+    movs: (selMovs.all(u.id) as MovRow[]).map((m) => movToJson(m, selItems.all(m.id) as GastoItemRow[])),
     pagos: (selPagos.all(u.id) as PagoRow[]).map(pagoToJson),
   };
 });
@@ -372,12 +374,12 @@ interface CarPatch {
   cuota?: number;
   estado?: string;
   gpsTag?: string;
+  kilometraje?: number;
+  seguroNombre?: string;
   serviceCada?: number;
   serviceUnidad?: string;
   lastServiceDate?: string;
   seguroDate?: string;
-  seguroCosto?: number;
-  seguroPeriodo?: string;
   seguroCada?: number;
 }
 
@@ -387,13 +389,13 @@ interface CarPatch {
 const CAMPOS: Record<string, { col: string; ok: (v: unknown) => boolean }> = {
   estado: { col: 'estado', ok: (v) => typeof v === 'string' && ESTADOS.has(v) },
   gpsTag: { col: 'gps_tag', ok: (v) => typeof v === 'string' && v.length <= 40 },
+  kilometraje: { col: 'kilometraje', ok: (v) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 10_000_000 },
+  seguroNombre: { col: 'seguro_nombre', ok: (v) => typeof v === 'string' && v.trim().length <= 120 },
   serviceCada: { col: 'service_cada', ok: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 3650 },
   serviceUnidad: { col: 'service_unidad', ok: (v) => v === 'dias' || v === 'meses' },
-  lastServiceDate: { col: 'last_service_date', ok: (v) => typeof v === 'string' && FECHA.test(v) },
-  seguroDate: { col: 'seguro_date', ok: (v) => typeof v === 'string' && FECHA.test(v) },
-  seguroCosto: { col: 'seguro_costo', ok: (v) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 1_000_000_000 },
-  seguroPeriodo: { col: 'seguro_periodo', ok: (v) => v === 'mensual' || v === 'anual' },
-  seguroCada: { col: 'seguro_cada', ok: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= SEG_CADA_MAX },
+  lastServiceDate: { col: 'last_service_date', ok: (v) => v === '' || (typeof v === 'string' && FECHA.test(v)) },
+  seguroDate: { col: 'seguro_date', ok: (v) => v === '' || (typeof v === 'string' && FECHA.test(v)) },
+  seguroCada: { col: 'seguro_cada', ok: (v) => v === 0 || (Number.isInteger(v) && (v as number) >= 1 && (v as number) <= SEG_CADA_MAX) },
 };
 
 /**
@@ -461,7 +463,16 @@ app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (re
     vals.push(0);
   }
 
-  db.prepare(`UPDATE cars SET ${sets.join(', ')} WHERE id = ? AND owner_id = ?`).run(...vals, req.params.id, u.id);
+  // Quitar el chofer solo manda `driver`/`cuota`, que no viven en CAMPOS: con
+  // sets vacío el UPDATE quedaría mal formado (`SET WHERE`). Ese caso se
+  // resuelve abajo con aplicarDriverEnAuto, así que acá se saltea.
+  if (sets.length) {
+    if (req.body?.kilometraje !== undefined) {
+      sets.push('kilometraje_actualizado = ?');
+      vals.push(hoyISO());
+    }
+    db.prepare(`UPDATE cars SET ${sets.join(', ')} WHERE id = ? AND owner_id = ?`).run(...vals, req.params.id, u.id);
+  }
 
   // El chofer (y su cuota) se manejan enlazando la fila de drivers.
   if (req.body?.driver !== undefined) {
@@ -597,12 +608,12 @@ interface NuevoCar {
   model: string;
   year: number;
   gpsTag?: string;
+  kilometraje?: number;
+  seguroNombre?: string;
   lastServiceDate?: string;
   serviceCada?: number;
   serviceUnidad?: string;
   seguroDate?: string;
-  seguroCosto?: number;
-  seguroPeriodo?: string;
   seguroCada?: number;
 }
 
@@ -613,20 +624,23 @@ app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
   const model = String(b.model ?? '').trim();
   if (!plate) return reply.code(400).send({ error: 'La chapa es obligatoria' });
   if (!model) return reply.code(400).send({ error: 'La marca y modelo son obligatorios' });
+  const kilometraje = b.kilometraje == null ? 0 : Number(b.kilometraje);
+  if (!Number.isInteger(kilometraje) || kilometraje < 0 || kilometraje > 10_000_000) return reply.code(400).send({ error: 'El kilometraje inicial no es válido' });
+  const seguroNombre = String(b.seguroNombre ?? '').trim();
+  if (seguroNombre.length > 120) return reply.code(400).send({ error: 'El nombre del seguro no es válido' });
+  const serviceCada = b.serviceCada == null ? 0 : Number(b.serviceCada);
+  if (!Number.isInteger(serviceCada) || serviceCada < 0 || serviceCada > 3650) return reply.code(400).send({ error: 'El intervalo de service no es válido' });
+  const seguroCada = b.seguroCada == null ? 0 : Number(b.seguroCada);
+  if (!Number.isInteger(seguroCada) || seguroCada < 0 || seguroCada > SEG_CADA_MAX) return reply.code(400).send({ error: 'El intervalo del seguro no es válido' });
 
   // La chapa es única dentro de la flota de cada uno, no de toda la base.
   const dup = db.prepare('SELECT id FROM cars WHERE UPPER(plate) = ? AND owner_id = ?').get(plate, u.id);
   if (dup) return reply.code(409).send({ error: 'Ya existe un vehículo con esa chapa' });
 
   const hoy = new Date().toISOString().slice(0, 10);
-  const enMeses = (n: number) => {
-    const d = new Date();
-    d.setMonth(d.getMonth() + n);
-    return d.toISOString().slice(0, 10);
-  };
   // El vencimiento del seguro lo trae el alta. Si faltara, un año desde hoy es
   // el único supuesto razonable, pero se acepta para no romper clientes viejos.
-  if (b.seguroDate !== undefined && !(typeof b.seguroDate === 'string' && FECHA.test(b.seguroDate))) {
+  if (b.seguroDate !== undefined && b.seguroDate !== '' && !(typeof b.seguroDate === 'string' && FECHA.test(b.seguroDate))) {
     return reply.code(400).send({ error: 'Fecha de vencimiento del seguro inválida' });
   }
   const car = {
@@ -641,17 +655,18 @@ app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
     cuota: 0,
     estado: 'activo',
     gps_tag: String(b.gpsTag ?? '').trim().slice(0, 40),
-    service_cada: Number.isInteger(b.serviceCada) && b.serviceCada! >= 1 && b.serviceCada! <= 3650 ? b.serviceCada! : 6,
+    kilometraje,
+    kilometraje_actualizado: b.kilometraje == null ? null : hoy,
+    service_cada: serviceCada,
     service_unidad: b.serviceUnidad === 'dias' ? 'dias' : 'meses',
-    last_service_date: typeof b.lastServiceDate === 'string' && FECHA.test(b.lastServiceDate) && b.lastServiceDate <= hoy ? b.lastServiceDate : hoy,
-    seguro_date: b.seguroDate ?? enMeses(12),
-    seguro_costo: Number.isInteger(b.seguroCosto) && b.seguroCosto! >= 0 && b.seguroCosto! <= 1_000_000_000 ? b.seguroCosto! : 0,
-    seguro_periodo: b.seguroPeriodo === 'anual' ? 'anual' : 'mensual',
-    seguro_cada: Number.isInteger(b.seguroCada) && b.seguroCada! >= 1 && b.seguroCada! <= SEG_CADA_MAX ? b.seguroCada! : 12,
+    last_service_date: typeof b.lastServiceDate === 'string' && FECHA.test(b.lastServiceDate) && b.lastServiceDate <= hoy ? b.lastServiceDate : '',
+    seguro_date: typeof b.seguroDate === 'string' && FECHA.test(b.seguroDate) ? b.seguroDate : '',
+    seguro_nombre: seguroNombre,
+    seguro_cada: seguroCada,
   };
   db.prepare(`
-    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, gps_tag, service_cada, service_unidad, last_service_date, seguro_date, seguro_costo, seguro_periodo, seguro_cada)
-    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @gps_tag, @service_cada, @service_unidad, @last_service_date, @seguro_date, @seguro_costo, @seguro_periodo, @seguro_cada)
+    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, gps_tag, kilometraje, kilometraje_actualizado, service_cada, service_unidad, last_service_date, seguro_date, seguro_nombre, seguro_cada)
+    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @gps_tag, @kilometraje, @kilometraje_actualizado, @service_cada, @service_unidad, @last_service_date, @seguro_date, @seguro_nombre, @seguro_cada)
   `).run(car);
 
   return reply.code(201).send(carToJson(selCar.get(car.id, u.id) as CarRow));
@@ -731,6 +746,33 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
 /** Categorías válidas para un gasto suelto. Mismo set que `CATS` en el cliente. */
 const CATS_EGRESO = new Set(['Taller', 'Combustible', 'Seguro', 'Multas', 'Documentación', 'Otros']);
 
+interface GastoItemInput {
+  nombre?: unknown;
+  cantidad?: unknown;
+  costoUnitario?: unknown;
+}
+
+function normalizarGastoItems(raw: string): { nombre: string; cantidad: number; costoUnitario: number; subtotal: number }[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw || '[]');
+  } catch {
+    throw new Error('El detalle de repuestos no es válido');
+  }
+  if (!Array.isArray(parsed) || parsed.length > 50) throw new Error('El gasto puede tener hasta 50 ítems');
+  return parsed.map((item: GastoItemInput) => {
+    const nombre = String(item?.nombre ?? '').trim().slice(0, 120);
+    const cantidad = Number(item?.cantidad);
+    const costoUnitario = Number(item?.costoUnitario);
+    if (!nombre || !Number.isFinite(cantidad) || cantidad <= 0 || cantidad > 1_000_000 || !Number.isInteger(costoUnitario) || costoUnitario <= 0 || costoUnitario > 1_000_000_000) {
+      throw new Error('Cada ítem necesita nombre, cantidad y costo unitario válidos');
+    }
+    const subtotal = Math.round(cantidad * costoUnitario);
+    if (!Number.isInteger(subtotal) || subtotal <= 0 || subtotal > 1_000_000_000) throw new Error('El subtotal de un ítem no es válido');
+    return { nombre, cantidad, costoUnitario, subtotal };
+  });
+}
+
 /** Gasto genérico con comprobante opcional, sin efecto sobre el estado del auto:
  *  a diferencia de `/taller`, esta ruta no saca al vehículo de circulación —
  *  eso sigue siendo una decisión aparte, tomada en la ficha del auto. */
@@ -742,6 +784,8 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
   let razon = '';
   let monto = 0;
   let cat = '';
+  let itemsRaw = '[]';
+  let manoObra = 0;
   let archivo: { id: string; nombre: string; tipo: string } | null = null;
 
   try {
@@ -750,6 +794,8 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
         if (parte.fieldname === 'razon') razon = String(parte.value).trim().slice(0, 120);
         if (parte.fieldname === 'monto') monto = Number(String(parte.value).replace(/\D/g, '')) || 0;
         if (parte.fieldname === 'cat') cat = String(parte.value);
+        if (parte.fieldname === 'items') itemsRaw = String(parte.value);
+        if (parte.fieldname === 'manoObra') manoObra = Number(String(parte.value).replace(/\D/g, '')) || 0;
         continue;
       }
       if (parte.fieldname !== 'comprobante') {
@@ -774,21 +820,35 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
   }
 
   if (!razon) return reply.code(400).send({ error: 'Indicá de qué es el gasto' });
-  if (monto <= 0 || monto > 1_000_000_000) return reply.code(400).send({ error: 'Indicá cuánto se gastó' });
   if (!CATS_EGRESO.has(cat)) return reply.code(400).send({ error: 'Elegí una categoría válida' });
-
+  if (!Number.isInteger(manoObra) || manoObra < 0 || manoObra > 1_000_000_000) return reply.code(400).send({ error: 'La mano de obra no es válida' });
+  let items: { nombre: string; cantidad: number; costoUnitario: number; subtotal: number }[];
+  try {
+    items = normalizarGastoItems(itemsRaw);
+  } catch (e) {
+    return reply.code(400).send({ error: e instanceof Error ? e.message : 'Detalle de gasto inválido' });
+  }
+  const detalleTotal = items.reduce((sum, item) => sum + item.subtotal, 0) + manoObra;
+  const total = items.length || manoObra > 0 ? detalleTotal : monto;
+  if (monto > 0 && (items.length || manoObra > 0) && monto !== detalleTotal) return reply.code(400).send({ error: 'El total no coincide con los ítems y la mano de obra' });
+  if (total <= 0 || total > 1_000_000_000) return reply.code(400).send({ error: 'Indicá cuánto se gastó' });
   const hoy = new Date().toISOString().slice(0, 10);
-  const info = db
-    .prepare(
-      `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
-       VALUES (?, ?, 'egreso', ?, ?, ?, ?, NULL, ?, ?, ?)`,
-    )
-    .run(u.id, car.id, monto, hoy, razon, cat, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
+  const info = db.transaction(() => {
+    const created = db
+      .prepare(
+        `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, mano_obra, comprobante, comprobante_nombre, comprobante_tipo)
+         VALUES (?, ?, 'egreso', ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+      )
+      .run(u.id, car.id, total, hoy, razon, cat, manoObra, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
+    const insertItem = db.prepare('INSERT INTO gasto_items (mov_id, nombre, cantidad, costo_unitario, subtotal) VALUES (?, ?, ?, ?, ?)');
+    for (const item of items) insertItem.run(created.lastInsertRowid, item.nombre, item.cantidad, item.costoUnitario, item.subtotal);
+    return created;
+  })();
 
-  req.log.info({ car: car.plate, cat, monto, comprobante: !!archivo }, 'gasto registrado');
+  req.log.info({ car: car.plate, cat, monto: total, items: items.length, comprobante: !!archivo }, 'gasto registrado');
 
   const mov = db.prepare('SELECT * FROM movs WHERE id = ?').get(info.lastInsertRowid) as MovRow;
-  return reply.code(201).send({ mov: movToJson(mov) });
+  return reply.code(201).send({ mov: movToJson(mov, selItems.all(mov.id) as GastoItemRow[]) });
 });
 
 /** Descarga del comprobante. Se resuelve por el movimiento y no por el nombre
@@ -905,12 +965,12 @@ app.post<{ Body: { usuario?: string; password?: string } }>('/api/chofer/login',
   if (!usuario || !password) return reply.code(400).send({ error: 'Completá usuario y contraseña' });
 
   const fila = db.prepare(
-    `SELECT d.id AS driver_id, d.nombre AS driver, d.driver_pass_hash, c.id AS car_id, c.cuota, c.plate, c.model, c.year
+    `SELECT d.id AS driver_id, d.nombre AS driver, d.driver_pass_hash, c.id AS car_id, c.cuota, c.plate, c.model, c.year, c.kilometraje, c.kilometraje_actualizado
        FROM drivers d
        JOIN cars c ON c.driver_id = d.id AND c.estado <> 'baja'
       WHERE d.driver_username = ?`,
   ).get(usuario) as
-    | { driver_id: number; driver: string; driver_pass_hash: string | null; car_id: string; cuota: number; plate: string; model: string; year: number }
+    | { driver_id: number; driver: string; driver_pass_hash: string | null; car_id: string; cuota: number; plate: string; model: string; year: number; kilometraje: number; kilometraje_actualizado: string | null }
     | undefined;
 
   const ok = fila?.driver_pass_hash ? await verifyPassword(password, fila.driver_pass_hash) : false;
@@ -927,6 +987,8 @@ app.post<{ Body: { usuario?: string; password?: string } }>('/api/chofer/login',
     token,
     driver: fila!.driver,
     cuota: fila!.cuota,
+    kilometraje: fila!.kilometraje,
+    kilometrajeActualizado: fila!.kilometraje_actualizado,
     car: { plate: fila!.plate, model: fila!.model, year: fila!.year },
   };
 });
@@ -989,11 +1051,27 @@ app.post<{ Body: DriverLocationBody }>('/api/chofer/location', async (req, reply
   return { ok: true, recordedAt };
 });
 
+app.post<{ Body: { kilometraje?: number } }>('/api/chofer/kilometraje', async (req, reply) => {
+  const s = quienChofer(db, req);
+  if (!s) return reply.code(401).send({ error: 'Sesión requerida' });
+  const kilometraje = Number(req.body?.kilometraje);
+  if (!Number.isInteger(kilometraje) || kilometraje < 0 || kilometraje > 10_000_000) {
+    return reply.code(400).send({ error: 'El kilometraje debe ser un número entero válido' });
+  }
+  const car = db.prepare('SELECT kilometraje FROM cars WHERE id = ? AND owner_id = ?').get(s.carId, s.ownerId) as { kilometraje: number } | undefined;
+  if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
+  if (kilometraje < car.kilometraje) return reply.code(400).send({ error: 'El kilometraje no puede ser menor al registrado' });
+  const actualizado = hoyISO();
+  db.prepare('UPDATE cars SET kilometraje = ?, kilometraje_actualizado = ? WHERE id = ? AND owner_id = ?').run(kilometraje, actualizado, s.carId, s.ownerId);
+  db.prepare('DELETE FROM kilometraje_alertas WHERE owner_id = ? AND car_id = ?').run(s.ownerId, s.carId);
+  return { ok: true, kilometraje, actualizado };
+});
+
 app.get('/api/chofer/me', async (req, reply) => {
   const s = quienChofer(db, req);
   if (!s) return reply.code(401).send({ error: 'Sesión requerida' });
-  const car = db.prepare('SELECT plate, model, year, cuota FROM cars WHERE id = ?').get(s.carId) as { plate: string; model: string; year: number; cuota: number };
-  return { driver: s.driver, cuota: car.cuota, car: { plate: car.plate, model: car.model, year: car.year } };
+  const car = db.prepare('SELECT plate, model, year, cuota, kilometraje, kilometraje_actualizado FROM cars WHERE id = ?').get(s.carId) as { plate: string; model: string; year: number; cuota: number; kilometraje: number; kilometraje_actualizado: string | null };
+  return { driver: s.driver, cuota: car.cuota, kilometraje: car.kilometraje, kilometrajeActualizado: car.kilometraje_actualizado, car: { plate: car.plate, model: car.model, year: car.year } };
 });
 
 app.get('/api/chofer/resumen', async (req, reply) => {
@@ -1025,12 +1103,38 @@ app.get('/api/chofer/resumen', async (req, reply) => {
   const atrasadoDesde = estado === 'atrasado' ? (pendientes[0]?.date ?? null) : null;
 
   const hoy = hoyISO();
-  const cuota = flota.find((c) => c.id === s.carId)?.cuota ?? 0;
+  const carActual = db.prepare('SELECT cuota, kilometraje, kilometraje_actualizado FROM cars WHERE id = ? AND owner_id = ?').get(s.carId, s.ownerId) as { cuota: number; kilometraje: number; kilometraje_actualizado: string | null } | undefined;
+  const cuota = carActual?.cuota ?? 0;
   const cobradoDelMes = cargos.filter((m) => m.date.slice(0, 7) === hoy.slice(0, 7)).reduce((a, m) => a + (cobrado.get(m.id) ?? 0), 0);
   const diasPagados = cuota > 0 ? Math.floor(cobradoDelMes / cuota) : 0;
   const diasTranscurridos = Number(hoy.slice(8, 10));
 
-  return { estado, deuda, aFavor, cuota, atrasadoDesde, diasPagados, diasTranscurridos, cobradoMes: cobradoDelMes };
+  const kilometrajeVencido = diasEntreISO(carActual?.kilometraje_actualizado ?? null) > 7;
+  if (kilometrajeVencido && carActual) {
+    const hoy = hoyISO();
+    const alertada = db.prepare('INSERT OR IGNORE INTO kilometraje_alertas (owner_id, car_id, notified_date) VALUES (?, ?, ?)').run(s.ownerId, s.carId, hoy).changes > 0;
+    if (alertada) {
+      void sendOwnerPush(db, s.ownerId, {
+        title: 'Kilometraje pendiente',
+        body: `${s.driver} todavía no actualizó el kilometraje de su auto después de siete días.`,
+        data: { type: 'kilometraje_pending', carId: s.carId ?? '' },
+      }).catch((e: Error) => req.log.warn({ err: e, ownerId: s.ownerId }, 'no se pudo enviar alerta de kilometraje'));
+    }
+  }
+
+  return {
+    estado,
+    deuda,
+    aFavor,
+    cuota,
+    atrasadoDesde,
+    diasPagados,
+    diasTranscurridos,
+    cobradoMes: cobradoDelMes,
+    kilometraje: carActual?.kilometraje ?? 0,
+    kilometrajeActualizado: carActual?.kilometraje_actualizado ?? null,
+    kilometrajeVencido,
+  };
 });
 
 app.get<{ Querystring: { dias?: string } }>('/api/chofer/pagos', async (req, reply) => {
@@ -1084,6 +1188,8 @@ app.post<{ Params: never }>('/api/chofer/pagos', async (req, reply) => {
     throw e;
   }
 
+  if (medio !== 'Transferencia') return reply.code(400).send({ error: 'Los pagos de chofer solo aceptan transferencia' });
+  if (!archivo) return reply.code(400).send({ error: 'Adjuntá el comprobante de la transferencia' });
   if (monto <= 0 || monto > 1_000_000_000) return reply.code(400).send({ error: 'El monto tiene que ser un número mayor a cero' });
 
   const hoy = hoyISO();
