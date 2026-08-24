@@ -34,6 +34,19 @@ export function Reportes({ v }: { v: MobileView }) {
           </View>
         </View>
       </View>
+      <View style={{ backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 22, padding: 18, gap: 12 }}>
+        <Text style={{ fontSize: 15, fontWeight: '700' }}>Gastos por auto</Text>
+        {rep.gastos.length === 0 ? <Text style={{ fontSize: 12, color: '#6b665c' }}>Sin gastos detallados en el período</Text> : rep.gastos.map((g) => (
+          <View key={g.plate} style={{ borderTopWidth: 1, borderTopColor: '#f0ebe0', paddingTop: 10, gap: 7 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Text style={{ fontWeight: '700', color: '#1a1a18' }}>{g.plate}</Text><Text style={{ fontWeight: '700', color: '#c0553f' }}>{g.total}</Text></View>
+            {g.rows.map((row, i) => <View key={i} style={{ backgroundColor: '#faf7f0', borderRadius: 10, padding: 8 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Text style={{ fontSize: 12, fontWeight: '600', flex: 1 }}>{row.desc} · {row.cat}</Text><Text style={{ fontSize: 12, fontWeight: '700' }}>{row.amount}</Text></View>
+              {row.items.map((item, j) => <Text key={j} style={{ fontSize: 11, color: '#6b665c', marginTop: 3 }}>{item.cantidad} × {item.nombre} · {item.subtotal}</Text>)}
+              {!!row.manoObra && <Text style={{ fontSize: 11, color: '#6b665c', marginTop: 3 }}>Mano de obra · {row.manoObra}</Text>}
+            </View>)}
+          </View>
+        ))}
+      </View>
       <View style={{ backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 22, padding: 18 }}>
         <Text style={{ fontSize: 15, fontWeight: '700' }}>Gastos por categoría</Text>
         <View style={{ marginTop: 14 }}>

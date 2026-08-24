@@ -23,6 +23,12 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "MiFlota usa Face ID para proteger el acceso de la flota."
+        }
+      ],
       "expo-notifications",
       [
         "expo-splash-screen",

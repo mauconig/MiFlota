@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { API_BASE } from './config';
-import type { Car, Mov, Pago, PickedFile } from './types';
+import type { Car, CarLocation, Mov, Pago, PickedFile } from './types';
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`. Se parsean a mediodía para que
  *  ningún huso horario corra el día al construir el Date. */
@@ -35,7 +36,7 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
   // A diferencia del browser, React Native no tiene un origin de página contra
   // el que resolver una URL relativa: sin este prefijo, `/api/...` termina
   // pegándole al propio servidor de Metro en vez de a la API.
-  const res = await fetch(API_BASE + url, { ...init, headers: { ...headers, ...authHeaders, ...init?.headers } });
+  const res = await fetch(API_BASE + url, { ...init, headers: { ...(headers ?? {}), ...authHeaders, ...((init?.headers ?? {}) as Record<string, string>) } as Record<string, string> });
   if (!res.ok) {
     const cuerpo = await res.json().catch(() => null);
     const msg = (cuerpo as { error?: string } | null)?.error ?? `Error ${res.status}`;
@@ -47,6 +48,7 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
 /** Token de sesión del dueño. Vive en memoria para los pedidos y en
  *  SecureStore para sobrevivir reinicios de la app. */
 const TOKEN_KEY = 'miflota_admin_token';
+const BIOMETRIC_KEY = 'miflota_admin_biometria';
 let authToken: string | null = null;
 
 async function guardarToken(token: string | null): Promise<void> {
@@ -73,6 +75,8 @@ export interface Auth {
   /** Cambia la contraseña del dueño. El servidor cierra las sesiones de los
    *  otros dispositivos; la actual queda activa. */
   cambiarPassword: (actual: string, nueva: string) => Promise<void>;
+  reintentarBiometria: () => Promise<boolean>;
+  biometriaBloqueada: boolean;
 }
 
 export function registerAdminPushToken(token: string, platform: string): Promise<{ ok: true }> {
@@ -107,17 +111,38 @@ export function clearPersistedPushToken(): Promise<void> {
 export function useAuth(): Auth {
   const [sesion, setSesion] = useState<Sesion | null>(null);
   const [cargando, setCargando] = useState(true);
+  const [biometriaBloqueada, setBiometriaBloqueada] = useState(false);
+
+  const pedirBiometria = useCallback(async (): Promise<boolean> => {
+    const hardware = await LocalAuthentication.hasHardwareAsync().catch(() => false);
+    const enrolled = hardware && (await LocalAuthentication.isEnrolledAsync().catch(() => false));
+    if (!enrolled) return true;
+    const r = await LocalAuthentication.authenticateAsync({ promptMessage: 'Desbloquear MiFlota', fallbackLabel: 'Usar contraseña', disableDeviceFallback: false });
+    return r.success;
+  }, []);
+
+  const validarToken = useCallback(async (token: string): Promise<boolean> => {
+    authToken = token;
+    const m = await req<{ autenticado: boolean; usuario?: string; nombre?: string }>('/api/me');
+    if (!m.autenticado) return false;
+    setSesion({ usuario: m.usuario!, nombre: m.nombre! });
+    setBiometriaBloqueada(false);
+    return true;
+  }, []);
 
   useEffect(() => {
     let vivo = true;
     (async () => {
       const guardado = await SecureStore.getItemAsync(TOKEN_KEY).catch(() => null);
       if (guardado) authToken = guardado;
+      const bio = (await SecureStore.getItemAsync(BIOMETRIC_KEY).catch(() => null)) === '1';
       try {
-        const m = await req<{ autenticado: boolean; usuario?: string; nombre?: string }>('/api/me');
         if (!vivo) return;
-        if (m.autenticado) setSesion({ usuario: m.usuario!, nombre: m.nombre! });
-        else await guardarToken(null);
+        if (guardado && bio && !(await pedirBiometria())) {
+          setBiometriaBloqueada(true);
+          return;
+        }
+        if (guardado && !(await validarToken(guardado))) await guardarToken(null);
       } catch {
         if (vivo) {
           await guardarToken(null);
@@ -130,7 +155,7 @@ export function useAuth(): Auth {
     return () => {
       vivo = false;
     };
-  }, []);
+  }, [pedirBiometria, validarToken]);
 
   const entrar = useCallback(async (usuario: string, password: string) => {
     // La cookie que el server también manda es irrelevante acá: la sesión de
@@ -138,8 +163,22 @@ export function useAuth(): Auth {
     const r = await req<Sesion & { token?: string }>('/api/login', { method: 'POST', body: JSON.stringify({ usuario, password }) });
     if (!r.token) throw new Error('El servidor no devolvió token de sesión');
     await guardarToken(r.token);
+    const hardware = await LocalAuthentication.hasHardwareAsync().catch(() => false);
+    const enrolled = hardware && (await LocalAuthentication.isEnrolledAsync().catch(() => false));
+    if (enrolled) await SecureStore.setItemAsync(BIOMETRIC_KEY, '1').catch(() => {});
     setSesion({ usuario: r.usuario, nombre: r.nombre });
   }, []);
+
+  const reintentarBiometria = useCallback(async () => {
+    const token = await SecureStore.getItemAsync(TOKEN_KEY).catch(() => null);
+    if (!token || !(await pedirBiometria())) return false;
+    try {
+      return await validarToken(token);
+    } catch {
+      await guardarToken(null);
+      return false;
+    }
+  }, [pedirBiometria, validarToken]);
 
   const salir = useCallback(async () => {
     const pushToken = await readPersistedPushToken();
@@ -151,6 +190,7 @@ export function useAuth(): Auth {
     // después se limpia el token local.
     await req('/api/logout', { method: 'POST' }).catch(() => {});
     await guardarToken(null);
+    await SecureStore.deleteItemAsync(BIOMETRIC_KEY).catch(() => {});
     setSesion(null);
   }, []);
 
@@ -158,7 +198,7 @@ export function useAuth(): Auth {
     await req<{ ok: true }>('/api/me/password', { method: 'POST', body: JSON.stringify({ actual, nueva }) });
   }, []);
 
-  return { sesion, cargando, entrar, salir, cambiarPassword };
+  return { sesion, cargando, entrar, salir, cambiarPassword, reintentarBiometria, biometriaBloqueada };
 }
 
 export interface NuevoCarPayload {
@@ -166,13 +206,13 @@ export interface NuevoCarPayload {
   model: string;
   year: number;
   gpsTag: string;
-  lastServiceDate: string;
-  serviceCada: number;
-  serviceUnidad: 'dias' | 'meses';
-  seguroDate: string;
-  seguroCosto: number;
-  seguroPeriodo: 'mensual' | 'anual';
-  seguroCada: number;
+  kilometraje?: number;
+  lastServiceDate?: string;
+  serviceCada?: number;
+  serviceUnidad?: 'dias' | 'meses';
+  seguroDate?: string;
+  seguroNombre?: string;
+  seguroCada?: number;
 }
 
 export interface NuevoPagoPayload {
@@ -191,6 +231,8 @@ export interface NuevoEgresoPayload {
   monto: number;
   cat: string;
   comprobante: PickedFile | null;
+  items?: { nombre: string; cantidad: number; costoUnitario: number; subtotal: number }[];
+  manoObra?: number;
 }
 
 export interface AssistantHistoryItem {
@@ -253,6 +295,7 @@ export interface FleetStore {
   cars: Car[];
   movs: Mov[];
   pagos: Pago[];
+  locations: CarLocation[];
   cargando: boolean;
   error: string;
   patchCar: (id: string, patch: Partial<Car>) => void;
@@ -277,14 +320,19 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
   const [cars, setCars] = useState<Car[]>([]);
   const [movs, setMovs] = useState<Mov[]>([]);
   const [pagos, setPagos] = useState<Pago[]>([]);
+  const [locations, setLocations] = useState<CarLocation[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
 
   const recargar = useCallback(async () => {
-    const s = await req<{ cars: CarDto[]; movs: MovDto[]; pagos: PagoDto[] }>('/api/state');
+    const [s, l] = await Promise.all([
+      req<{ cars: CarDto[]; movs: MovDto[]; pagos: PagoDto[] }>('/api/state'),
+      req<CarLocation[]>('/api/locations'),
+    ]);
     setCars(s.cars.map(toCar));
     setMovs(s.movs.map(toMov));
     setPagos(s.pagos.map(toPago));
+    setLocations(l);
   }, []);
 
   useEffect(() => {
@@ -295,6 +343,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
       setCars([]);
       setMovs([]);
       setPagos([]);
+      setLocations([]);
       setError('');
       setCargando(true);
       return;
@@ -366,6 +415,8 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     fd.append('razon', datos.razon);
     fd.append('monto', String(datos.monto));
     fd.append('cat', datos.cat);
+    fd.append('manoObra', String(datos.manoObra ?? 0));
+    fd.append('items', JSON.stringify(datos.items ?? []));
     // React Native no tiene `File`: un archivo elegido con expo-document-picker
     // se adjunta como este objeto {uri,name,type}, que el fetch de RN entiende
     // igual que un File real al armar el multipart.
@@ -397,6 +448,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     cars,
     movs,
     pagos,
+    locations,
     cargando,
     error,
     patchCar,

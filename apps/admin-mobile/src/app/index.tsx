@@ -37,7 +37,7 @@ export default function App() {
   if (!auth.sesion) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#f4f0e8' }}>
-        <Login onEntrar={auth.entrar} />
+        <Login onEntrar={auth.entrar} onBiometria={auth.biometriaBloqueada ? auth.reintentarBiometria : undefined} />
       </SafeAreaView>
     );
   }
@@ -60,7 +60,7 @@ function AuthedApp({
   update: (patch: Partial<MobileState> | ((s: MobileState) => Partial<MobileState>)) => void;
   store: FleetStore;
 }) {
-  const v = useMobileView(store.cars, store.movs, store.pagos, state, update, store, cambiarPassword);
+  const v = useMobileView(store.cars, store.movs, store.pagos, store.locations, state, update, store, cambiarPassword);
   if (store.cargando) return <Spinner />;
   return (
     // Sin el borde "bottom": ese inset lo absorbe BottomNav (su fondo tiene

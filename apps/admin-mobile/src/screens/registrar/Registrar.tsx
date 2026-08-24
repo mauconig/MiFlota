@@ -41,7 +41,7 @@ export function Registrar({ v }: { v: MobileView }) {
       </View>
       {fecha.picker}
 
-      <NumericKeypad keys={r.keys} />
+      {r.tab === 'cobro' && <NumericKeypad keys={r.keys} />}
 
       <Pressable onPress={r.submit} disabled={r.guardando} style={{ borderRadius: 20, backgroundColor: r.cta.bg, minHeight: 52, alignItems: 'center', justifyContent: 'center', opacity: r.guardando ? 0.7 : 1 }}>
         <Text style={{ color: r.cta.fg, fontSize: 15, fontWeight: '700' }}>{r.guardando ? 'Guardando…' : r.cta.label}</Text>

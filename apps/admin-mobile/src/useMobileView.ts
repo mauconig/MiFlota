@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { BackHandler, Keyboard } from 'react-native';
-import type { Car, Mov, Pago, MobileState, Screen, RegistrarTab, FleetFilter, PickedFile } from './types';
+import type { Car, Mov, Pago, MobileState, Screen, RegistrarTab, FleetFilter, PickedFile, CarLocation } from './types';
 import { imputar, type Aplicacion } from './cobranza';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, daysBetween, durLbl, dLbl, dLblFull, fmt, fmtShort, initials, statusColor, numFromInput, miles, isoLocal } from './format';
@@ -18,6 +18,7 @@ const MESES_ABR = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep'
 // `TODAY` fijo (no `new Date()`) para quedar alineada con el `MIFLOTA_HOY`
 // del servidor — nunca llamar al reloj real acá.
 
+const svcConfigured = (c: Car) => c.serviceCada > 0 && c.lastServiceDate.getFullYear() > 1970;
 const svcNextDate = (c: Car) => (c.serviceUnidad === 'meses' ? addM(c.lastServiceDate, c.serviceCada) : addD(c.lastServiceDate, c.serviceCada));
 const svcDaysLeft = (c: Car) => daysBetween(TODAY, svcNextDate(c));
 /** Una cuota es de quien manejaba el auto cuando se emitió, no de quien lo
@@ -94,7 +95,7 @@ const chipStyle = (active: boolean, tone?: 'amber') => {
 
 interface Alerta {
   car: Car;
-  kind: 'Service' | 'Seguro' | 'Taller';
+  kind: 'Service' | 'Seguro' | 'Taller' | 'Kilometraje';
   sev: number;
   text: string;
 }
@@ -103,14 +104,16 @@ function buildAlerts(active: Car[]): Alerta[] {
   const list: Alerta[] = [];
   active.forEach((c) => {
     const dLeft = svcDaysLeft(c);
-    if (dLeft <= SVC_AVISO_DIAS) {
+    if (svcConfigured(c) && dLeft <= SVC_AVISO_DIAS) {
       list.push({ car: c, kind: 'Service', sev: dLeft < 0 ? 2 : 1, text: 'Service ' + (dLeft < 0 ? 'vencido hace ' + durLbl(dLeft) : dLeft === 0 ? 'vence hoy' : 'vence en ' + durLbl(dLeft)) });
     }
     const segLeft = daysBetween(TODAY, c.seguroDate);
-    if (segLeft <= SEG_AVISO_DIAS) {
+    if (c.seguroCada > 0 && c.seguroNombre.trim() && c.seguroDate.getFullYear() > 1970 && segLeft <= SEG_AVISO_DIAS) {
       list.push({ car: c, kind: 'Seguro', sev: segLeft < 0 ? 2 : 1, text: 'Seguro ' + (segLeft < 0 ? 'vencido hace ' + durLbl(segLeft) : segLeft === 0 ? 'vence hoy' : 'vence en ' + durLbl(segLeft)) });
     }
     if (c.estado === 'taller') list.push({ car: c, kind: 'Taller', sev: 1, text: 'En taller, sin generar cuota' });
+    const kmDays = c.kilometrajeActualizado ? daysBetween(new Date(c.kilometrajeActualizado + 'T12:00:00'), TODAY) : Number.POSITIVE_INFINITY;
+    if (!c.kilometrajeActualizado || kmDays > 7) list.push({ car: c, kind: 'Kilometraje', sev: 1, text: c.kilometraje ? 'Kilometraje pendiente de actualizar' : 'Falta cargar el kilometraje' });
   });
   list.sort((a, b) => b.sev - a.sev);
   return list;
@@ -123,7 +126,7 @@ const TAG: Record<Car['estado'], [string, string, string]> = {
 };
 
 export function blankRegistrarForm(tab: RegistrarTab, carId: string, driver: string): import('./types').RegistrarForm {
-  return { tab, carId, digits: '', fecha: isoLocal(TODAY), nota: '', driver, tipo: 'pago', cat: CATS[0], comprobante: null, guardando: false };
+  return { tab, carId, digits: '', fecha: isoLocal(TODAY), nota: '', driver, tipo: 'pago', cat: CATS[0], comprobante: null, items: [{ nombre: '', cantidad: '1', costoUnitario: '' }], manoObra: '', guardando: false };
 }
 
 function blankNuevoVehiculo(): import('./types').NuevoVehiculoForm {
@@ -132,14 +135,14 @@ function blankNuevoVehiculo(): import('./types').NuevoVehiculoForm {
     model: '',
     year: '2018',
     gpsTag: '',
-    lastService: isoLocal(TODAY),
-    serviceCada: '6',
+    kilometraje: '',
+    lastService: '',
+    serviceCada: '',
     serviceUnidad: 'meses',
     // El vencimiento no se presupone: es el dato que hay que mirar en la póliza.
     seguroVence: '',
-    seguroCosto: '',
-    seguroPeriodo: 'mensual',
-    seguroCada: '12',
+    seguroNombre: '',
+    seguroCada: '',
   };
 }
 
@@ -235,6 +238,12 @@ interface DetalleView {
   goGasto: () => void;
   openEstadoSheet: () => void;
   openChoferSheet: () => void;
+  location: {
+    age: string;
+    stale: boolean;
+    accuracy: number | null;
+    mapsUrl: string;
+  } | null;
 }
 
 interface RankRow {
@@ -315,10 +324,12 @@ export interface MobileView {
     model: string;
     year: string;
     gpsTag: string;
+    kilometraje: string;
     setPlate: (v: string) => void;
     setModel: (v: string) => void;
     setYear: (v: string) => void;
     setGpsTag: (v: string) => void;
+    setKilometraje: (v: string) => void;
     lastService: string;
     setLastService: (iso: string) => void;
     hoy: string;
@@ -327,9 +338,8 @@ export interface MobileView {
     unidadOpts: Chip[];
     seguroVence: string;
     setSeguroVence: (iso: string) => void;
-    seguroCosto: string;
-    setSeguroCosto: (v: string) => void;
-    periodoOpts: Chip[];
+    seguroNombre: string;
+    setSeguroNombre: (v: string) => void;
     seguroCada: string;
     setSeguroCada: (v: string) => void;
     /** Palabra al lado de "Renovar cada": sigue al chip Mensual/Anual (solo la
@@ -376,6 +386,12 @@ export interface MobileView {
       lockCar: boolean;
       comprobante: PickedFile | null;
       setComprobante: (f: PickedFile | null) => void;
+      items: { nombre: string; cantidad: string; costoUnitario: string }[];
+      setItem: (index: number, patch: Partial<{ nombre: string; cantidad: string; costoUnitario: string }>) => void;
+      addItem: () => void;
+      removeItem: (index: number) => void;
+      manoObra: string;
+      setManoObra: (v: string) => void;
     } | null;
   } | null;
 
@@ -386,6 +402,7 @@ export interface MobileView {
     egr: string;
     nMovs: number;
     cats: { cat: string; w: number; color: string; short: string }[];
+    gastos: { plate: string; total: string; rows: { desc: string; cat: string; amount: string; items: { nombre: string; cantidad: string; subtotal: string }[]; manoObra: string }[] }[];
     exportXls: () => void;
     exportPdf: () => void;
   };
@@ -447,6 +464,7 @@ export function useMobileView(
   cars: Car[],
   movs: Mov[],
   pagos: Pago[],
+  locations: CarLocation[],
   state: MobileState,
   update: (patch: Partial<MobileState> | ((s: MobileState) => Partial<MobileState>)) => void,
   persist: Pick<FleetStore, 'patchCar' | 'previewDriverCredentials' | 'assignDriver' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller'>,
@@ -504,30 +522,18 @@ export function useMobileView(
       toast('Ingresá la marca y el modelo');
       return null;
     }
+    const kilometraje = numFromInput(n.kilometraje);
     if (cars.some((c) => c.plate.toUpperCase() === plate)) {
       toast('Esa chapa ya está en la flota');
       return null;
     }
     const cada = numFromInput(n.serviceCada);
-    if (!cada) {
-      toast('Indicá cada cuánto se le hace el service');
-      return null;
-    }
-    if (n.lastService > isoLocal(TODAY)) {
+    if (n.lastService && n.lastService > isoLocal(TODAY)) {
       toast('El último service no puede ser una fecha futura');
       return null;
     }
-    if (!n.seguroVence) {
-      toast('Indicá cuándo vence el seguro');
-      return null;
-    }
-    const segCosto = numFromInput(n.seguroCosto);
-    if (!segCosto) {
-      toast('Indicá el costo del seguro');
-      return null;
-    }
     const segCada = numFromInput(n.seguroCada);
-    if (!segCada || segCada > SEG_CADA_MAX) {
+    if (segCada > SEG_CADA_MAX) {
       toast('Cada cuánto se renueva el seguro: entre 1 y ' + SEG_CADA_MAX + ' meses');
       return null;
     }
@@ -538,13 +544,11 @@ export function useMobileView(
         model: n.model.trim(),
         year: numFromInput(n.year) || 2018,
         gpsTag: n.gpsTag.trim(),
-        lastServiceDate: n.lastService || isoLocal(TODAY),
-        serviceCada: cada,
-        serviceUnidad: n.serviceUnidad,
-        seguroDate: n.seguroVence,
-        seguroCosto: segCosto,
-        seguroPeriodo: n.seguroPeriodo,
-        seguroCada: segCada,
+        ...(n.kilometraje.trim() ? { kilometraje } : {}),
+        ...(n.lastService ? { lastServiceDate: n.lastService, serviceCada: cada, serviceUnidad: n.serviceUnidad } : n.serviceCada ? { serviceCada: cada, serviceUnidad: n.serviceUnidad } : {}),
+        ...(n.seguroVence ? { seguroDate: n.seguroVence } : {}),
+        ...(n.seguroNombre.trim() ? { seguroNombre: n.seguroNombre.trim() } : {}),
+        ...(n.seguroCada ? { seguroCada: segCada } : {}),
       },
     };
   };
@@ -557,12 +561,12 @@ export function useMobileView(
       { label: 'Año', value: n.year || '—' },
     ];
     if (n.gpsTag.trim()) rows.push({ label: 'GPS tag', value: n.gpsTag.trim() });
+    rows.push({ label: 'Kilometraje', value: n.kilometraje || '—' });
     rows.push({ label: 'Último service', value: n.lastService ? dLblFull(new Date(n.lastService + 'T12:00:00')) : '—' });
     rows.push({ label: 'Service cada', value: (n.serviceCada || '—') + ' ' + (n.serviceUnidad === 'dias' ? 'días' : 'meses') });
     rows.push({ label: 'Seguro vence', value: n.seguroVence ? dLblFull(new Date(n.seguroVence + 'T12:00:00')) : '—' });
-    const costo = numFromInput(n.seguroCosto);
-    rows.push({ label: 'Costo de la póliza', value: (costo ? fmt(costo) : '—') + (n.seguroPeriodo === 'mensual' ? ' por mes' : ' por año') });
-    rows.push({ label: 'Renovar cada', value: (n.seguroCada || '—') + ' ' + (n.seguroPeriodo === 'anual' ? 'años' : 'meses') });
+    rows.push({ label: 'Aseguradora', value: n.seguroNombre || '—' });
+    rows.push({ label: 'Renovar cada', value: (n.seguroCada || '—') + ' meses' });
     return rows;
   };
 
@@ -641,6 +645,21 @@ export function useMobileView(
   });
 
   const car = state.carId ? cars.find((c) => c.id === state.carId) : undefined;
+
+  // Última posición conocida del auto. Misma lógica que admin-web: la edad se
+  // calcula desde `recorded_at` y pasada una hora se avisa que está vieja.
+  const carLocation = car ? locations.find((l) => l.carId === car.id) : undefined;
+  const locationView = (() => {
+    if (!carLocation) return null;
+    const ageMinutes = Math.max(0, Math.floor((Date.now() - new Date(carLocation.recordedAt).getTime()) / 60_000));
+    const age = ageMinutes < 2 ? 'hace un momento' : ageMinutes < 60 ? 'hace ' + ageMinutes + ' min' : 'hace ' + Math.floor(ageMinutes / 60) + ' h';
+    return {
+      age,
+      stale: ageMinutes > 60,
+      accuracy: carLocation.accuracy ?? null,
+      mapsUrl: `https://www.google.com/maps/search/?api=1&query=${carLocation.latitude},${carLocation.longitude}`,
+    };
+  })();
 
   // ---- period sheet --------------------------------------------------------
   const periodOpts: [MobileState['period'], string][] = [
@@ -785,6 +804,7 @@ export function useMobileView(
           choferCredentials: null,
           choferCredentialsLoading: false,
         }),
+      location: locationView,
     };
   }
 
@@ -801,7 +821,12 @@ export function useMobileView(
   let registrarView: MobileView['registrar'] = null;
   if (f) {
     const setF = (patch: Partial<typeof f>) => update((s) => ({ registrar: s.registrar && { ...s.registrar, ...patch } }));
-    const amountNum = parseInt(f.digits || '0', 10);
+    const gastoItems = f.items
+      .map((item) => ({ nombre: item.nombre.trim(), cantidad: numFromInput(item.cantidad), costoUnitario: numFromInput(item.costoUnitario) }))
+      .filter((item) => item.nombre && item.cantidad > 0 && item.costoUnitario > 0)
+      .map((item) => ({ ...item, subtotal: item.cantidad * item.costoUnitario }));
+    const manoObraNum = numFromInput(f.manoObra);
+    const amountNum = f.tab === 'gasto' ? gastoItems.reduce((sum, item) => sum + item.subtotal, 0) + manoObraNum : parseInt(f.digits || '0', 10);
     const press = (k: string) =>
       setF({
         digits: k === 'del' ? f.digits.slice(0, -1) : k === '000' ? (f.digits ? (f.digits + '000').slice(0, 10) : f.digits) : f.digits.length < 10 ? (f.digits === '' && k === '0' ? '' : f.digits + k) : f.digits,
@@ -841,12 +866,18 @@ export function useMobileView(
         lockCar: !!car,
         comprobante: f.comprobante,
         setComprobante: (file) => setF({ comprobante: file }),
+        items: f.items,
+        setItem: (index, patch) => setF({ items: f.items.map((item, i) => (i === index ? { ...item, ...patch } : item)) }),
+        addItem: () => setF({ items: [...f.items, { nombre: '', cantidad: '1', costoUnitario: '' }] }),
+        removeItem: (index) => setF({ items: f.items.length > 1 ? f.items.filter((_, i) => i !== index) : f.items }),
+        manoObra: f.manoObra,
+        setManoObra: (v) => setF({ manoObra: miles(v) }),
       };
     }
 
     const submit = () => {
       if (f.guardando) return;
-      if (!amountNum) return toast(f.tab === 'cobro' ? 'Ingresá cuánto pagó' : 'Indicá cuánto se gastó');
+      if (!amountNum) return toast(f.tab === 'cobro' ? 'Ingresá cuánto pagó' : 'Agregá repuestos o mano de obra');
       if (f.fecha > isoLocal(TODAY)) return toast('La fecha no puede ser futura');
       if (f.tab === 'cobro') {
         if (!f.driver) return toast('Elegí de qué chofer es el pago');
@@ -869,7 +900,7 @@ export function useMobileView(
         setF({ guardando: true });
         const plate = carDe.get(f.carId)?.plate ?? '';
         persist
-          .addEgreso(f.carId, { razon: f.nota.trim(), monto: amountNum, cat: f.cat, comprobante: f.comprobante })
+          .addEgreso(f.carId, { razon: f.nota.trim(), monto: amountNum, cat: f.cat, comprobante: f.comprobante, items: gastoItems, manoObra: manoObraNum })
           .then(() => {
             toast('Gasto registrado · ' + plate + ' · ' + fmt(amountNum));
             back();
@@ -886,7 +917,7 @@ export function useMobileView(
       setTab: (t) => setF({ tab: t }),
       amountDisplay: amountNum ? fmt(amountNum) : '₲ 0',
       amountColor: amountNum ? (f.tab === 'cobro' ? COLORS.pos : COLORS.neg) : '#b3aa99',
-      amountHint: amountNum ? (f.tab === 'cobro' ? 'Cobro al chofer' : 'Gasto del auto') : 'Usá el teclado para escribir el monto',
+      amountHint: amountNum ? (f.tab === 'cobro' ? 'Cobro al chofer' : 'Repuestos + mano de obra') : f.tab === 'gasto' ? 'Agregá el detalle del gasto' : 'Usá el teclado para escribir el monto',
       keys,
       fecha: f.fecha,
       setFecha: (iso) => setF({ fecha: iso }),
@@ -1038,10 +1069,12 @@ export function useMobileView(
       model: state.nuevoVehiculo.model,
       year: state.nuevoVehiculo.year,
       gpsTag: state.nuevoVehiculo.gpsTag,
+      kilometraje: state.nuevoVehiculo.kilometraje,
       setPlate: (v) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, plate: v } })),
       setModel: (v) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, model: v } })),
       setYear: (v) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, year: v } })),
       setGpsTag: (v) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, gpsTag: v } })),
+      setKilometraje: (v) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, kilometraje: v } })),
       lastService: state.nuevoVehiculo.lastService,
       setLastService: (iso) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, lastService: iso } })),
       hoy: isoLocal(TODAY),
@@ -1054,17 +1087,12 @@ export function useMobileView(
       })),
       seguroVence: state.nuevoVehiculo.seguroVence,
       setSeguroVence: (iso) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, seguroVence: iso } })),
-      seguroCosto: state.nuevoVehiculo.seguroCosto,
-      setSeguroCosto: (v) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, seguroCosto: miles(v) } })),
-      periodoOpts: (['mensual', 'anual'] as const).map((p) => ({
-        label: p === 'mensual' ? 'Mensual' : 'Anual',
-        ...chipStyle(state.nuevoVehiculo.seguroPeriodo === p),
-        pick: () => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, seguroPeriodo: p } })),
-      })),
+      seguroNombre: state.nuevoVehiculo.seguroNombre,
+      setSeguroNombre: (v) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, seguroNombre: v } })),
       seguroCada: state.nuevoVehiculo.seguroCada,
       setSeguroCada: (v) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, seguroCada: v } })),
       // Solo la palabra: el valor guardado siempre son meses (ver NuevoVehiculoForm).
-      cadaUnitLabel: state.nuevoVehiculo.seguroPeriodo === 'anual' ? 'años' : 'meses',
+      cadaUnitLabel: 'meses',
       guardar: () => {
         if (!nuevoVehiculoValidar()) return;
         update({ nuevoVehiculoConfirm: true });
@@ -1108,6 +1136,11 @@ export function useMobileView(
         .filter((x) => x.v > 0)
         .sort((a, b) => b.v - a.v)
         .map((x) => ({ cat: x.cat, w: Math.max(4, Math.round((x.v / repMax) * 100)), color: CATCOLORS[x.cat], short: fmtShort(x.v) })),
+      gastos: active.map((car) => {
+        const movements = movs.filter((m) => inR(m) && m.type === 'egreso' && m.carId === car.id);
+        const rows = movements.map((m) => ({ desc: m.desc, cat: m.cat || 'Otro', amount: fmt(m.amount), items: (m.items || []).map((item) => ({ nombre: item.nombre, cantidad: String(item.cantidad), subtotal: fmt(item.subtotal) })), manoObra: m.manoObra ? fmt(m.manoObra) : '' }));
+        return { plate: car.plate, total: fmt(movements.reduce((sum, m) => sum + m.amount, 0)), rows };
+      }).filter((g) => g.rows.length > 0),
       exportXls,
       exportPdf,
     },

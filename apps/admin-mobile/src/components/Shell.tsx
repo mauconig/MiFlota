@@ -1,4 +1,5 @@
-import { KeyboardAvoidingView, ScrollView, View } from 'react-native';
+import { View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type { MobileView } from '../useMobileView';
 import { TabHeader, SubHeader } from './Header';
 import { BottomNav } from './BottomNav';
@@ -24,7 +25,7 @@ export function Shell({ v, nombre, usuario, onLogout }: { v: MobileView; nombre:
     // se lo llevaba puesto a él también. Afuera, ninguna animación de teclado
     // lo puede mover — solo el contenido de arriba se corre para el teclado.
     <View style={{ flex: 1, backgroundColor: '#f4f0e8' }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+      <View style={{ flex: 1 }}>
         {v.isTab && <TabHeader title={v.headerTitle} sub={v.headerSub} onAssistant={v.openAssistant} onProfile={v.goPerfil} nombre={nombre} />}
         {v.isSub && <SubHeader title={v.headerTitle} onBack={v.back} />}
         {v.isAssistant && <SubHeader title={v.headerTitle} onBack={v.back} />}
@@ -34,7 +35,7 @@ export function Shell({ v, nombre, usuario, onLogout }: { v: MobileView; nombre:
           // compositor se acomoden bien al teclado.
           <Assistant onSinSesion={onLogout} onOpenCar={v.goDetalle} />
         ) : (
-          <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
+          <KeyboardAwareScrollView style={{ flex: 1 }} bottomOffset={24} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
             {v.screen === 'dashboard' && <Dashboard v={v} />}
             {v.screen === 'flota' && <Flota v={v} />}
             {v.screen === 'detalle' && <Detalle v={v} />}
@@ -43,9 +44,9 @@ export function Shell({ v, nombre, usuario, onLogout }: { v: MobileView; nombre:
             {v.screen === 'reportes' && <Reportes v={v} />}
             {v.screen === 'ranking' && <Ranking v={v} />}
             {v.screen === 'perfil' && <Perfil v={v} nombre={nombre} usuario={usuario} onLogout={onLogout} />}
-          </ScrollView>
+          </KeyboardAwareScrollView>
         )}
-      </KeyboardAvoidingView>
+      </View>
 
       <View style={{ position: 'relative' }}>
         {v.period.open && <PeriodoSheet v={v} />}

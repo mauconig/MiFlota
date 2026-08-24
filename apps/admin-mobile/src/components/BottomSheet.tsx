@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { KeyboardAvoidingView, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { Modal, Pressable, Text, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
@@ -15,7 +16,7 @@ export function BottomSheet({ title, onClose, children }: { title: string; onClo
           `height` en vez de `padding` en Android llegó a dejar la pantalla
           de atrás con un hueco en blanco permanente tras un remount (ver
           Shell) — `padding` en las dos plataformas evita esa clase de bug. */}
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+      <View style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(22,21,15,0.38)', justifyContent: 'flex-end' }} onPress={onClose}>
           <Pressable
             onPress={() => {}}
@@ -34,12 +35,12 @@ export function BottomSheet({ title, onClose, children }: { title: string; onClo
                 </Svg>
               </Pressable>
             </View>
-            <ScrollView contentContainerStyle={{ gap: 10 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <KeyboardAwareScrollView bottomOffset={24} contentContainerStyle={{ gap: 10 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               {children}
-            </ScrollView>
+            </KeyboardAwareScrollView>
           </Pressable>
         </Pressable>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }

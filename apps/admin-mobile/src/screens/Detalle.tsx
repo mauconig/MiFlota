@@ -1,9 +1,19 @@
-import { Pressable, Text, View } from 'react-native';
+import { Linking, Pressable, Text, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import type { MobileView } from '../useMobileView';
 import { Avatar } from '../components/Avatar';
 import { AlertCard } from '../components/AlertCard';
 import { MovRow } from '../components/MovRow';
+
+const GpsIcon = ({ color }: { color: string }) => (
+  <Svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+    <Circle cx="12" cy="12" r="3" />
+    <Path d="M12 2v4" />
+    <Path d="M12 18v4" />
+    <Path d="M2 12h4" />
+    <Path d="M18 12h4" />
+  </Svg>
+);
 
 export function Detalle({ v }: { v: MobileView }) {
   const dc = v.detalle;
@@ -77,6 +87,27 @@ export function Detalle({ v }: { v: MobileView }) {
           <Text style={{ color: '#1a1a18', fontSize: 14, fontWeight: '700' }}>Gasto</Text>
         </Pressable>
       </View>
+
+      {dc.location && (
+        <View style={{ backgroundColor: dc.location.stale ? '#fff9ec' : '#f2f8f4', borderWidth: 1, borderColor: dc.location.stale ? '#f2e4c6' : '#dcebe2', borderRadius: 18, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 13 }}>
+          <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: dc.location.stale ? '#f9ead0' : '#e7f2ec', alignItems: 'center', justifyContent: 'center' }}>
+            <GpsIcon color={dc.location.stale ? '#a8730f' : '#2e7d5b'} />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase', color: '#6b665c' }}>Última ubicación</Text>
+            <Text style={{ fontSize: 13, fontWeight: '700', marginTop: 2 }}>
+              {dc.location.stale ? 'Ubicación desactualizada' : 'Auto localizado'}
+            </Text>
+            <Text style={{ fontSize: 11, color: '#6b665c', marginTop: 1 }}>
+              {dc.location.age}
+              {dc.location.accuracy != null ? ' · precisión ±' + Math.round(dc.location.accuracy) + ' m' : ''}
+            </Text>
+          </View>
+          <Pressable onPress={() => void Linking.openURL(dc.location!.mapsUrl)} style={{ borderRadius: 12, backgroundColor: '#16150f', paddingVertical: 9, paddingHorizontal: 13 }}>
+            <Text style={{ color: '#fffdf8', fontSize: 12, fontWeight: '700' }}>Mapa</Text>
+          </Pressable>
+        </View>
+      )}
 
       {dc.hasAlerts && (
         <View style={{ gap: 8 }}>

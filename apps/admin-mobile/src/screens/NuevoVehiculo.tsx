@@ -18,7 +18,7 @@ export function NuevoVehiculo({ v }: { v: MobileView }) {
   const seguroVence = useDateField(nc.seguroVence, nc.setSeguroVence);
   return (
     <View style={{ paddingHorizontal: 16, paddingTop: 6, paddingBottom: 16, gap: 14 }}>
-      <Text style={{ fontSize: 12, color: '#6b665c', paddingHorizontal: 4 }}>Chapa y modelo son obligatorios. El chofer se asigna después, desde la ficha del vehículo.</Text>
+      <Text style={{ fontSize: 12, color: '#6b665c', paddingHorizontal: 4 }}>Solo chapa y modelo son obligatorios. Service, seguro y kilometraje se pueden agregar después desde la ficha.</Text>
 
       <View style={card}>
         <View style={[row, divider]}>
@@ -40,15 +40,19 @@ export function NuevoVehiculo({ v }: { v: MobileView }) {
           <TextInput keyboardType="numeric" value={nc.year} onChangeText={nc.setYear} placeholder="2018" style={valueInput} />
         </View>
         <View style={[row, divider]}>
+          <Text style={label}>Kilometraje · opcional</Text>
+          <TextInput keyboardType="numeric" value={nc.kilometraje} onChangeText={nc.setKilometraje} placeholder="120000" style={valueInput} />
+        </View>
+        <View style={[row, divider]}>
           <Text style={label}>GPS tag</Text>
           <TextInput value={nc.gpsTag} onChangeText={nc.setGpsTag} placeholder="Opcional" maxLength={40} style={valueInput} />
         </View>
         <Pressable onPress={lastService.open} style={[row, divider]}>
-          <Text style={label}>Último service</Text>
+          <Text style={label}>Último service · opcional</Text>
           <Text style={valueInput}>{nc.lastService ? dLblFull(new Date(nc.lastService + 'T12:00:00')) : 'Elegir fecha'}</Text>
         </Pressable>
         <View style={[row, { paddingBottom: 12 }]}>
-          <Text style={label}>Service cada</Text>
+          <Text style={label}>Service cada · opcional</Text>
           <TextInput keyboardType="numeric" value={nc.serviceCada} onChangeText={nc.setServiceCada} placeholder="6" style={valueInput} />
         </View>
         <View style={{ paddingBottom: 12 }}>
@@ -68,16 +72,13 @@ export function NuevoVehiculo({ v }: { v: MobileView }) {
           <Text style={valueInput}>{nc.seguroVence ? dLblFull(new Date(nc.seguroVence + 'T12:00:00')) : 'Elegir fecha'}</Text>
         </Pressable>
         <View style={[row, divider]}>
-          <Text style={label}>Costo de la póliza</Text>
-          <TextInput keyboardType="numeric" value={nc.seguroCosto} onChangeText={nc.setSeguroCosto} placeholder="400.000" style={valueInput} />
+          <Text style={label}>Aseguradora</Text>
+          <TextInput value={nc.seguroNombre} onChangeText={nc.setSeguroNombre} placeholder="Mapfre" style={valueInput} />
         </View>
         <View style={[row, { paddingBottom: 12 }]}>
           <Text style={label}>Renovar cada</Text>
           <TextInput keyboardType="numeric" value={nc.seguroCada} onChangeText={nc.setSeguroCada} placeholder="12" style={valueInput} />
           <Text style={{ fontSize: 13, color: '#6b665c' }}>{nc.cadaUnitLabel}</Text>
-        </View>
-        <View style={{ paddingBottom: 12 }}>
-          <ChipRow chips={nc.periodoOpts} equal />
         </View>
       </View>
       {seguroVence.picker}

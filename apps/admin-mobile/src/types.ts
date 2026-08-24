@@ -2,7 +2,6 @@ export type Estado = 'activo' | 'taller' | 'baja';
 export type ServiceUnidad = 'dias' | 'meses';
 /** Cada cuánto se paga el seguro, que no es lo mismo que cada cuánto se renueva
     la póliza: se puede pagar por mes y renovar una vez al año. */
-export type SeguroPeriodo = 'mensual' | 'anual';
 
 export interface Car {
   id: string;
@@ -20,12 +19,13 @@ export interface Car {
   serviceCada: number;
   serviceUnidad: ServiceUnidad;
   lastServiceDate: Date;
+  kilometraje: number;
+  kilometrajeActualizado: string | null;
   /** Vencimiento como fecha, no como días restantes: un contador queda
       desactualizado apenas pasa un día en la base. */
   seguroDate: Date;
   /** Costo de la póliza en guaraníes, en la periodicidad de `seguroPeriodo`. */
-  seguroCosto: number;
-  seguroPeriodo: SeguroPeriodo;
+  seguroNombre: string;
   /** Meses entre renovaciones de la póliza. */
   seguroCada: number;
 }
@@ -53,6 +53,16 @@ export interface Mov {
   driverId?: number | null;
   /** Adjunto del gasto. El archivo se pide por `/api/comprobantes/:id`. */
   comprobante?: { id: string; nombre: string; tipo: string };
+  manoObra?: number;
+  items?: GastoItem[];
+}
+
+export interface GastoItem {
+  id?: number;
+  nombre: string;
+  cantidad: number;
+  costoUnitario: number;
+  subtotal: number;
 }
 
 /** `pago` es plata que entró; `ajuste` cancela deuda sin caja (condonación).
@@ -78,6 +88,17 @@ export interface Pago {
   nota?: string;
 }
 
+/** Última posición conocida de un auto (una fila por auto en el servidor). */
+export interface CarLocation {
+  carId: string;
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  recordedAt: string;
+  receivedAt: string;
+  mocked: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Estado de UI propio de admin-mobile. La app es una pila de pantallas sobre
 // un frame de teléfono, no un dashboard de pestañas siempre montadas como
@@ -92,12 +113,12 @@ export interface NuevoVehiculoForm {
   model: string;
   year: string;
   gpsTag: string;
+  kilometraje: string;
   lastService: string;
   serviceCada: string;
   serviceUnidad: ServiceUnidad;
   seguroVence: string;
-  seguroCosto: string;
-  seguroPeriodo: SeguroPeriodo;
+  seguroNombre: string;
   seguroCada: string;
 }
 
@@ -125,7 +146,15 @@ export interface RegistrarForm {
   /** Solo Gasto. */
   cat: string;
   comprobante: PickedFile | null;
+  items: GastoDraft[];
+  manoObra: string;
   guardando: boolean;
+}
+
+export interface GastoDraft {
+  nombre: string;
+  cantidad: string;
+  costoUnitario: string;
 }
 
 export type FleetFilter = 'todos' | 'activo' | 'taller' | 'alerta';
