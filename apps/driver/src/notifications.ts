@@ -1,4 +1,8 @@
 import * as Notifications from 'expo-notifications';
+import * as SecureStore from 'expo-secure-store';
+
+const KM_REMINDER_KEY = 'kilometraje_reminder_id';
+const DAILY_REMINDER_KEY = 'daily_reminder_id';
 
 /** Configura el comportamiento de notificaciones locales. */
 export async function configureNotifications() {
@@ -10,6 +14,8 @@ export async function configureNotifications() {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowAlert: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
       shouldPlaySound: true,
       shouldSetBadge: false,
     }),
@@ -40,10 +46,32 @@ export async function notifyReporte(cat: string) {
   });
 }
 
+export async function scheduleKilometrajeReminder() {
+  const previous = await SecureStore.getItemAsync(KM_REMINDER_KEY);
+  if (previous) await Notifications.cancelScheduledNotificationAsync(previous).catch(() => {});
+  const id = await Notifications.scheduleNotificationAsync({
+    content: {
+      title: 'Actualizá el kilometraje',
+      body: 'Recordá informar el kilometraje de tu auto esta semana.',
+      sound: true,
+    },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(Date.now() + 7 * 86400000) },
+  });
+  await SecureStore.setItemAsync(KM_REMINDER_KEY, id);
+}
+
+export async function notifyKilometrajePendiente() {
+  await Notifications.scheduleNotificationAsync({
+    content: { title: 'Kilometraje pendiente', body: 'Actualizá el kilometraje de tu auto para mantener la flota al día.', sound: true },
+    trigger: null,
+  });
+}
+
 /** Programa un recordatorio diario de cuota. */
 export async function scheduleDailyReminder(hora: number = 19, minuto: number = 0) {
-  await Notifications.cancelScheduledNotificationAsync().catch(() => {});
-  await Notifications.scheduleNotificationAsync({
+  const previous = await SecureStore.getItemAsync(DAILY_REMINDER_KEY);
+  if (previous) await Notifications.cancelScheduledNotificationAsync(previous).catch(() => {});
+  const id = await Notifications.scheduleNotificationAsync({
     content: {
       title: 'Recordatorio de cuota',
       body: 'Recordá pagar tu cuota diaria antes de finalizar la jornada.',
@@ -55,6 +83,7 @@ export async function scheduleDailyReminder(hora: number = 19, minuto: number = 
       minute: minuto,
     },
   });
+  await SecureStore.setItemAsync(DAILY_REMINDER_KEY, id);
 }
 
 /** Cancela todos los recordatorios programados. */
