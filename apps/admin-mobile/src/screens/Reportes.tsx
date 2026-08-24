@@ -1,4 +1,4 @@
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import type { MobileView } from '../useMobileView';
 import type { ReportInclude } from '../types';
@@ -36,9 +36,9 @@ function OptionCard({ title, description, selected, onPress, icon }: { title: st
   );
 }
 
-function ContinueButton({ label = 'Continuar', onPress, disabled = false }: { label?: string; onPress: () => void; disabled?: boolean }) {
+function ContinueButton({ label = 'Continuar', onPress, disabled = false, fixed = false }: { label?: string; onPress: () => void; disabled?: boolean; fixed?: boolean }) {
   return (
-    <Pressable disabled={disabled} onPress={onPress} style={{ minHeight: 50, borderRadius: 17, backgroundColor: disabled ? '#d7d0c3' : INK, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 }}>
+    <Pressable disabled={disabled} onPress={onPress} style={{ minHeight: 50, borderRadius: 17, backgroundColor: disabled ? '#d7d0c3' : INK, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16, ...(fixed ? { position: 'absolute', left: 0, right: 0, bottom: 22, zIndex: 3, elevation: 3 } : {}) }}>
       <Text style={{ color: disabled ? '#8c8476' : PAPER, fontSize: 14, fontWeight: '700' }}>{label}</Text>
     </Pressable>
   );
@@ -63,7 +63,7 @@ function PeriodButton({ v }: { v: MobileView }) {
 
 function SelectionLabel({ value, allLabel, countLabel }: { value: 'todos' | 'todas' | string[]; allLabel: string; countLabel: string }) {
   const label = value === 'todos' || value === 'todas' ? allLabel : value.length === 0 ? 'Ninguno elegido' : `${value.length} ${countLabel}${value.length === 1 ? '' : 's'} elegidos`;
-  return <Text style={{ color: MUTED, fontSize: 12, marginTop: 4 }}>{label}</Text>;
+  return <Text style={{ position: 'absolute', left: 0, right: 0, bottom: 76, color: MUTED, fontSize: 12 }}>{label}</Text>;
 }
 
 function previewMoney(value: number) {
@@ -83,7 +83,7 @@ export function Reportes({ v }: { v: MobileView }) {
   const categoryLabel = rep.categorySelection === 'todas' ? 'Todas las categorías' : `${rep.categorySelection.length} categoría${rep.categorySelection.length === 1 ? '' : 's'}`;
 
   return (
-    <View style={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 24, gap: 14 }}>
+    <View style={{ flex: 1, minHeight: 0, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12, gap: 14 }}>
       <PeriodButton v={v} />
 
       <View style={{ gap: 4 }}>
@@ -99,23 +99,29 @@ export function Reportes({ v }: { v: MobileView }) {
       )}
 
       {isCars && (
-        <View style={{ gap: 10 }}>
+        <View style={{ flex: 1, minHeight: 0 }}>
+          <ScrollView style={{ flex: 1, minHeight: 0, height: 0 }} contentContainerStyle={{ gap: 10, paddingBottom: 82 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" nestedScrollEnabled>
           <OptionCard title="Todos los vehículos" description="Incluye la flota completa" selected={rep.carSelection === 'todos'} onPress={rep.selectAllCars} />
           {rep.carOptions.map((car) => <OptionCard key={car.id} title={car.label} description={car.sub} selected={car.selected} onPress={car.toggle} />)}
+          </ScrollView>
+          <ContinueButton onPress={rep.next} fixed />
           <SelectionLabel value={rep.carSelection} allLabel="Toda la flota" countLabel="vehículo" />
         </View>
       )}
 
       {isCategories && (
-        <View style={{ gap: 10 }}>
+        <View style={{ flex: 1, minHeight: 0 }}>
+          <ScrollView style={{ flex: 1, minHeight: 0, height: 0 }} contentContainerStyle={{ gap: 10, paddingBottom: 82 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" nestedScrollEnabled>
           <OptionCard title="Todas las categorías" description="Incluye todos los gastos del período" selected={rep.categorySelection === 'todas'} onPress={rep.selectAllCategories} />
           {rep.categoryOptions.map((category) => <OptionCard key={category.label} title={category.label} description="Incluir en el reporte" selected={category.selected} onPress={category.toggle} />)}
+          </ScrollView>
+          <ContinueButton onPress={rep.next} fixed />
           <SelectionLabel value={rep.categorySelection} allLabel="Todas las categorías" countLabel="categoría" />
         </View>
       )}
 
       {isReview && (
-        <View style={{ gap: 12 }}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: 24 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled">
           <View style={{ backgroundColor: PAPER, borderWidth: 1, borderColor: BORDER, borderRadius: 18, padding: 16, gap: 12 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}><Text style={{ color: MUTED, fontSize: 13 }}>Período</Text><Text numberOfLines={1} style={{ color: INK, fontSize: 13, fontWeight: '700', flex: 1, textAlign: 'right' }}>{rep.periodLabel}</Text></View>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}><Text style={{ color: MUTED, fontSize: 13 }}>Qué incluye</Text><Text style={{ color: INK, fontSize: 13, fontWeight: '700', flex: 1, textAlign: 'right' }}>{includeLabel}</Text></View>
@@ -167,10 +173,10 @@ export function Reportes({ v }: { v: MobileView }) {
             </Pressable>
           </View>
           <Pressable onPress={rep.reset} style={{ minHeight: 48, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: MUTED, fontSize: 13, fontWeight: '600' }}>Empezar de nuevo</Text></Pressable>
-        </View>
+        </ScrollView>
       )}
 
-      {!isReview && <ContinueButton onPress={rep.next} />}
+      {!isReview && !isCars && !isCategories && <ContinueButton onPress={rep.next} />}
     </View>
   );
 }

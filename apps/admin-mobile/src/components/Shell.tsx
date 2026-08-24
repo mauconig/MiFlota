@@ -39,6 +39,10 @@ export function Shell({ v, nombre, usuario, onLogout }: { v: MobileView; nombre:
           // El chat necesita su propio scroll para que los mensajes y el
           // compositor se acomoden bien al teclado.
           <Assistant onSinSesion={onLogout} onOpenCar={v.goDetalle} />
+        ) : v.screen === 'reportes' ? (
+          <View style={{ flex: 1, minHeight: 0 }}>
+            <Reportes v={v} />
+          </View>
         ) : (
           <KeyboardAwareScrollView style={{ flex: 1 }} bottomOffset={24} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
             {v.screen === 'dashboard' && <Dashboard v={v} />}
@@ -50,7 +54,6 @@ export function Shell({ v, nombre, usuario, onLogout }: { v: MobileView; nombre:
             {v.screen === 'detalle' && <Detalle v={v} />}
             {v.screen === 'nuevoVehiculo' && <NuevoVehiculo v={v} />}
             {v.screen === 'registrar' && <Registrar v={v} />}
-            {v.screen === 'reportes' && <Reportes v={v} />}
             {v.screen === 'ranking' && <Ranking v={v} />}
             {v.screen === 'perfil' && <Perfil v={v} nombre={nombre} usuario={usuario} onLogout={onLogout} />}
           </KeyboardAwareScrollView>
