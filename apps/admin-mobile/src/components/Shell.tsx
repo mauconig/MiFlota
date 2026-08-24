@@ -66,7 +66,7 @@ export function Shell({ v, nombre, usuario, onLogout }: { v: MobileView; nombre:
         {v.choferSheet.open && <ChoferSheet v={v} />}
         {v.registroChoice.open && <RegistroChoiceSheet v={v} />}
         <Toast msg={v.toast} />
-        <BottomNav v={v} />
+        {v.screen !== 'registrar' && <BottomNav v={v} />}
       </View>
     </View>
   );

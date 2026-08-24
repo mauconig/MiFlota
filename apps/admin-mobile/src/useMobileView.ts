@@ -643,7 +643,6 @@ export function useMobileView(
       const firstStep = state.registrar.tab === 'gasto' && state.registrar.lockCar ? 1 : 0;
       if (state.registrar.step > firstStep) {
         let previousStep = state.registrar.step - 1;
-        if (state.registrar.tab === 'gasto' && state.registrar.step === 3 && state.registrar.cat !== 'Repuestos') previousStep = 1;
         update((s) => ({ registrar: s.registrar && { ...s.registrar, step: previousStep } }));
         return;
       }
@@ -1184,12 +1183,10 @@ export function useMobileView(
       if (f.step === 0) return setF({ step: 1 });
       if (f.step === 1) {
         if (!f.cat) return toast('Elegí el tipo de egreso');
-        return setF({ step: f.cat === 'Repuestos' ? 2 : 3 });
+        return setF({ step: 2 });
       }
-      if (f.step === 2 && !f.nota.trim()) return toast('Escribí qué repuesto compraste');
+      if (f.step === 2 && !amountNum) return toast('Ingresá cuánto gastaste');
       if (f.step === 2) return setF({ step: 3 });
-      if (f.step === 3 && !amountNum) return toast('Ingresá cuánto gastaste');
-      if (f.step === 3) setF({ step: 4 });
     };
 
     const submit = () => {
@@ -1250,26 +1247,22 @@ export function useMobileView(
       ['Revisá el egreso', 'Confirmá los datos antes de guardarlo.'],
     ];
     const firstStep = f.lockCar ? 1 : 0;
-    const progressStep = f.tab === 'cobro'
-      ? f.step - firstStep
-      : f.cat === 'Repuestos'
-        ? f.step - firstStep
-        : f.step >= 3
-          ? f.step - firstStep - 1
-          : f.step - firstStep;
-    const totalSteps = f.tab === 'cobro' ? 3 - firstStep : (f.cat === 'Repuestos' ? 5 : 4) - firstStep;
-    const stepMeta = f.tab === 'cobro' ? simpleCobroTitles[f.step] : gastoTitles[f.step];
+    const viewStep = f.tab === 'gasto' ? Math.min(f.step, 3) : f.step;
+    const progressStep = viewStep - firstStep;
+    const totalSteps = f.tab === 'cobro' ? 3 - firstStep : 4 - firstStep;
+    const gastoStepMeta = [gastoTitles[0], gastoTitles[1], gastoTitles[3], gastoTitles[4]][viewStep];
+    const stepMeta = f.tab === 'cobro' ? simpleCobroTitles[f.step] : gastoStepMeta;
     registrarView = {
       tab: f.tab,
       setTab: (t) => setF({ tab: t }),
-      step: f.step,
+      step: viewStep,
       totalSteps,
       progressStep,
       stepTitle: stepMeta[0],
       stepHint: stepMeta[1],
       backStep: () => back(),
       next,
-      nextLabel: (f.tab === 'cobro' && f.step === 2) || (f.tab === 'gasto' && f.step === 4) ? (f.tab === 'cobro' ? 'Registrar ingreso' : 'Registrar egreso') : 'Continuar',
+      nextLabel: (f.tab === 'cobro' && f.step === 2) || (f.tab === 'gasto' && f.step >= 3) ? (f.tab === 'cobro' ? 'Registrar ingreso' : 'Registrar egreso') : 'Continuar',
       nextDisabled: false,
       success: f.success,
       finish,

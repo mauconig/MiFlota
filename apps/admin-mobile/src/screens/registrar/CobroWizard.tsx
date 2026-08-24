@@ -1,4 +1,4 @@
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import type { MobileView } from '../../useMobileView';
 import { MoneyDisplay } from '../../components/MoneyDisplay';
 import { NumericKeypad } from '../../components/NumericKeypad';
@@ -11,23 +11,43 @@ type RegistrarView = NonNullable<MobileView['registrar']>;
 
 const card = { backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 20, padding: 14 } as const;
 
+export function CobroSuccess({ r }: { r: RegistrarView }) {
+  const { width } = useWindowDimensions();
+  const compact = width < 380;
+  if (!r.success) return null;
+  return (
+    <View style={{ flex: 1, width: '100%', maxWidth: 520, alignSelf: 'center', gap: 12, paddingHorizontal: 14, paddingTop: 18, paddingBottom: 12 }}>
+      <View style={{ backgroundColor: '#e7f2ec', borderRadius: 18, padding: compact ? 16 : 18, gap: 6 }}>
+        <Text allowFontScaling={false} numberOfLines={2} style={{ color: '#256b4d', fontSize: compact ? 21 : 23, lineHeight: compact ? 26 : 28, fontWeight: '800' }}>{r.success.title}</Text>
+        <Text allowFontScaling={false} numberOfLines={2} style={{ color: '#4f6b5b', fontSize: 14, lineHeight: 19 }}>{r.success.detail}</Text>
+        <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={{ color: '#256b4d', fontSize: compact ? 24 : 26, fontWeight: '800', marginTop: 6 }}>{r.success.amount}</Text>
+      </View>
+      <Pressable onPress={r.finish} style={{ minHeight: 48, borderRadius: 15, backgroundColor: '#16150f', alignItems: 'center', justifyContent: 'center' }}><Text allowFontScaling={false} style={{ color: '#fffdf8', fontSize: 14, fontWeight: '700' }}>Volver a Inicio</Text></Pressable>
+      <Pressable onPress={r.again} style={{ minHeight: 48, borderRadius: 15, borderWidth: 1, borderColor: '#d9cdb8', alignItems: 'center', justifyContent: 'center' }}><Text allowFontScaling={false} style={{ color: '#5f5a51', fontSize: 14, fontWeight: '700' }}>Registrar otro ingreso</Text></Pressable>
+    </View>
+  );
+}
+
 export function CobroWizard({ r }: { r: RegistrarView }) {
+  const { width } = useWindowDimensions();
+  const compact = width < 380;
   const cobro = r.cobro;
+  const fecha = useDateField(r.fecha, r.setFecha, r.hoy);
   if (!cobro) return null;
 
   if (r.success) {
     return (
-      <View style={{ gap: 18, paddingTop: 10 }}>
-        <View style={{ backgroundColor: '#e7f2ec', borderRadius: 22, padding: 22, gap: 8 }}>
-          <Text style={{ color: '#256b4d', fontSize: 26, fontWeight: '800' }}>{r.success.title}</Text>
-          <Text style={{ color: '#4f6b5b', fontSize: 15 }}>{r.success.detail}</Text>
-          <Text style={{ color: '#256b4d', fontSize: 28, fontWeight: '800', marginTop: 8 }}>{r.success.amount}</Text>
+      <View style={{ flex: 1, width: '100%', maxWidth: 520, alignSelf: 'center', justifyContent: 'flex-start', gap: 12, paddingHorizontal: 14, paddingTop: 18, paddingBottom: 12 }}>
+        <View style={{ backgroundColor: '#e7f2ec', borderRadius: 18, padding: compact ? 16 : 18, gap: 6 }}>
+          <Text allowFontScaling={false} numberOfLines={2} style={{ color: '#256b4d', fontSize: compact ? 21 : 23, lineHeight: compact ? 26 : 28, fontWeight: '800' }}>{r.success.title}</Text>
+          <Text allowFontScaling={false} numberOfLines={2} style={{ color: '#4f6b5b', fontSize: 14, lineHeight: 19 }}>{r.success.detail}</Text>
+          <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={{ color: '#256b4d', fontSize: compact ? 24 : 26, fontWeight: '800', marginTop: 6 }}>{r.success.amount}</Text>
         </View>
-        <Pressable onPress={r.finish} style={{ minHeight: 52, borderRadius: 18, backgroundColor: '#16150f', alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: '#fffdf8', fontSize: 15, fontWeight: '700' }}>Volver a Inicio</Text>
+        <Pressable onPress={r.finish} style={{ minHeight: 48, borderRadius: 15, backgroundColor: '#16150f', alignItems: 'center', justifyContent: 'center' }}>
+          <Text allowFontScaling={false} style={{ color: '#fffdf8', fontSize: 14, fontWeight: '700' }}>Volver a Inicio</Text>
         </Pressable>
-        <Pressable onPress={r.again} style={{ minHeight: 52, borderRadius: 18, borderWidth: 1, borderColor: '#d9cdb8', alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: '#5f5a51', fontSize: 15, fontWeight: '700' }}>Registrar otro ingreso</Text>
+        <Pressable onPress={r.again} style={{ minHeight: 48, borderRadius: 15, borderWidth: 1, borderColor: '#d9cdb8', alignItems: 'center', justifyContent: 'center' }}>
+          <Text allowFontScaling={false} style={{ color: '#5f5a51', fontSize: 14, fontWeight: '700' }}>Registrar otro ingreso</Text>
         </Pressable>
       </View>
     );
@@ -35,8 +55,6 @@ export function CobroWizard({ r }: { r: RegistrarView }) {
 
   const current = cobro.selCars.find((c) => c.id === cobro.carId);
   const select = useSelectSheet('Elegí un auto', cobro.selCars, cobro.setCarId);
-  const fecha = useDateField(r.fecha, r.setFecha, r.hoy);
-
   let content: React.ReactNode;
   if (r.step === 0) {
     content = (
