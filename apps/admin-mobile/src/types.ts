@@ -107,6 +107,14 @@ export interface CarLocation {
 export type Screen = 'dashboard' | 'flota' | 'gastos' | 'mas' | 'alertas' | 'choferes' | 'detalle' | 'nuevoVehiculo' | 'registrar' | 'reportes' | 'ranking' | 'assistant' | 'perfil';
 export type Period = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
 export type RegistrarTab = 'cobro' | 'gasto';
+export type RegistrarStep = number;
+
+export interface RegistrarSuccess {
+  tab: RegistrarTab;
+  title: string;
+  detail: string;
+  amount: string;
+}
 
 export interface NuevoVehiculoForm {
   plate: string;
@@ -148,7 +156,16 @@ export interface RegistrarForm {
   comprobante: PickedFile | null;
   items: GastoDraft[];
   manoObra: string;
+  /** Paso actual del asistente guiado. */
+  step: RegistrarStep;
+  /** true cuando el gasto lleva repuestos; null mientras no se respondiÃ³. */
+  repuestos: boolean | null;
+  /** true cuando se quiere agregar otro repuesto. */
+  otroItem: boolean | null;
+  /** El vehÃ­culo viene fijado cuando el flujo se abre desde su ficha. */
+  lockCar: boolean;
   guardando: boolean;
+  success: RegistrarSuccess | null;
 }
 
 export interface GastoDraft {

@@ -126,8 +126,26 @@ const TAG: Record<Car['estado'], [string, string, string]> = {
   baja: ['Baja', '#f0ece3', '#6b665c'],
 };
 
-export function blankRegistrarForm(tab: RegistrarTab, carId: string, driver: string): import('./types').RegistrarForm {
-  return { tab, carId, digits: '', fecha: isoLocal(TODAY), nota: '', driver, tipo: 'pago', cat: CATS[0], comprobante: null, items: [{ nombre: '', cantidad: '1', costoUnitario: '' }], manoObra: '', guardando: false };
+export function blankRegistrarForm(tab: RegistrarTab, carId: string, driver: string, lockCar = false): import('./types').RegistrarForm {
+  return {
+    tab,
+    carId,
+    digits: '',
+    fecha: isoLocal(TODAY),
+    nota: '',
+    driver,
+    tipo: 'pago',
+    cat: CATS[0],
+    comprobante: null,
+    items: [{ nombre: '', cantidad: '1', costoUnitario: '' }],
+    manoObra: '',
+    step: tab === 'gasto' && !lockCar ? 0 : 0,
+    repuestos: null,
+    otroItem: null,
+    lockCar,
+    guardando: false,
+    success: null,
+  };
 }
 
 function blankNuevoVehiculo(): import('./types').NuevoVehiculoForm {
@@ -971,7 +989,8 @@ export function useMobileView(
   function goRegistrar(tab: RegistrarTab, carId?: string) {
     const resolvedCar = carId ?? car?.id ?? active[0]?.id ?? '';
     const driver = carDe.get(resolvedCar)?.driver ?? '';
-    push('registrar', { registrar: blankRegistrarForm(tab, resolvedCar, driver === 'Sin chofer' ? '' : driver) });
+    const lockCar = Boolean(carId ?? car);
+    push('registrar', { registrar: blankRegistrarForm(tab, resolvedCar, driver === 'Sin chofer' ? '' : driver, lockCar) });
   }
   const goRegistrarCobro = (carId?: string) => goRegistrar('cobro', carId);
   const goRegistrarGasto = (carId?: string) => goRegistrar('gasto', carId);
