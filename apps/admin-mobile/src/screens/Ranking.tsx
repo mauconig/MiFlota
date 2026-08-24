@@ -1,10 +1,27 @@
 import { Pressable, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
 import Svg, { Path, Rect } from 'react-native-svg';
 import type { MobileView } from '../useMobileView';
 import { Avatar } from '../components/Avatar';
+import { Pagination } from '../components/Pagination';
+
+const PAGE_SIZE = 5;
 
 export function Ranking({ v }: { v: MobileView }) {
   const rk = v.ranking;
+  const [page, setPage] = useState(0);
+  const resetKey = useMemo(() => rk.rows.map((row) => `${row.pos}-${row.name}`).join('|'), [rk.rows]);
+  const pageCount = Math.max(1, Math.ceil(rk.rows.length / PAGE_SIZE));
+  const visibleRows = rk.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(0);
+  }, [resetKey]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount - 1));
+  }, [pageCount]);
+
   const segBg = (on: boolean) => (on ? '#16150f' : 'transparent');
   const segFg = (on: boolean) => (on ? '#fffdf8' : '#6b665c');
   return (
@@ -29,14 +46,14 @@ export function Ranking({ v }: { v: MobileView }) {
         </Pressable>
       </View>
       <Text style={{ fontSize: 11, color: '#6b665c', paddingLeft: 6 }}>{rk.hint}</Text>
-      {rk.rows.map((r, i) => (
+      {visibleRows.map((r) => (
         <Pressable
           key={i}
           onPress={r.open}
           style={{
-            backgroundColor: i === 0 ? '#fdf6e8' : '#fffdf8',
+            backgroundColor: r.pos === '1' ? '#fdf6e8' : '#fffdf8',
             borderWidth: 1,
-            borderColor: i === 0 ? '#f2e4c6' : '#ece4d6',
+            borderColor: r.pos === '1' ? '#f2e4c6' : '#ece4d6',
             borderRadius: 20,
             paddingVertical: 12,
             paddingHorizontal: 15,
@@ -61,6 +78,7 @@ export function Ranking({ v }: { v: MobileView }) {
           <Text style={{ width: 84, textAlign: 'right', fontSize: 15, fontWeight: '700', letterSpacing: -0.3, color: r.color }}>{r.net}</Text>
         </Pressable>
       ))}
+      <Pagination page={page} pageSize={PAGE_SIZE} total={rk.rows.length} itemLabel="vehículos" onPageChange={setPage} />
     </View>
   );
 }
