@@ -279,25 +279,29 @@ function reportRange(period: AssistantReportRequest['period'], to: string): stri
 }
 
 function reportMoney(value: number): string {
-  return '₲ ' + new Intl.NumberFormat('es-PY').format(Math.round(value));
+  // Helvetica no contiene correctamente el símbolo ₲ y PDFKit lo termina
+  // mostrando como un carácter extraño. "Gs." es claro y seguro en cualquier
+  // visor de PDF, incluido el visor de Chrome en Android.
+  return 'Gs. ' + new Intl.NumberFormat('es-PY').format(Math.round(value));
 }
 
-async function pdfFromLines(lines: string[]): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 42 });
-    const chunks: Buffer[] = [];
-    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
-    doc.fontSize(18).text('MiFlota');
-    doc.moveDown(0.4);
-    doc.fontSize(10).fillColor('#6b665c');
-    lines.forEach((line) => {
-      if (doc.y > 760) doc.addPage();
-      doc.text(line, { width: 510 });
-    });
-    doc.end();
-  });
+/** Nombre legible y único para las descargas. Se usa la hora de Paraguay
+ * aunque el proceso de la API esté corriendo en UTC en la VPS. */
+function reportFileTimestamp(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Asuncion',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now).reduce<Record<string, string>>((result, part) => {
+    if (part.type !== 'literal') result[part.type] = part.value;
+    return result;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}-${parts.hour}${parts.minute}${parts.second}`;
 }
 
 async function createAssistantReport(ownerId: number, request: AssistantReportRequest): Promise<AssistantFile> {
@@ -323,15 +327,15 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
       detalle: mov.descripcion,
       repuestos,
       manoObra: mov.mano_obra ?? 0,
-      total: mov.amount,
+      total: items.length ? repuestos + (mov.mano_obra ?? 0) : mov.amount,
       items: items.map((item) => `${item.cantidad} x ${item.nombre} (${reportMoney(item.costo_unitario)})`).join('; '),
+      itemRows: items,
     };
   });
-  const title = request.report === 'resumen' ? 'Resumen de gastos' : 'Gastos detallados';
   const periodLabel = from ? `${from} a ${to}` : `Hasta ${to}`;
   const extension = request.format === 'xlsx' ? 'xlsx' : 'pdf';
   const id = randomUUID();
-  const name = `miflota-${request.report}-${to}-${id}.${extension}`;
+  const name = `MiFlota-${request.report}-${reportFileTimestamp()}-${id.slice(0, 8)}.${extension}`;
   const path = join(ASSISTANT_REPORTS_DIR, name);
   let data: Buffer;
   if (request.format === 'xlsx') {
@@ -341,13 +345,27 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
     XLSX.utils.book_append_sheet(book, sheet, 'Gastos');
     data = XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   } else {
-    const lines = [`${title} · ${periodLabel}`, `Generado: ${to}`, ''];
-    if (!rows.length) lines.push('No hay gastos para los filtros elegidos.');
-    rows.forEach((row) => lines.push(`${row.fecha} · ${row.vehiculo} · ${row.categoria} · ${row.detalle} · Total ${reportMoney(row.total)}`, `  Repuestos: ${reportMoney(row.repuestos)} · Mano de obra: ${reportMoney(row.manoObra)}${row.items ? ` · ${row.items}` : ''}`));
-    data = await pdfFromLines(lines);
+    data = await pdfFromFleetReport({
+      periodLabel,
+      generatedAt: to,
+      incomeRows: [],
+      expenseRows: rows.map((row) => ({
+        fecha: row.fecha,
+        vehiculo: row.vehiculo,
+        categoria: row.categoria,
+        detalle: row.detalle,
+        items: row.itemRows,
+        repuestos: row.repuestos,
+        manoObra: row.manoObra,
+        total: row.total,
+      })),
+      incomeTotal: 0,
+      expenseTotal: rows.reduce((sum, row) => sum + row.total, 0),
+      resultTotal: -rows.reduce((sum, row) => sum + row.total, 0),
+    });
   }
   await writeFile(path, data);
-  const record: AssistantReportFileRecord = { name: `${title}.${extension}`, url: `/api/assistant/files/${id}`, mimeType: extension === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf', path, ownerId, expiresAt: Date.now() + 30 * 60_000 };
+  const record: AssistantReportFileRecord = { name, url: `/api/assistant/files/${id}`, mimeType: extension === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf', path, ownerId, expiresAt: Date.now() + 30 * 60_000 };
   assistantReportFiles.set(id, record);
   setTimeout(() => {
     assistantReportFiles.delete(id);
@@ -387,6 +405,172 @@ interface FleetReportIncomeRow {
   monto: number;
   medio: string;
   nota: string;
+}
+
+const REPORT_COLORS = {
+  ink: '#1b1a17',
+  muted: '#6b665c',
+  orange: '#eda332',
+  orangeLight: '#fff0d8',
+  paper: '#fffdf9',
+  line: '#e7dfd2',
+  green: '#2d8666',
+  red: '#c85c45',
+};
+
+function pdfCell(value: string | number | null | undefined, maxLength = 42): string {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return text.length > maxLength ? `${text.slice(0, Math.max(0, maxLength - 1))}…` : text;
+}
+
+async function pdfFromFleetReport(data: {
+  periodLabel: string;
+  generatedAt: string;
+  incomeRows: FleetReportIncomeRow[];
+  expenseRows: FleetReportExpenseRow[];
+  incomeTotal: number;
+  expenseTotal: number;
+  resultTotal: number;
+}): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margin: 36 });
+    const chunks: Buffer[] = [];
+    const margin = 36;
+    const width = doc.page.width - margin * 2;
+
+    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const pageHeader = () => {
+      doc.roundedRect(margin, margin, width, 82, 14).fill(REPORT_COLORS.ink);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(24).text('MiFlota', margin + 18, margin + 16);
+      doc.font('Helvetica').fontSize(10).text('Reporte financiero de la flota', margin + 19, margin + 47);
+      doc.fontSize(9).text(`Generado: ${data.generatedAt}`, margin + width - 190, margin + 21, { width: 172, align: 'right' });
+      doc.text(data.periodLabel, margin + width - 190, margin + 43, { width: 172, align: 'right' });
+      doc.y = margin + 102;
+    };
+
+    const ensureSpace = (height: number) => {
+      if (doc.y + height <= doc.page.height - margin) return;
+      doc.addPage();
+      pageHeader();
+    };
+
+    const sectionTitle = (title: string, subtitle?: string) => {
+      ensureSpace(42);
+      doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(16).text(title, margin, doc.y);
+      if (subtitle) doc.fillColor(REPORT_COLORS.muted).font('Helvetica').fontSize(9).text(subtitle, margin, doc.y + 4);
+      doc.moveTo(margin, doc.y + 11).lineTo(margin + width, doc.y + 11).lineWidth(1).strokeColor(REPORT_COLORS.line).stroke();
+      doc.y += subtitle ? 27 : 22;
+    };
+
+    const drawTable = (headers: string[], rows: string[][], columnWidths: number[]) => {
+      const rowHeight = 23;
+      const drawHeader = () => {
+        doc.roundedRect(margin, doc.y, width, rowHeight, 5).fill(REPORT_COLORS.orange);
+        let x = margin;
+        headers.forEach((header, index) => {
+          doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(8).text(header, x + 7, doc.y + 7, { width: columnWidths[index] - 14, lineBreak: false });
+          x += columnWidths[index];
+        });
+        doc.y += rowHeight;
+      };
+      drawHeader();
+      rows.forEach((row, rowIndex) => {
+        if (doc.y + rowHeight > doc.page.height - margin) {
+          doc.addPage();
+          pageHeader();
+          drawHeader();
+        }
+        if (rowIndex % 2 === 0) doc.rect(margin, doc.y, width, rowHeight).fill(REPORT_COLORS.orangeLight);
+        let x = margin;
+        row.forEach((cell, index) => {
+          doc.fillColor(REPORT_COLORS.ink).font('Helvetica').fontSize(8).text(pdfCell(cell, 34), x + 7, doc.y + 7, { width: columnWidths[index] - 14, lineBreak: false });
+          x += columnWidths[index];
+        });
+        doc.moveTo(margin, doc.y + rowHeight).lineTo(margin + width, doc.y + rowHeight).lineWidth(0.5).strokeColor(REPORT_COLORS.line).stroke();
+        doc.y += rowHeight;
+      });
+      doc.y += 12;
+    };
+
+    const drawExpenseCard = (row: FleetReportExpenseRow) => {
+      const itemRows = row.items.length
+        ? row.items.map((item) => [item.nombre, String(item.cantidad), reportMoney(item.costo_unitario), reportMoney(item.subtotal)])
+        : [['Sin detalle de repuesto', '', '', '']];
+      const cardHeight = 79 + 20 + itemRows.length * 21 + (row.manoObra ? 25 : 8);
+      ensureSpace(cardHeight + 10);
+      const x = margin;
+      const y = doc.y;
+      doc.roundedRect(x, y, width, cardHeight, 10).fill(REPORT_COLORS.paper).stroke(REPORT_COLORS.line);
+      doc.roundedRect(x, y, width, 29, 10).fill(REPORT_COLORS.orangeLight);
+      doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(9).text(`${pdfCell(row.fecha, 12)}  ·  ${pdfCell(row.vehiculo, 20)}`, x + 13, y + 9, { width: width - 190, lineBreak: false });
+      doc.fillColor(REPORT_COLORS.muted).font('Helvetica-Bold').fontSize(9).text(pdfCell(row.categoria, 24), x + width - 170, y + 9, { width: 157, align: 'right', lineBreak: false });
+      doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(10).text(pdfCell(row.detalle, 52), x + 13, y + 42, { width: width - 165, lineBreak: false });
+      doc.fillColor(REPORT_COLORS.red).font('Helvetica-Bold').fontSize(12).text(`Total ${reportMoney(row.total)}`, x + width - 155, y + 40, { width: 142, align: 'right', lineBreak: false });
+
+      const tableX = x + 13;
+      const tableWidth = width - 26;
+      let tableY = y + 65;
+      const itemWidths = [tableWidth - 270, 55, 105, 110];
+      doc.roundedRect(tableX, tableY, tableWidth, 20, 4).fill(REPORT_COLORS.ink);
+      ['Repuesto', 'Cantidad', 'Unitario', 'Subtotal'].forEach((header, index) => {
+        const cellX = tableX + itemWidths.slice(0, index).reduce((sum, value) => sum + value, 0);
+        doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7.5).text(header, cellX + 6, tableY + 6, { width: itemWidths[index] - 12, lineBreak: false });
+      });
+      tableY += 20;
+      itemRows.forEach((item, index) => {
+        if (index % 2 === 0) doc.rect(tableX, tableY, tableWidth, 21).fill('#faf5ec');
+        item.forEach((value, valueIndex) => {
+          const cellX = tableX + itemWidths.slice(0, valueIndex).reduce((sum, itemWidth) => sum + itemWidth, 0);
+          doc.fillColor(REPORT_COLORS.ink).font('Helvetica').fontSize(7.5).text(pdfCell(value, 35), cellX + 6, tableY + 6, { width: itemWidths[valueIndex] - 12, lineBreak: false });
+        });
+        tableY += 21;
+      });
+      if (row.manoObra) {
+        doc.fillColor(REPORT_COLORS.muted).font('Helvetica-Bold').fontSize(8).text(`Mano de obra: ${reportMoney(row.manoObra)}`, tableX, tableY + 6, { width: tableWidth, align: 'right' });
+      }
+      doc.y = y + cardHeight + 10;
+    };
+
+    pageHeader();
+    const cardGap = 9;
+    const cardWidth = (width - cardGap * 2) / 3;
+    const summaryCards = [
+      ['Cobrado', data.incomeTotal, REPORT_COLORS.green],
+      ['Gastos', data.expenseTotal, REPORT_COLORS.orange],
+      ['Resultado', data.resultTotal, data.resultTotal < 0 ? REPORT_COLORS.red : REPORT_COLORS.green],
+    ] as const;
+    const summaryY = doc.y;
+    summaryCards.forEach(([label, amount, color], index) => {
+      const x = margin + index * (cardWidth + cardGap);
+      doc.roundedRect(x, summaryY, cardWidth, 66, 10).fill(REPORT_COLORS.paper).stroke(REPORT_COLORS.line);
+      doc.fillColor(REPORT_COLORS.muted).font('Helvetica-Bold').fontSize(8).text(label.toUpperCase(), x + 12, summaryY + 12);
+      doc.fillColor(color).font('Helvetica-Bold').fontSize(15).text(reportMoney(amount), x + 12, summaryY + 32, { width: cardWidth - 24, lineBreak: false });
+    });
+    doc.y = summaryY + 84;
+    doc.fillColor(REPORT_COLORS.muted).font('Helvetica').fontSize(9).text(`${data.incomeRows.length + data.expenseRows.length} movimientos incluidos · datos filtrados según la selección`, margin, doc.y);
+    doc.y += 22;
+
+    if (data.incomeRows.length) {
+      sectionTitle('Ingresos cobrados', `${data.incomeRows.length} cobro(s)`);
+      drawTable(
+        ['Fecha', 'Vehículo', 'Chofer', 'Monto', 'Medio', 'Nota'],
+        data.incomeRows.map((row) => [row.fecha, row.vehiculo, row.chofer, reportMoney(row.monto), row.medio, row.nota]),
+        [59, 82, 118, 80, 82, width - 421],
+      );
+    }
+    if (data.expenseRows.length) {
+      sectionTitle('Gastos', `${data.expenseRows.length} gasto(s) · repuestos y mano de obra`);
+      data.expenseRows.forEach(drawExpenseCard);
+    }
+    if (!data.incomeRows.length && !data.expenseRows.length) {
+      doc.roundedRect(margin, doc.y, width, 60, 10).fill(REPORT_COLORS.orangeLight);
+      doc.fillColor(REPORT_COLORS.muted).font('Helvetica-Bold').fontSize(11).text('No hay datos para los filtros elegidos.', margin + 16, doc.y + 23);
+    }
+    doc.end();
+  });
 }
 
 function reportPeriodRange(period: FleetReportExportBody['period']): { from: string; to: string } | null {
@@ -446,7 +630,7 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
   const periodLabel = `${range.from} a ${range.to}`;
   const extension = format === 'xlsx' ? 'xlsx' : 'pdf';
   const id = randomUUID();
-  const name = `miflota-reporte-${range.to}-${id}.${extension}`;
+  const name = `MiFlota-reporte-${reportFileTimestamp()}-${id.slice(0, 8)}.${extension}`;
   const path = join(ASSISTANT_REPORTS_DIR, name);
   let data: Buffer;
 
@@ -477,33 +661,20 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
     }
     data = XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   } else {
-    const lines = [
-      'MiFlota · Reporte detallado',
-      `Período: ${periodLabel}`,
-      `Ingresos cobrados: ${reportMoney(incomeTotal)}`,
-      `Gastos: ${reportMoney(expenseTotal)}`,
-      `Resultado: ${reportMoney(resultTotal)}`,
-      '',
-    ];
-    if (incomeRows.length) {
-      lines.push('INGRESOS COBRADOS');
-      incomeRows.forEach((row) => lines.push(`${row.fecha} · ${row.vehiculo} · ${row.chofer} · ${reportMoney(row.monto)} · ${row.medio}${row.nota ? ` · ${row.nota}` : ''}`));
-      lines.push('');
-    }
-    if (expenseRows.length) {
-      lines.push('GASTOS');
-      expenseRows.forEach((row) => {
-        lines.push(`${row.fecha} · ${row.vehiculo} · ${row.categoria} · ${row.detalle} · Total ${reportMoney(row.total)}`);
-        row.items.forEach((item) => lines.push(`  ${item.cantidad} × ${item.nombre} · Unitario ${reportMoney(item.costo_unitario)} · Subtotal ${reportMoney(item.subtotal)}`));
-        if (row.manoObra) lines.push(`  Mano de obra · ${reportMoney(row.manoObra)}`);
-      });
-    }
-    data = await pdfFromLines(lines);
+    data = await pdfFromFleetReport({
+      periodLabel,
+      generatedAt: `${hoyISO()} · ${reportFileTimestamp().slice(11).replace(/(\d{2})(\d{2})(\d{2})/, '$1:$2:$3')}`,
+      incomeRows,
+      expenseRows,
+      incomeTotal,
+      expenseTotal,
+      resultTotal,
+    });
   }
 
   await writeFile(path, data);
   const mimeType = extension === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf';
-  const record: AssistantReportFileRecord = { name: `MiFlota-reporte.${extension}`, url: `/api/reports/files/${id}`, mimeType, path, ownerId, expiresAt: Date.now() + 30 * 60_000 };
+  const record: AssistantReportFileRecord = { name, url: `/api/reports/files/${id}`, mimeType, path, ownerId, expiresAt: Date.now() + 30 * 60_000 };
   assistantReportFiles.set(id, record);
   setTimeout(() => {
     assistantReportFiles.delete(id);
