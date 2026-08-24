@@ -273,12 +273,37 @@ export interface AssistantReply {
   files?: { name: string; url: string; mimeType: string }[];
 }
 
+export type ReportPeriodType = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
+export type ReportInclude = 'gastos' | 'ingresos' | 'ambos';
+export type ReportSelection = 'todos' | string[];
+export type ReportCategorySelection = 'todas' | string[];
+
+export interface ReportExportPayload {
+  period: { type: ReportPeriodType; from: string; to: string };
+  include: ReportInclude;
+  carIds: ReportSelection;
+  categories?: ReportCategorySelection;
+  format: 'pdf' | 'xlsx';
+}
+
+export interface ReportExportResponse {
+  file: { name: string; url: string; mimeType: string };
+  counts: { ingresos: number; gastos: number; total: number };
+}
+
 /** La pregunta viaja al backend autenticado. La clave y el acceso a los datos
  * permanecen siempre en el servidor; el bundle de Expo no contiene ninguno. */
 export function askAssistant(question: string, history: AssistantHistoryItem[]): Promise<AssistantReply> {
   return req<AssistantReply>('/api/assistant/query', {
     method: 'POST',
     body: JSON.stringify({ question, history: history.slice(-6) }),
+  });
+}
+
+export function exportFleetReport(payload: ReportExportPayload): Promise<ReportExportResponse> {
+  return req<ReportExportResponse>('/api/reports/export', {
+    method: 'POST',
+    body: JSON.stringify(payload),
   });
 }
 
@@ -306,6 +331,7 @@ export interface FleetStore {
   addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
   addEgreso: (carId: string, datos: NuevoEgresoPayload) => Promise<Mov>;
   mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: PickedFile | null }) => Promise<void>;
+  exportReport: (payload: ReportExportPayload) => Promise<ReportExportResponse>;
 }
 
 /**
@@ -459,5 +485,6 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     addPago,
     addEgreso,
     mandarATaller,
+    exportReport: exportFleetReport,
   };
 }

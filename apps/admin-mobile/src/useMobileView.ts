@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react';
-import { BackHandler, Keyboard } from 'react-native';
-import type { Car, Mov, Pago, MobileState, Screen, RegistrarTab, FleetFilter, PickedFile, CarLocation } from './types';
+import { BackHandler, Keyboard, Linking } from 'react-native';
+import type { Car, Mov, Pago, MobileState, Screen, RegistrarTab, FleetFilter, PickedFile, CarLocation, ReportCategorySelection, ReportInclude, ReportSelection, ReportStep } from './types';
 import { imputar, type Aplicacion } from './cobranza';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, daysBetween, durLbl, dLbl, dLblFull, fmt, fmtShort, initials, statusColor, numFromInput, miles, isoLocal } from './format';
 import type { FleetStore } from './api';
+import { API_BASE } from './config';
 
 const UMBRAL_VERDE = 2500000;
 const SVC_AVISO_DIAS = 15;
@@ -169,6 +170,12 @@ export function initialMobileState(): MobileState {
     gastosCarId: 'todos',
     gastosCat: 'todas',
     gastosExpanded: {},
+    reportesStep: 'include',
+    reportesInclude: null,
+    reportesCarIds: 'todos',
+    reportesCategories: 'todas',
+    reportesExportando: false,
+    reportesError: '',
     toast: '',
     fleetFilter: 'todos',
     rankBy: 'auto',
@@ -456,15 +463,23 @@ export interface MobileView {
   } | null;
 
   reportes: {
-    net: string;
-    netColor: string;
-    ing: string;
-    egr: string;
-    nMovs: number;
-    cats: { cat: string; w: number; color: string; short: string }[];
-    gastos: { plate: string; total: string; rows: { desc: string; cat: string; amount: string; items: { nombre: string; cantidad: string; subtotal: string }[]; manoObra: string }[] }[];
-    exportXls: () => void;
-    exportPdf: () => void;
+    step: ReportStep;
+    include: ReportInclude | null;
+    setInclude: (value: ReportInclude) => void;
+    carSelection: ReportSelection;
+    carOptions: { id: string; label: string; sub: string; selected: boolean; toggle: () => void }[];
+    selectAllCars: () => void;
+    categorySelection: ReportCategorySelection;
+    categoryOptions: { label: string; selected: boolean; toggle: () => void }[];
+    selectAllCategories: () => void;
+    next: () => void;
+    previous: () => void;
+    reset: () => void;
+    periodLabel: string;
+    counts: { ingresos: number; gastos: number; total: number };
+    exporting: boolean;
+    error: string;
+    exportFile: (format: 'pdf' | 'xlsx') => void;
   };
 
   ranking: { rows: RankRow[]; byAuto: boolean; setAuto: () => void; setModelo: () => void; hint: string };
@@ -527,7 +542,7 @@ export function useMobileView(
   locations: CarLocation[],
   state: MobileState,
   update: (patch: Partial<MobileState> | ((s: MobileState) => Partial<MobileState>)) => void,
-  persist: Pick<FleetStore, 'patchCar' | 'previewDriverCredentials' | 'assignDriver' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller'>,
+  persist: Pick<FleetStore, 'patchCar' | 'previewDriverCredentials' | 'assignDriver' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller' | 'exportReport'>,
   cambiarPassword: (actual: string, nueva: string) => Promise<void>,
 ): MobileView {
   const toast = (msg: string) => update({ toast: msg });
@@ -564,6 +579,18 @@ export function useMobileView(
   };
   const back = () => {
     Keyboard.dismiss();
+    if (state.screen === 'reportes') {
+      const previousReportStep: Partial<Record<ReportStep, ReportStep>> = {
+        cars: 'include',
+        categories: 'cars',
+        review: state.reportesInclude === 'gastos' || state.reportesInclude === 'ambos' ? 'categories' : 'cars',
+      };
+      const previousStep = previousReportStep[state.reportesStep];
+      if (previousStep) {
+        update({ reportesStep: previousStep, reportesError: '' });
+        return;
+      }
+    }
     const prev = stackRef.current.pop();
     update(prev ?? { screen: 'dashboard', backTo: 'dashboard', carId: null });
   };
@@ -1065,14 +1092,86 @@ export function useMobileView(
   }
 
   // ---- reportes -------------------------------------------------------
-  const repMax = Math.max(...CATS.map((c) => tot.byCat[c] || 0), 1);
+  const reportCarAllowed = (carId: string | null) => state.reportesCarIds === 'todos' || (carId !== null && state.reportesCarIds.includes(carId));
+  const reportCategoryAllowed = (category: string) => state.reportesCategories === 'todas' || state.reportesCategories.includes(category);
+  const reportIncludeExpenses = state.reportesInclude === 'gastos' || state.reportesInclude === 'ambos';
+  const reportIncludeIncome = state.reportesInclude === 'ingresos' || state.reportesInclude === 'ambos';
+  const reportExpenses = reportIncludeExpenses
+    ? movs.filter((m) => m.type === 'egreso' && inR(m) && reportCarAllowed(m.carId) && reportCategoryAllowed(m.cat || 'Otros'))
+    : [];
+  const reportIncome = reportIncludeIncome ? pagos.filter((p) => p.tipo === 'pago' && p.fecha >= r.start && p.fecha <= r.end && reportCarAllowed(p.carId)) : [];
+  const reportCounts = { ingresos: reportIncome.length, gastos: reportExpenses.length, total: reportIncome.length + reportExpenses.length };
+  const reportCarOptions = cars.map((car) => ({
+    id: car.id,
+    label: car.plate,
+    sub: `${car.model}${car.estado === 'baja' ? ' · Baja' : ''}`,
+    selected: state.reportesCarIds === 'todos' || state.reportesCarIds.includes(car.id),
+    toggle: () => update((s) => {
+      if (s.reportesCarIds === 'todos') return { reportesCarIds: [car.id], reportesError: '' };
+      const next = s.reportesCarIds.includes(car.id) ? s.reportesCarIds.filter((id) => id !== car.id) : [...s.reportesCarIds, car.id];
+      return { reportesCarIds: next, reportesError: '' };
+    }),
+  }));
+  const reportCategoryOptions = CATS.map((category) => ({
+    label: category,
+    selected: state.reportesCategories === 'todas' || state.reportesCategories.includes(category),
+    toggle: () => update((s) => {
+      if (s.reportesCategories === 'todas') return { reportesCategories: [category], reportesError: '' };
+      const next = s.reportesCategories.includes(category) ? s.reportesCategories.filter((item) => item !== category) : [...s.reportesCategories, category];
+      return { reportesCategories: next, reportesError: '' };
+    }),
+  }));
+  const reportSetInclude = (value: ReportInclude) => update({ reportesInclude: value, reportesStep: 'include', reportesError: '' });
+  const reportSelectAllCars = () => update({ reportesCarIds: 'todos', reportesError: '' });
+  const reportSelectAllCategories = () => update({ reportesCategories: 'todas', reportesError: '' });
+  const reportNext = () => {
+    if (state.reportesStep === 'include') {
+      if (!state.reportesInclude) return toast('Elegí qué querés incluir');
+      return update({ reportesStep: 'cars', reportesError: '' });
+    }
+    if (state.reportesStep === 'cars') {
+      if (state.reportesCarIds !== 'todos' && state.reportesCarIds.length === 0) return toast('Elegí al menos un vehículo');
+      return update({ reportesStep: reportIncludeExpenses ? 'categories' : 'review', reportesError: '' });
+    }
+    if (state.reportesStep === 'categories') {
+      if (state.reportesCategories !== 'todas' && state.reportesCategories.length === 0) return toast('Elegí al menos una categoría');
+      return update({ reportesStep: 'review', reportesError: '' });
+    }
+  };
+  const reportPrevious = () => {
+    const previousReportStep: Partial<Record<ReportStep, ReportStep>> = {
+      cars: 'include',
+      categories: 'cars',
+      review: reportIncludeExpenses ? 'categories' : 'cars',
+    };
+    const previousStep = previousReportStep[state.reportesStep];
+    if (previousStep) update({ reportesStep: previousStep, reportesError: '' });
+  };
+  const reportReset = () => update({ reportesStep: 'include', reportesInclude: null, reportesCarIds: 'todos', reportesCategories: 'todas', reportesExportando: false, reportesError: '' });
+  const reportExport = (format: 'pdf' | 'xlsx') => {
+    if (!state.reportesInclude) return toast('Elegí qué querés incluir');
+    if (!reportCounts.total) {
+      update({ reportesError: 'No hay datos para los filtros elegidos.' });
+      return;
+    }
+    update({ reportesExportando: true, reportesError: '' });
+    persist.exportReport({
+      period: { type: state.period, from: isoLocal(r.start), to: isoLocal(r.end) },
+      include: state.reportesInclude,
+      carIds: state.reportesCarIds,
+      ...(reportIncludeExpenses ? { categories: state.reportesCategories } : {}),
+      format,
+    })
+      .then((result) => {
+        update({ reportesExportando: false });
+        void Linking.openURL(API_BASE + result.file.url).catch(() => toast('No se pudo abrir el archivo'));
+      })
+      .catch((error: Error) => update({ reportesExportando: false, reportesError: error.message || 'No se pudo generar el reporte' }));
+  };
   // La versión web genera el .xlsx con la librería `xlsx` y lo baja como Blob;
   // ninguna de las dos cosas existe en React Native. Se exporta desde
   // admin-web hasta que esto tenga una ruta propia (compartir un archivo con
   // expo-file-system/expo-sharing).
-  const exportXls = () => toast('Función en camino');
-  const exportPdf = () => toast('Función en camino');
-
   // ---- ranking -------------------------------------------------------
   let rankRows: RankRow[];
   if (state.rankBy === 'modelo') {
@@ -1120,6 +1219,8 @@ export function useMobileView(
     ['baja', 'Baja', 'Fuera de la flota, no entra en los cálculos'],
   ];
 
+  const goReportes = () => push('reportes', { reportesStep: 'include', reportesInclude: null, reportesCarIds: 'todos', reportesCategories: 'todas', reportesExportando: false, reportesError: '' });
+
   const headerByScreen: Record<string, [string, string]> = {
     dashboard: ['MiFlota', 'Actualizado · ' + r.label],
     flota: ['Vehículos', active.length + ' activos · ' + (cars.length - active.length) + ' de baja'],
@@ -1157,7 +1258,7 @@ export function useMobileView(
     navFlota: () => replaceTab('flota'),
     navGastos: () => replaceTab('gastos'),
     navMas: () => replaceTab('mas'),
-    navReportes: () => push('reportes'),
+    navReportes: goReportes,
     navAlertas: () => push('alertas'),
     navChoferes: () => push('choferes'),
     tabActive: {
@@ -1230,7 +1331,7 @@ export function useMobileView(
       driverCount: choferViews.filter((d) => d.name !== 'Sin chofer').length,
       navAlertas: () => push('alertas'),
       navChoferes: () => push('choferes'),
-      navReportes: () => push('reportes'),
+      navReportes: goReportes,
       goPerfil: () => push('perfil', { perfil: { actual: '', nueva: '', repetir: '', guardando: false } }),
     },
     alertas: { items: alertViews },
@@ -1301,22 +1402,23 @@ export function useMobileView(
     registrar: registrarView,
 
     reportes: {
-      net: fmt(tot.net),
-      netColor: tot.net >= 0 ? COLORS.ink : COLORS.neg,
-      ing: fmtShort(tot.ing),
-      egr: fmtShort(tot.egr),
-      nMovs: movs.filter(inR).length,
-      cats: CATS.map((c) => ({ cat: c, v: tot.byCat[c] || 0 }))
-        .filter((x) => x.v > 0)
-        .sort((a, b) => b.v - a.v)
-        .map((x) => ({ cat: x.cat, w: Math.max(4, Math.round((x.v / repMax) * 100)), color: CATCOLORS[x.cat], short: fmtShort(x.v) })),
-      gastos: active.map((car) => {
-        const movements = movs.filter((m) => inR(m) && m.type === 'egreso' && m.carId === car.id);
-        const rows = movements.map((m) => ({ desc: m.desc, cat: m.cat || 'Otro', amount: fmt(m.amount), items: (m.items || []).map((item) => ({ nombre: item.nombre, cantidad: String(item.cantidad), subtotal: fmt(item.subtotal) })), manoObra: m.manoObra ? fmt(m.manoObra) : '' }));
-        return { plate: car.plate, total: fmt(movements.reduce((sum, m) => sum + m.amount, 0)), rows };
-      }).filter((g) => g.rows.length > 0),
-      exportXls,
-      exportPdf,
+      step: state.reportesStep,
+      include: state.reportesInclude,
+      setInclude: reportSetInclude,
+      carSelection: state.reportesCarIds,
+      carOptions: reportCarOptions,
+      selectAllCars: reportSelectAllCars,
+      categorySelection: state.reportesCategories,
+      categoryOptions: reportCategoryOptions,
+      selectAllCategories: reportSelectAllCategories,
+      next: reportNext,
+      previous: reportPrevious,
+      reset: reportReset,
+      periodLabel: r.label,
+      counts: reportCounts,
+      exporting: state.reportesExportando,
+      error: state.reportesError,
+      exportFile: reportExport,
     },
 
     ranking: {

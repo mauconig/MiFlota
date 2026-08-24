@@ -118,6 +118,7 @@ app.addHook('preHandler', async (req, reply) => {
   // Los archivos de reportes llevan un token aleatorio con vencimiento propio;
   // eso permite abrirlos desde el navegador del teléfono sin copiar la sesión.
   if (req.url.startsWith('/api/assistant/files/')) return;
+  if (req.url.startsWith('/api/reports/files/')) return;
   if (ABIERTAS.has(req.url.split('?')[0])) return;
   if (!usuarioDeSesion(db, tokenDueno(req))) return reply.code(401).send({ error: 'Sesión requerida' });
 });
@@ -355,6 +356,162 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
   return { name: record.name, url: record.url, mimeType: record.mimeType };
 }
 
+type FleetReportPeriod = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
+type FleetReportInclude = 'gastos' | 'ingresos' | 'ambos';
+type FleetReportSelection = 'todos' | string[];
+type FleetReportCategorySelection = 'todas' | string[];
+
+interface FleetReportExportBody {
+  period?: { type?: FleetReportPeriod; from?: string; to?: string };
+  include?: FleetReportInclude;
+  carIds?: FleetReportSelection;
+  categories?: FleetReportCategorySelection;
+  format?: 'pdf' | 'xlsx';
+}
+
+interface FleetReportExpenseRow {
+  fecha: string;
+  vehiculo: string;
+  categoria: string;
+  detalle: string;
+  items: GastoItemRow[];
+  repuestos: number;
+  manoObra: number;
+  total: number;
+}
+
+interface FleetReportIncomeRow {
+  fecha: string;
+  vehiculo: string;
+  chofer: string;
+  monto: number;
+  medio: string;
+  nota: string;
+}
+
+function reportPeriodRange(period: FleetReportExportBody['period']): { from: string; to: string } | null {
+  const type = period?.type;
+  const to = String(period?.to ?? hoyISO());
+  const from = String(period?.from ?? '');
+  if (!['semana', 'mes', 'jul', 'd90', 'custom'].includes(type ?? '') || !FECHA.test(to)) return null;
+  if (from && (!FECHA.test(from) || from > to)) return null;
+  if (type === 'custom' && !from) return null;
+  if (from) return { from, to };
+  if (type === 'semana') return { from: isoOffset(to, -6), to };
+  if (type === 'mes') return { from: `${to.slice(0, 7)}-01`, to };
+  if (type === 'jul') return { from: `${to.slice(0, 4)}-07-01`, to: `${to.slice(0, 4)}-07-31` <= to ? `${to.slice(0, 4)}-07-31` : to };
+  if (type === 'd90') return { from: isoOffset(to, -89), to };
+  return { from: '1970-01-01', to };
+}
+
+function reportSelection(value: FleetReportSelection | undefined): 'todos' | Set<string> {
+  if (value === 'todos' || value === undefined) return 'todos';
+  if (!Array.isArray(value)) return new Set();
+  return new Set(value.map((id) => String(id).trim()).filter(Boolean));
+}
+
+async function createFleetReport(ownerId: number, body: FleetReportExportBody): Promise<{ file: AssistantFile; counts: { ingresos: number; gastos: number; total: number } }> {
+  const include = body.include;
+  const format = body.format;
+  const range = reportPeriodRange(body.period);
+  if (!range || !['gastos', 'ingresos', 'ambos'].includes(include ?? '') || !['pdf', 'xlsx'].includes(format ?? '')) throw new Error('Los filtros del reporte no son válidos');
+
+  const cars = selCars.all(ownerId) as CarRow[];
+  const carById = new Map(cars.map((car) => [car.id, car]));
+  const selectedCars = reportSelection(body.carIds);
+  if (selectedCars !== 'todos' && [...selectedCars].some((id) => !carById.has(id))) throw new Error('Uno de los vehículos no pertenece a tu flota');
+  const selectedCategories = body.categories === 'todas' ? 'todos' : reportSelection(body.categories);
+  const carAllowed = (carId: string | null) => selectedCars === 'todos' || (carId !== null && selectedCars.has(carId));
+  const categoryAllowed = (category: string) => selectedCategories === 'todos' || selectedCategories.has(category);
+
+  const incomeRows: FleetReportIncomeRow[] = include === 'gastos' ? [] : (selPagos.all(ownerId) as PagoRow[])
+    .filter((pago) => pago.tipo === 'pago' && pago.fecha >= range.from && pago.fecha <= range.to && carAllowed(pago.car_id))
+    .map((pago) => ({ fecha: pago.fecha, vehiculo: carById.get(pago.car_id ?? '')?.plate ?? 'Sin vehículo', chofer: pago.driver || 'Sin chofer', monto: pago.monto, medio: pago.medio || 'Sin especificar', nota: pago.nota || '' }));
+
+  const expenseRows: FleetReportExpenseRow[] = include === 'ingresos' ? [] : (selMovs.all(ownerId) as MovRow[])
+    .filter((mov) => mov.type === 'egreso' && mov.date >= range.from && mov.date <= range.to && carAllowed(mov.car_id) && categoryAllowed(mov.cat || 'Otros'))
+    .map((mov) => {
+      const items = selItems.all(mov.id) as GastoItemRow[];
+      const repuestos = items.reduce((sum, item) => sum + item.subtotal, 0);
+      const manoObra = mov.mano_obra ?? 0;
+      return { fecha: mov.date, vehiculo: carById.get(mov.car_id)?.plate ?? 'Vehículo eliminado', categoria: mov.cat || 'Otros', detalle: mov.descripcion, items, repuestos, manoObra, total: items.length ? repuestos + manoObra : mov.amount };
+    });
+
+  const counts = { ingresos: incomeRows.length, gastos: expenseRows.length, total: incomeRows.length + expenseRows.length };
+  if (!counts.total) throw new Error('No hay datos para los filtros elegidos');
+
+  const incomeTotal = incomeRows.reduce((sum, row) => sum + row.monto, 0);
+  const expenseTotal = expenseRows.reduce((sum, row) => sum + row.total, 0);
+  const resultTotal = incomeTotal - expenseTotal;
+  const periodLabel = `${range.from} a ${range.to}`;
+  const extension = format === 'xlsx' ? 'xlsx' : 'pdf';
+  const id = randomUUID();
+  const name = `miflota-reporte-${range.to}-${id}.${extension}`;
+  const path = join(ASSISTANT_REPORTS_DIR, name);
+  let data: Buffer;
+
+  if (format === 'xlsx') {
+    const book = XLSX.utils.book_new();
+    const summary = [
+      ['MiFlota · Reporte detallado'],
+      ['Período', periodLabel],
+      ['Ingresos cobrados', incomeTotal],
+      ['Gastos', expenseTotal],
+      ['Resultado', resultTotal],
+      ['Movimientos', counts.total],
+    ];
+    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(summary), 'Resumen');
+    if (incomeRows.length) {
+      XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([
+        ['Fecha', 'Vehículo', 'Chofer', 'Monto', 'Medio', 'Nota'],
+        ...incomeRows.map((row) => [row.fecha, row.vehiculo, row.chofer, row.monto, row.medio, row.nota]),
+      ]), 'Ingresos');
+    }
+    if (expenseRows.length) {
+      const detailRows: (string | number)[][] = [['Fecha', 'Vehículo', 'Categoría', 'Detalle', 'Repuesto', 'Cantidad', 'Costo unitario', 'Subtotal repuesto', 'Mano de obra', 'Total gasto']];
+      expenseRows.forEach((row) => {
+        if (!row.items.length) detailRows.push([row.fecha, row.vehiculo, row.categoria, row.detalle, '', '', '', '', row.manoObra, row.total]);
+        else row.items.forEach((item) => detailRows.push([row.fecha, row.vehiculo, row.categoria, row.detalle, item.nombre, item.cantidad, item.costo_unitario, item.subtotal, row.manoObra, row.total]));
+      });
+      XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(detailRows), 'Gastos');
+    }
+    data = XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  } else {
+    const lines = [
+      'MiFlota · Reporte detallado',
+      `Período: ${periodLabel}`,
+      `Ingresos cobrados: ${reportMoney(incomeTotal)}`,
+      `Gastos: ${reportMoney(expenseTotal)}`,
+      `Resultado: ${reportMoney(resultTotal)}`,
+      '',
+    ];
+    if (incomeRows.length) {
+      lines.push('INGRESOS COBRADOS');
+      incomeRows.forEach((row) => lines.push(`${row.fecha} · ${row.vehiculo} · ${row.chofer} · ${reportMoney(row.monto)} · ${row.medio}${row.nota ? ` · ${row.nota}` : ''}`));
+      lines.push('');
+    }
+    if (expenseRows.length) {
+      lines.push('GASTOS');
+      expenseRows.forEach((row) => {
+        lines.push(`${row.fecha} · ${row.vehiculo} · ${row.categoria} · ${row.detalle} · Total ${reportMoney(row.total)}`);
+        row.items.forEach((item) => lines.push(`  ${item.cantidad} × ${item.nombre} · Unitario ${reportMoney(item.costo_unitario)} · Subtotal ${reportMoney(item.subtotal)}`));
+        if (row.manoObra) lines.push(`  Mano de obra · ${reportMoney(row.manoObra)}`);
+      });
+    }
+    data = await pdfFromLines(lines);
+  }
+
+  await writeFile(path, data);
+  const mimeType = extension === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf';
+  const record: AssistantReportFileRecord = { name: `MiFlota-reporte.${extension}`, url: `/api/reports/files/${id}`, mimeType, path, ownerId, expiresAt: Date.now() + 30 * 60_000 };
+  assistantReportFiles.set(id, record);
+  setTimeout(() => {
+    assistantReportFiles.delete(id);
+    void rm(path, { force: true }).catch(() => {});
+  }, 30 * 60_000).unref();
+  return { file: { name: record.name, url: record.url, mimeType: record.mimeType }, counts };
+}
+
 const quien = (req: { cookies: Record<string, string | undefined>; headers: { authorization?: string | string[] } }) => usuarioDeSesion(db, tokenDueno(req))!;
 
 app.get('/api/health', async () => ({ ok: true, db: DB_PATH }));
@@ -472,6 +629,23 @@ app.get<{ Params: { id: string } }>('/api/assistant/files/:id', async (req, repl
 
 /** Ultimas posiciones conocidas, separadas del estado historico para que el
  * panel pueda refrescar el mapa sin descargar todos los movimientos. */
+app.post<{ Body: FleetReportExportBody }>('/api/reports/export', async (req, reply) => {
+  const u = quien(req);
+  try {
+    return await createFleetReport(u.id, req.body ?? {});
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudo generar el reporte';
+    return reply.code(message.startsWith('No hay datos') ? 422 : 400).send({ error: message });
+  }
+});
+
+app.get<{ Params: { id: string } }>('/api/reports/files/:id', async (req, reply) => {
+  const file = assistantReportFiles.get(req.params.id);
+  if (!file || file.expiresAt <= Date.now() || !existsSync(file.path)) return reply.code(404).send({ error: 'El archivo ya no está disponible' });
+  reply.header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+  return reply.type(file.mimeType).send(createReadStream(file.path));
+});
+
 app.get('/api/locations', async (req) => {
   const u = quien(req);
   return (selLocations.all(u.id) as LocationRow[]).map(locationToJson);

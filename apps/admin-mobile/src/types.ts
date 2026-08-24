@@ -160,6 +160,11 @@ export interface GastoDraft {
 export type FleetFilter = 'todos' | 'activo' | 'taller' | 'alerta';
 export type RankBy = 'auto' | 'modelo';
 
+export type ReportInclude = 'gastos' | 'ingresos' | 'ambos';
+export type ReportStep = 'include' | 'cars' | 'categories' | 'review';
+export type ReportSelection = 'todos' | string[];
+export type ReportCategorySelection = 'todas' | string[];
+
 /** Archivo elegido con expo-document-picker: no hay `File` del browser en
  *  React Native, así que el comprobante viaja como URI + metadata. */
 export interface PickedFile {
@@ -202,6 +207,12 @@ export interface MobileState {
   gastosCarId: string;
   gastosCat: string;
   gastosExpanded: Record<string, boolean>;
+  reportesStep: ReportStep;
+  reportesInclude: ReportInclude | null;
+  reportesCarIds: ReportSelection;
+  reportesCategories: ReportCategorySelection;
+  reportesExportando: boolean;
+  reportesError: string;
   toast: string;
   fleetFilter: FleetFilter;
   rankBy: RankBy;
