@@ -7,6 +7,8 @@ export interface Car {
 export interface Me {
   driver: string;
   cuota: number;
+  kilometraje: number;
+  kilometrajeActualizado: string | null;
   car: Car;
 }
 
@@ -21,6 +23,9 @@ export interface Resumen {
   diasPagados: number;
   diasTranscurridos: number;
   cobradoMes: number;
+  kilometraje: number;
+  kilometrajeActualizado: string | null;
+  kilometrajeVencido: boolean;
 }
 
 export interface Comprobante {
@@ -56,4 +61,4 @@ export interface Reporte {
 }
 
 export const CATS_REPORTE = ['Frenos', 'Motor', 'Neumáticos', 'Aire acondicionado', 'Documentos', 'Otro'];
-export const MEDIOS_PAGO = ['Transferencia', 'Efectivo', 'Giros Tigo'];
+export const MEDIOS_PAGO = ['Transferencia'];

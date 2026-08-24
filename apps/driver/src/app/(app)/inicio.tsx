@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
-import { RefreshControl, ScrollView, Text, View } from 'react-native';
+import { RefreshControl, Text, TextInput, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useFocusEffect, useRouter } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
 import { useAuth } from '../../auth';
@@ -12,6 +13,7 @@ import { SkeletonDashboard } from '../../components/Skeleton';
 import { fmtG, fmtD, fmtHoy, mesLabel } from '../../format';
 import { COLORS } from '../../theme';
 import type { Resumen } from '../../types';
+import { notifyKilometrajePendiente, scheduleKilometrajeReminder } from '../../notifications';
 
 const ESTADO_TAG: Record<Resumen['estado'], { label: string; bg: string; fg: string }> = {
   atrasado: { label: 'Atrasado', bg: COLORS.redDark, fg: COLORS.onDark },
@@ -34,12 +36,18 @@ export default function Inicio() {
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [cargando, setCargando] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [kmInput, setKmInput] = useState('');
+  const [guardandoKm, setGuardandoKm] = useState(false);
+  const [kmError, setKmError] = useState('');
 
   const cargar = useCallback(async () => {
     if (!token) return;
     try {
       const r = await api.getResumen(token);
       setResumen(r);
+      setKmInput(String(r.kilometraje));
+      if (r.kilometrajeVencido) void notifyKilometrajePendiente();
+      else void scheduleKilometrajeReminder();
     } catch (e) {
       if (e instanceof SinSesion) sesionVencida();
     } finally {
@@ -52,6 +60,26 @@ export default function Inicio() {
     await cargar();
     setRefreshing(false);
   }, [cargar]);
+
+  const guardarKilometraje = async () => {
+    if (!token || guardandoKm) return;
+    const km = Number(kmInput.replace(/\D/g, ''));
+    if (!Number.isInteger(km) || km < resumen!.kilometraje) {
+      setKmError('Ingresá un kilometraje válido y no menor al anterior.');
+      return;
+    }
+    setKmError('');
+    setGuardandoKm(true);
+    try {
+      await api.postKilometraje(token, km);
+      await cargar();
+    } catch (e) {
+      if (e instanceof SinSesion) sesionVencida();
+      else setKmError(e instanceof Error ? e.message : 'No se pudo guardar');
+    } finally {
+      setGuardandoKm(false);
+    }
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -79,7 +107,7 @@ export default function Inicio() {
   return (
     <View style={{ flex: 1 }}>
       <TabHeader title={`Hola, ${primerNombre}`} sub={fmtHoy()} initials={initials(me.driver)} onPerfil={() => router.push('/(app)/perfil' as never)} />
-      <ScrollView
+      <KeyboardAwareScrollView
         contentContainerStyle={{ padding: 16, paddingTop: 6, gap: 12 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.textMuted} />}
       >
@@ -136,6 +164,19 @@ export default function Inicio() {
           <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 11 }}>Pagaste {fmtG(resumen.cobradoMes)} este mes.</Text>
         </Card>
 
+        <Card style={{ gap: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: COLORS.text }}>Kilometraje</Text>
+            <Text style={{ fontSize: 11, color: resumen.kilometrajeVencido ? COLORS.redText2 : COLORS.textMuted }}>{resumen.kilometrajeVencido ? 'Pendiente esta semana' : 'Actualizado'}</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <TextInput value={kmInput} onChangeText={setKmInput} keyboardType="number-pad" style={{ flex: 1, borderWidth: 1, borderColor: '#e0d6c4', borderRadius: 14, minHeight: 48, paddingHorizontal: 13, fontSize: 16, color: COLORS.text }} />
+            <Text style={{ fontSize: 12, color: COLORS.textMuted }}>km</Text>
+            <PrimaryButton label={guardandoKm ? 'Guardando…' : 'Actualizar'} variant="ghost" onPress={guardarKilometraje} />
+          </View>
+          {!!kmError && <Text style={{ fontSize: 12, color: COLORS.redText2 }}>{kmError}</Text>}
+        </Card>
+
         <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 15 }}>
           <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: COLORS.bgApp, alignItems: 'center', justifyContent: 'center' }}>
             <Svg viewBox="0 0 24 24" width={22} height={22} fill="none" stroke={COLORS.textMuted} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
@@ -149,7 +190,7 @@ export default function Inicio() {
           </View>
           <PrimaryButton label="Reportar falla" variant="ghost" onPress={() => router.push('/(app)/nueva-queja' as never)} />
         </Card>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

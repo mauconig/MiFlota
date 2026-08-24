@@ -14,7 +14,7 @@ async function req<T>(path: string, token: string | null, init: RequestInit = {}
 }
 
 export const login = (usuario: string, password: string) =>
-  req<{ token: string; driver: string; cuota: number; car: Me['car'] }>('/api/chofer/login', null, {
+  req<{ token: string; driver: string; cuota: number; kilometraje: number; kilometrajeActualizado: string | null; car: Me['car'] }>('/api/chofer/login', null, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ usuario, password }),
@@ -23,6 +23,13 @@ export const login = (usuario: string, password: string) =>
 export const logout = (token: string) => req<{ ok: true }>('/api/chofer/logout', token, { method: 'POST' });
 
 export const getMe = (token: string) => req<Me>('/api/chofer/me', token);
+
+export const postKilometraje = (token: string, kilometraje: number) =>
+  req<{ ok: true; kilometraje: number; actualizado: string }>('/api/chofer/kilometraje', token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kilometraje }),
+  });
 
 export interface DriverLocationPayload {
   latitude: number;
