@@ -1,13 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import * as LocalAuthentication from 'expo-local-authentication';
 import * as api from './api';
-import { startLocationSharing, stopLocationSharing, type LocationSharingStatus } from './location';
+import { SinSesion } from './api';
+import { shareLocationOnce, startHourlySharing, stopLocationSharing, type LocationSharingStatus } from './location';
 import { TOKEN_KEY } from './session';
 import type { Me } from './types';
 
 /** 30 minutos de inactividad cierran la sesión automáticamente. */
 const TIMEOUT_MS = 30 * 60 * 1000;
+const BIOMETRIC_KEY = 'miflota_driver_biometria';
 
 interface AuthState {
   cargando: boolean;
@@ -18,6 +21,8 @@ interface AuthState {
   entrar: (usuario: string, password: string) => Promise<string | null>;
   salir: () => Promise<void>;
   sesionVencida: () => void;
+  reintentarBiometria: () => Promise<boolean>;
+  biometriaBloqueada: boolean;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -27,12 +32,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [locationStatus, setLocationStatus] = useState<LocationSharingStatus | 'inactive'>('inactive');
+  const [biometriaBloqueada, setBiometriaBloqueada] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const appState = useRef(AppState.currentState);
 
+  const pedirBiometria = useCallback(async () => {
+    const hardware = await LocalAuthentication.hasHardwareAsync().catch(() => false);
+    const enrolled = hardware && (await LocalAuthentication.isEnrolledAsync().catch(() => false));
+    if (!enrolled) return true;
+    const r = await LocalAuthentication.authenticateAsync({ promptMessage: 'Desbloquear MiFlota', fallbackLabel: 'Usar contraseña', disableDeviceFallback: false });
+    return r.success;
+  }, []);
+
   const activarUbicacion = useCallback(async () => {
     try {
-      const status = await startLocationSharing();
+      // Comparte al momento y agenda el refresco horario en primer plano.
+      const status = await shareLocationOnce();
+      if (status === 'active') startHourlySharing();
       setLocationStatus(status);
       return status;
     } catch {
@@ -51,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     resetTimer();
     timerRef.current = setTimeout(() => {
       SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
-      stopLocationSharing().catch(() => {});
+      stopLocationSharing();
       setToken(null);
       setMe(null);
       setLocationStatus('inactive');
@@ -71,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         last.then((ts) => {
           if (ts && Date.now() - ts > TIMEOUT_MS) {
             SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
-            stopLocationSharing().catch(() => {});
+            stopLocationSharing();
             setToken(null);
             setMe(null);
             setLocationStatus('inactive');
@@ -99,8 +115,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       const saved = await SecureStore.getItemAsync(TOKEN_KEY);
+      const bio = (await SecureStore.getItemAsync(BIOMETRIC_KEY).catch(() => null)) === '1';
       if (saved) {
         try {
+          if (bio && !(await pedirBiometria())) {
+            setBiometriaBloqueada(true);
+            setCargando(false);
+            return;
+          }
           const m = await api.getMe(saved);
           setToken(saved);
           setMe(m);
@@ -112,27 +134,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setCargando(false);
     })();
-  }, [activarUbicacion, startTimer]);
+  }, [activarUbicacion, pedirBiometria, startTimer]);
 
   const entrar = useCallback(async (usuario: string, password: string) => {
     try {
       const r = await api.login(usuario, password);
       await SecureStore.setItemAsync(TOKEN_KEY, r.token);
+      const hardware = await LocalAuthentication.hasHardwareAsync().catch(() => false);
+      const enrolled = hardware && (await LocalAuthentication.isEnrolledAsync().catch(() => false));
+      if (enrolled) await SecureStore.setItemAsync(BIOMETRIC_KEY, '1').catch(() => {});
       setToken(r.token);
-      setMe({ driver: r.driver, cuota: r.cuota, car: r.car });
+      setMe({ driver: r.driver, cuota: r.cuota, kilometraje: r.kilometraje, kilometrajeActualizado: r.kilometrajeActualizado, car: r.car });
       void activarUbicacion();
       startTimer();
       return null;
     } catch (e) {
+      // 401 = credenciales rechazadas (el server no devuelve detalle). Sin
+      // este mensaje la pantalla de login navegaba igual y volvía al login
+      // sin explicar nada.
+      if (e instanceof SinSesion) return 'Usuario o contraseña incorrectos';
       return e instanceof Error ? e.message : 'No se pudo conectar al servidor';
     }
   }, [activarUbicacion, startTimer]);
 
+  const reintentarBiometria = useCallback(async () => {
+    const saved = await SecureStore.getItemAsync(TOKEN_KEY).catch(() => null);
+    if (!saved || !(await pedirBiometria())) return false;
+    try {
+      const m = await api.getMe(saved);
+      setToken(saved);
+      setMe(m);
+      setBiometriaBloqueada(false);
+      void activarUbicacion();
+      startTimer();
+      return true;
+    } catch {
+      await SecureStore.deleteItemAsync(TOKEN_KEY);
+      return false;
+    }
+  }, [activarUbicacion, pedirBiometria, startTimer]);
+
   const salir = useCallback(async () => {
     resetTimer();
     if (token) await api.logout(token).catch(() => {});
-    await stopLocationSharing().catch(() => {});
+    stopLocationSharing();
     await SecureStore.deleteItemAsync(TOKEN_KEY);
+    await SecureStore.deleteItemAsync(BIOMETRIC_KEY);
     await SecureStore.deleteItemAsync('last_active');
     setToken(null);
     setMe(null);
@@ -143,13 +190,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     resetTimer();
     SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
     SecureStore.deleteItemAsync('last_active').catch(() => {});
-    stopLocationSharing().catch(() => {});
+    stopLocationSharing();
     setToken(null);
     setMe(null);
     setLocationStatus('inactive');
   }, [resetTimer]);
 
-  const value = useMemo(() => ({ cargando, token, me, locationStatus, activarUbicacion, entrar, salir, sesionVencida }), [cargando, token, me, locationStatus, activarUbicacion, entrar, salir, sesionVencida]);
+  const value = useMemo(() => ({ cargando, token, me, locationStatus, activarUbicacion, entrar, salir, sesionVencida, reintentarBiometria, biometriaBloqueada }), [cargando, token, me, locationStatus, activarUbicacion, entrar, salir, sesionVencida, reintentarBiometria, biometriaBloqueada]);
   return <AuthContext value={value}>{children}</AuthContext>;
 }
 

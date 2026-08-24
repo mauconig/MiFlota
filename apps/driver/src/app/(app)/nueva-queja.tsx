@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ScrollView, Text, TextInput, View } from 'react-native';
+import { Text, TextInput, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../auth';
 import * as api from '../../api';
@@ -52,7 +53,7 @@ export default function NuevaQueja() {
   return (
     <View style={{ flex: 1 }}>
       <SubHeader title="Nuevo reporte" />
-      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 6, gap: 12 }}>
+      <KeyboardAwareScrollView bottomOffset={24} contentContainerStyle={{ padding: 16, paddingTop: 6, gap: 12 }} keyboardShouldPersistTaps="handled">
         <Text style={{ fontSize: 12, color: COLORS.textMuted, paddingHorizontal: 4 }}>
           Contale al dueño qué pasa con el {me?.car.plate}. Lo ve apenas lo envías.
         </Text>
@@ -83,7 +84,7 @@ export default function NuevaQueja() {
         {!!err && <Text style={{ color: COLORS.redText2, fontSize: 12, textAlign: 'center' }}>{err}</Text>}
 
         <PrimaryButton label={enviando ? 'Enviando…' : 'Enviar reporte'} variant="dark" onPress={enviar} />
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

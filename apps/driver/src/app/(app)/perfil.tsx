@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useAuth } from '../../auth';
 import * as api from '../../api';
@@ -44,7 +45,7 @@ export default function Perfil() {
   return (
     <View style={{ flex: 1 }}>
       <TabHeader title="Mi cuenta" sub={`${me.car.plate} · ${me.car.model}`} initials={initials(me.driver)} onPerfil={() => {}} />
-      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 6, gap: 12 }}>
+      <KeyboardAwareScrollView bottomOffset={24} contentContainerStyle={{ padding: 16, paddingTop: 6, gap: 12 }} keyboardShouldPersistTaps="handled">
         <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 13, padding: 18 }}>
           <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: COLORS.bgDark, alignItems: 'center', justifyContent: 'center' }}>
             <Text style={{ fontSize: 17, fontWeight: '700', color: '#f7dfae' }}>{initials(me.driver)}</Text>
@@ -65,25 +66,21 @@ export default function Perfil() {
           <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', color: COLORS.textMuted }}>Ubicación del auto</Text>
           <Text style={{ fontSize: 13, color: COLORS.text }}>
             {locationStatus === 'active'
-              ? 'Compartiendo en segundo plano.'
-              : locationStatus === 'unavailable'
-                ? 'Expo Go no admite ubicación en segundo plano en Android. Usá un development build.'
+              ? 'Ubicación compartida. Se actualiza cada hora mientras la app esté abierta.'
               : locationStatus === 'services-disabled'
                 ? 'Activá la ubicación del teléfono para compartirla.'
                 : locationStatus === 'permission-required'
-                  ? 'Falta permiso de ubicación en segundo plano.'
+                  ? 'Falta permiso de ubicación para compartirla.'
                   : locationStatus === 'error'
-                    ? 'No se pudo activar el seguimiento.'
-                    : 'El seguimiento todavía no está activo.'}
+                    ? 'No se pudo compartir la ubicación.'
+                    : 'La ubicación todavía no se compartió.'}
           </Text>
-          {locationStatus !== 'active' && locationStatus !== 'unavailable' && (
-            <Pressable
-              onPress={() => void activarUbicacion()}
-              style={{ minHeight: 48, borderRadius: 16, backgroundColor: COLORS.bgDark, alignItems: 'center', justifyContent: 'center' }}
-            >
-              <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.onDark }}>Activar ubicación</Text>
-            </Pressable>
-          )}
+          <Pressable
+            onPress={() => void activarUbicacion()}
+            style={{ minHeight: 48, borderRadius: 16, backgroundColor: COLORS.bgDark, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.onDark }}>Compartir ahora</Text>
+          </Pressable>
         </Card>
 
         <Pressable
@@ -95,7 +92,7 @@ export default function Perfil() {
         >
           <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.redText2 }}>Cerrar sesión</Text>
         </Pressable>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

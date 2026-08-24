@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Pressable, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -18,7 +19,7 @@ function CarIcon() {
 }
 
 export default function Login() {
-  const { entrar } = useAuth();
+  const { entrar, reintentarBiometria, biometriaBloqueada } = useAuth();
   const router = useRouter();
   const [usuario, setUsuario] = useState('');
   const [password, setPassword] = useState('');
@@ -46,7 +47,7 @@ export default function Login() {
   const footerLift = Math.round(height * 0.07);
 
   return (
-    <View style={{ flex: 1, backgroundColor: COLORS.bgDark }}>
+    <KeyboardAwareScrollView style={{ flex: 1, backgroundColor: COLORS.bgDark }} bottomOffset={24} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
       <View style={{ flex: 1, padding: 26, paddingTop: insets.top + 40, paddingBottom: Math.max(insets.bottom, 16), gap: 26 }}>
         <View style={{ gap: 10 }}>
           <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: COLORS.amber, alignItems: 'center', justifyContent: 'center' }}>
@@ -108,12 +109,15 @@ export default function Login() {
           >
             <Text style={{ fontSize: 15, fontWeight: '700', color: COLORS.bgDark }}>{enviando ? 'Entrando…' : 'Ingresar'}</Text>
           </Pressable>
+          {biometriaBloqueada && <Pressable onPress={() => void reintentarBiometria()} style={{ minHeight: 46, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.onDarkMuted }}>Desbloquear con huella o Face ID</Text>
+          </Pressable>}
         </View>
 
         <Text style={{ marginTop: 'auto', marginBottom: footerLift, fontSize: 11, color: '#77726a', lineHeight: 17 }}>
           El dueño de la flota te asigna el auto, el usuario y la contraseña. Si no los tenés, pedíselos a él.
         </Text>
       </View>
-    </View>
+    </KeyboardAwareScrollView>
   );
 }
