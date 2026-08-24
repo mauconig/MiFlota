@@ -1,15 +1,31 @@
 import { Pressable, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
 import Svg, { Path, Rect } from 'react-native-svg';
 import type { MobileView } from '../useMobileView';
 import { Sparkline } from '../components/Sparkline';
 import { Donut } from '../components/Donut';
 import { BarList } from '../components/BarList';
 import { HealthCard } from '../components/HealthCard';
+import { Pagination } from '../components/Pagination';
 
 const card = { backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 20, padding: 16 };
+const PAGE_SIZE = 5;
 
 export function Dashboard({ v }: { v: MobileView }) {
   const d = v.dashboard;
+  const [page, setPage] = useState(0);
+  const resetKey = useMemo(() => d.bars.map((bar) => bar.plate).join('|'), [d.bars]);
+  const pageCount = Math.max(1, Math.ceil(d.bars.length / PAGE_SIZE));
+  const visibleBars = d.bars.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(0);
+  }, [resetKey]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount - 1));
+  }, [pageCount]);
+
   return (
     <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16, gap: 14 }}>
       <View style={{ paddingHorizontal: 4 }}>
@@ -65,9 +81,10 @@ export function Dashboard({ v }: { v: MobileView }) {
           {d.bars.length === 0 ? (
             <Text style={{ fontSize: 12, color: '#6b665c' }}>Sin vehículos activos todavía</Text>
           ) : (
-            <BarList bars={d.bars.map((b) => ({ label: b.plate, w: b.w, color: b.color, short: b.short }))} />
+            <BarList bars={visibleBars.map((b) => ({ label: b.plate, w: b.w, color: b.color, short: b.short }))} />
           )}
         </View>
+        <Pagination page={page} pageSize={PAGE_SIZE} total={d.bars.length} itemLabel="vehículos" onPageChange={setPage} />
       </View>
 
       <HealthCard d={d} />

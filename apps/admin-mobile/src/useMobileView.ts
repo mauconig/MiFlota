@@ -862,7 +862,7 @@ export function useMobileView(
     acc += pct;
     return seg;
   });
-  const bars = sorted.slice(0, 7).map((x) => ({ plate: x.c.plate, w: Math.max(4, Math.round((Math.abs(x.n) / maxAbs) * 100)), color: statusColor(x.n, UMBRAL_VERDE), short: fmtShort(x.n) }));
+  const bars = sorted.map((x) => ({ plate: x.c.plate, w: Math.max(4, Math.round((Math.abs(x.n) / maxAbs) * 100)), color: statusColor(x.n, UMBRAL_VERDE), short: fmtShort(x.n) }));
 
   const baseMonth = new Date(TODAY.getFullYear(), TODAY.getMonth(), 1);
   const monthNets: number[] = [];
