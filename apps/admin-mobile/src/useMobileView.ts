@@ -1031,7 +1031,7 @@ export function useMobileView(
     const cs = stats(movs, aplicaciones, (m) => m.carId === car.id && inR(m), (a) => a.carId === car.id && inRA(a));
     const carAlerts = alertsByCar.get(car.id) ?? [];
     const carMovs = movs.filter((m) => m.carId === car.id).sort((a, b) => +b.date - +a.date);
-    const timeline: MovRowView[] = carMovs.slice(0, 40).map((m) => {
+    const timeline: MovRowView[] = carMovs.map((m) => {
       const isIng = m.type === 'ingreso';
       const deuda = isIng ? deudaDe(m) : 0;
       const cobradoM = isIng ? cobradoDe(m) : 0;
