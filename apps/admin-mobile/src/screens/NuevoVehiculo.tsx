@@ -18,7 +18,7 @@ export function NuevoVehiculo({ v }: { v: MobileView }) {
   const seguroVence = useDateField(nc.seguroVence, nc.setSeguroVence);
   return (
     <View style={{ paddingHorizontal: 16, paddingTop: 6, paddingBottom: 16, gap: 14 }}>
-      <Text style={{ fontSize: 12, color: '#6b665c', paddingHorizontal: 4 }}>Solo chapa y modelo son obligatorios. Service, seguro y kilometraje se pueden agregar después desde la ficha.</Text>
+      <Text style={{ fontSize: 12, color: '#6b665c', paddingHorizontal: 4 }}>{nc.editando ? 'Actualizá los datos del vehículo. Los cambios se guardan en su ficha.' : 'Solo chapa y modelo son obligatorios. Service, seguro y kilometraje se pueden agregar después desde la ficha.'}</Text>
 
       <View style={card}>
         <View style={[row, divider]}>
@@ -86,7 +86,7 @@ export function NuevoVehiculo({ v }: { v: MobileView }) {
       <Text style={{ fontSize: 12, color: '#6b665c', paddingHorizontal: 4 }}>La cuota se define al asignarle un chofer.</Text>
 
       <Pressable onPress={nc.guardar} style={{ borderRadius: 20, backgroundColor: '#16150f', minHeight: 52, alignItems: 'center', justifyContent: 'center' }}>
-        <Text style={{ color: '#fffdf8', fontSize: 15, fontWeight: '700' }}>Agregar a la flota</Text>
+        <Text style={{ color: '#fffdf8', fontSize: 15, fontWeight: '700' }}>{nc.editando ? 'Guardar cambios' : 'Agregar a la flota'}</Text>
       </Pressable>
       <Pressable onPress={v.back} style={{ borderWidth: 1, borderColor: '#e0d6c4', borderRadius: 20, backgroundColor: '#fffdf8', minHeight: 48, alignItems: 'center', justifyContent: 'center' }}>
         <Text style={{ color: '#3d3a34', fontSize: 14, fontWeight: '600' }}>Cancelar</Text>

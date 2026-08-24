@@ -4,7 +4,7 @@ import type { Car, Mov, Pago, MobileState, Screen, RegistrarTab, FleetFilter, Pi
 import { imputar, type Aplicacion } from './cobranza';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, daysBetween, durLbl, dLbl, dLblFull, fmt, fmtShort, initials, statusColor, numFromInput, miles, isoLocal } from './format';
-import type { FleetStore } from './api';
+import type { FleetStore, NuevoCarPayload } from './api';
 import { API_BASE } from './config';
 
 const UMBRAL_VERDE = 2500000;
@@ -166,6 +166,22 @@ function blankNuevoVehiculo(): import('./types').NuevoVehiculoForm {
   };
 }
 
+function nuevoVehiculoDesdeCar(car: Car): import('./types').NuevoVehiculoForm {
+  return {
+    plate: car.plate,
+    model: car.model,
+    year: String(car.year),
+    gpsTag: car.gpsTag,
+    kilometraje: car.kilometraje ? String(car.kilometraje) : '',
+    lastService: car.lastServiceDate.getFullYear() > 1970 ? isoLocal(car.lastServiceDate) : '',
+    serviceCada: car.serviceCada ? String(car.serviceCada) : '',
+    serviceUnidad: car.serviceUnidad,
+    seguroVence: car.seguroDate.getFullYear() > 1970 ? isoLocal(car.seguroDate) : '',
+    seguroNombre: car.seguroNombre,
+    seguroCada: car.seguroCada ? String(car.seguroCada) : '',
+  };
+}
+
 export function initialMobileState(): MobileState {
   return {
     screen: 'dashboard',
@@ -260,6 +276,7 @@ interface DetalleView {
   cuotaFmt: string;
   driverAction: string;
   driverTitle: string;
+  edit: () => void;
   alerts: AlertCardView[];
   hasAlerts: boolean;
   movs: MovRowView[];
@@ -443,6 +460,7 @@ export interface MobileView {
   detalle: DetalleView | null;
 
   nuevoVehiculo: {
+    editando: boolean;
     plate: string;
     model: string;
     year: string;
@@ -704,7 +722,7 @@ export function useMobileView(
       return null;
     }
     const kilometraje = numFromInput(n.kilometraje);
-    if (cars.some((c) => c.plate.toUpperCase() === plate)) {
+    if (cars.some((c) => c.id !== state.carId && c.plate.toUpperCase() === plate)) {
       toast('Esa chapa ya está en la flota');
       return null;
     }
@@ -718,19 +736,20 @@ export function useMobileView(
       toast('Cada cuánto se renueva el seguro: entre 1 y ' + SEG_CADA_MAX + ' meses');
       return null;
     }
+    const payload: NuevoCarPayload = {
+      plate,
+      model: n.model.trim(),
+      year: numFromInput(n.year) || 2018,
+      gpsTag: n.gpsTag.trim(),
+      ...(n.kilometraje.trim() ? { kilometraje } : {}),
+      ...(n.lastService ? { lastServiceDate: n.lastService, serviceCada: cada, serviceUnidad: n.serviceUnidad } : n.serviceCada ? { serviceCada: cada, serviceUnidad: n.serviceUnidad } : {}),
+      ...(n.seguroVence ? { seguroDate: n.seguroVence } : {}),
+      ...(n.seguroNombre.trim() ? { seguroNombre: n.seguroNombre.trim() } : {}),
+      ...(n.seguroCada ? { seguroCada: segCada } : {}),
+    };
     return {
       plate,
-      payload: {
-        plate,
-        model: n.model.trim(),
-        year: numFromInput(n.year) || 2018,
-        gpsTag: n.gpsTag.trim(),
-        ...(n.kilometraje.trim() ? { kilometraje } : {}),
-        ...(n.lastService ? { lastServiceDate: n.lastService, serviceCada: cada, serviceUnidad: n.serviceUnidad } : n.serviceCada ? { serviceCada: cada, serviceUnidad: n.serviceUnidad } : {}),
-        ...(n.seguroVence ? { seguroDate: n.seguroVence } : {}),
-        ...(n.seguroNombre.trim() ? { seguroNombre: n.seguroNombre.trim() } : {}),
-        ...(n.seguroCada ? { seguroCada: segCada } : {}),
-      },
+      payload,
     };
   };
 
@@ -1069,6 +1088,7 @@ export function useMobileView(
       cuotaFmt: car.cuota ? fmt(car.cuota) : '—',
       driverAction: car.driver === 'Sin chofer' ? 'Asignar' : 'Cambiar',
       driverTitle: car.driver === 'Sin chofer' ? 'Asignar chofer' : 'Chofer de ' + car.plate,
+      edit: () => push('nuevoVehiculo', { carId: car.id, nuevoVehiculo: nuevoVehiculoDesdeCar(car), nuevoVehiculoConfirm: false, nuevoVehiculoGuardando: false }),
       alerts: carAlerts.map((a) => ({
         txt: a.text,
         sub: a.kind,
@@ -1514,7 +1534,7 @@ export function useMobileView(
     ranking: ['Ganancia por vehículo', 'Comparación del período'],
     reportes: ['Reportes', 'Exportá para tu contador'],
     detalle: ['Detalle del vehículo', ''],
-    nuevoVehiculo: ['Nuevo vehículo', ''],
+    nuevoVehiculo: [state.carId ? 'Editar vehículo' : 'Nuevo vehículo', ''],
     registrar: [f?.tab === 'gasto' ? 'Registrar egreso' : 'Registrar ingreso', ''],
     assistant: ['MiFlota IA', ''],
     perfil: ['Perfil', ''],
@@ -1638,6 +1658,7 @@ export function useMobileView(
     detalle,
 
     nuevoVehiculo: {
+      editando: state.carId !== null,
       plate: state.nuevoVehiculo.plate,
       model: state.nuevoVehiculo.model,
       year: state.nuevoVehiculo.year,
@@ -1678,6 +1699,24 @@ export function useMobileView(
           const v = nuevoVehiculoValidar();
           if (!v) {
             update({ nuevoVehiculoConfirm: false });
+            return;
+          }
+          if (state.carId) {
+            persist.patchCar(state.carId, {
+              plate: v.payload.plate,
+              model: v.payload.model,
+              year: v.payload.year,
+              gpsTag: v.payload.gpsTag,
+              kilometraje: v.payload.kilometraje ?? 0,
+              lastServiceDate: v.payload.lastServiceDate ? new Date(v.payload.lastServiceDate + 'T12:00:00') : new Date(0),
+              ...(v.payload.serviceCada !== undefined ? { serviceCada: v.payload.serviceCada, serviceUnidad: v.payload.serviceUnidad ?? 'meses' } : {}),
+              seguroDate: v.payload.seguroDate ? new Date(v.payload.seguroDate + 'T12:00:00') : new Date(0),
+              seguroNombre: v.payload.seguroNombre ?? '',
+              seguroCada: v.payload.seguroCada ?? 0,
+            });
+            toast('Datos del vehículo actualizados · ' + v.plate);
+            update({ nuevoVehiculoConfirm: false, nuevoVehiculoGuardando: false });
+            back();
             return;
           }
           update({ nuevoVehiculoGuardando: true });

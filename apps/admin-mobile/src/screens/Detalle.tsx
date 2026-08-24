@@ -66,6 +66,9 @@ export function Detalle({ v }: { v: MobileView }) {
             </Svg>
           </Pressable>
         </View>
+        <Pressable onPress={dc.edit} style={{ minHeight: 46, borderRadius: 15, borderWidth: 1, borderColor: '#d9cdb8', backgroundColor: '#fffdf8', alignItems: 'center', justifyContent: 'center', marginTop: 12 }}>
+          <Text style={{ color: '#3d3a34', fontSize: 13, fontWeight: '700' }}>Editar datos del vehículo</Text>
+        </Pressable>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#f0ebe0' }}>
           <View>
             <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', color: '#6b665c' }}>Cobrado</Text>

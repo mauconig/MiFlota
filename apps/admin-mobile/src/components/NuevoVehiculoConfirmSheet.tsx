@@ -6,7 +6,7 @@ export function NuevoVehiculoConfirmSheet({ v }: { v: MobileView }) {
   const c = v.nuevoVehiculo.confirm;
   if (!c.open) return null;
   return (
-    <BottomSheet title="Confirmar vehículo nuevo" onClose={c.cancelar}>
+    <BottomSheet title={v.nuevoVehiculo.editando ? 'Confirmar cambios' : 'Confirmar vehículo nuevo'} onClose={c.cancelar}>
       <View style={{ backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 18, paddingHorizontal: 14 }}>
         {c.resumen.map((row, i) => (
           <View
@@ -33,7 +33,7 @@ export function NuevoVehiculoConfirmSheet({ v }: { v: MobileView }) {
         disabled={c.guardando}
         style={{ borderRadius: 18, backgroundColor: '#16150f', minHeight: 48, alignItems: 'center', justifyContent: 'center', opacity: c.guardando ? 0.7 : 1 }}
       >
-        <Text style={{ color: '#fffdf8', fontSize: 14, fontWeight: '700' }}>{c.guardando ? 'Guardando…' : 'Confirmar y agregar'}</Text>
+        <Text style={{ color: '#fffdf8', fontSize: 14, fontWeight: '700' }}>{c.guardando ? 'Guardando…' : v.nuevoVehiculo.editando ? 'Confirmar cambios' : 'Confirmar y agregar'}</Text>
       </Pressable>
       <Pressable
         onPress={c.cancelar}

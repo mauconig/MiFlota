@@ -828,6 +828,9 @@ const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 const SEG_CADA_MAX = 120;
 
 interface CarPatch {
+  plate?: string;
+  model?: string;
+  year?: number;
   driver?: string;
   cuota?: number;
   estado?: string;
@@ -845,6 +848,9 @@ interface CarPatch {
  *  `driver` y `cuota` se manejan aparte (la asignación de chofer ahora enlaza
  *  una fila de `drivers`, no solo un texto). */
 const CAMPOS: Record<string, { col: string; ok: (v: unknown) => boolean }> = {
+  plate: { col: 'plate', ok: (v) => typeof v === 'string' && v.trim().length > 0 && v.trim().length <= 20 },
+  model: { col: 'model', ok: (v) => typeof v === 'string' && v.trim().length > 0 && v.trim().length <= 120 },
+  year: { col: 'year', ok: (v) => Number.isInteger(v) && (v as number) > 1950 && (v as number) < 2100 },
   estado: { col: 'estado', ok: (v) => typeof v === 'string' && ESTADOS.has(v) },
   gpsTag: { col: 'gps_tag', ok: (v) => typeof v === 'string' && v.length <= 40 },
   kilometraje: { col: 'kilometraje', ok: (v) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 10_000_000 },
@@ -899,10 +905,17 @@ app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (re
   const actual = selCar.get(req.params.id, u.id) as CarRow | undefined;
   if (!actual) return reply.code(404).send({ error: 'Vehículo inexistente' });
 
+  const body = req.body ?? ({} as CarPatch);
+  const normalizedPlate = body.plate === undefined ? undefined : body.plate.trim().toUpperCase();
+  if (normalizedPlate !== undefined) {
+    const duplicate = db.prepare('SELECT 1 FROM cars WHERE owner_id = ? AND id <> ? AND UPPER(plate) = ?').get(u.id, req.params.id, normalizedPlate);
+    if (duplicate) return reply.code(409).send({ error: 'Ya existe un vehículo con esa chapa' });
+  }
+
   const sets: string[] = [];
   const vals: unknown[] = [];
   for (const [campo, def] of Object.entries(CAMPOS) as [string, { col: string; ok: (v: unknown) => boolean }][]) {
-    const v = req.body?.[campo as keyof CarPatch];
+    const v = campo === 'plate' ? normalizedPlate : body[campo as keyof CarPatch];
     if (v === undefined) continue;
     if (!def.ok(v)) return reply.code(400).send({ error: `Valor inválido para ${campo}` });
     sets.push(`${def.col} = ?`);
@@ -911,10 +924,10 @@ app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (re
 
   // Sin chofer no hay cuota. Se resuelve acá y no solo en el cliente para que
   // la regla valga también para cualquier otra vía de escritura.
-  const driverFinal = req.body?.driver ?? actual.driver;
-  const cuotaFinal = req.body?.cuota ?? actual.cuota;
+  const driverFinal = body.driver ?? actual.driver;
+  const cuotaFinal = body.cuota ?? actual.cuota;
   if (driverFinal === 'Sin chofer' && cuotaFinal > 0) {
-    if (req.body?.cuota !== undefined && req.body?.driver === undefined) {
+    if (body.cuota !== undefined && body.driver === undefined) {
       return reply.code(400).send({ error: 'No se puede fijar una cuota en un vehículo sin chofer' });
     }
     sets.push('cuota = ?');
@@ -925,7 +938,7 @@ app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (re
   // sets vacío el UPDATE quedaría mal formado (`SET WHERE`). Ese caso se
   // resuelve abajo con aplicarDriverEnAuto, así que acá se saltea.
   if (sets.length) {
-    if (req.body?.kilometraje !== undefined) {
+    if (body.kilometraje !== undefined) {
       sets.push('kilometraje_actualizado = ?');
       vals.push(hoyISO());
     }
@@ -933,10 +946,10 @@ app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (re
   }
 
   // El chofer (y su cuota) se manejan enlazando la fila de drivers.
-  if (req.body?.driver !== undefined) {
-    aplicarDriverEnAuto(db, u.id, req.params.id, req.body.driver === 'Sin chofer' ? null : req.body.driver, req.body?.cuota ?? 0);
-  } else if (req.body?.cuota !== undefined) {
-    db.prepare('UPDATE cars SET cuota = ? WHERE id = ? AND owner_id = ?').run(req.body.cuota, req.params.id, u.id);
+  if (body.driver !== undefined) {
+    aplicarDriverEnAuto(db, u.id, req.params.id, body.driver === 'Sin chofer' ? null : body.driver, body.cuota ?? 0);
+  } else if (body.cuota !== undefined) {
+    db.prepare('UPDATE cars SET cuota = ? WHERE id = ? AND owner_id = ?').run(body.cuota, req.params.id, u.id);
   }
 
   return carToJson(selCar.get(req.params.id, u.id) as CarRow);
