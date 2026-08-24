@@ -104,7 +104,7 @@ export interface CarLocation {
 // un frame de teléfono, no un dashboard de pestañas siempre montadas como
 // admin-web, así que este estado no se parece al `UIState` de ahí.
 
-export type Screen = 'dashboard' | 'flota' | 'detalle' | 'nuevoVehiculo' | 'registrar' | 'reportes' | 'ranking' | 'assistant' | 'perfil';
+export type Screen = 'dashboard' | 'flota' | 'gastos' | 'mas' | 'alertas' | 'choferes' | 'detalle' | 'nuevoVehiculo' | 'registrar' | 'reportes' | 'ranking' | 'assistant' | 'perfil';
 export type Period = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
 export type RegistrarTab = 'cobro' | 'gasto';
 
@@ -198,6 +198,10 @@ export interface MobileState {
   nuevoVehiculoConfirm: boolean;
   nuevoVehiculoGuardando: boolean;
   registrar: RegistrarForm | null;
+  registroChoice: boolean;
+  gastosCarId: string;
+  gastosCat: string;
+  gastosExpanded: Record<string, boolean>;
   toast: string;
   fleetFilter: FleetFilter;
   rankBy: RankBy;

@@ -165,6 +165,10 @@ export function initialMobileState(): MobileState {
     nuevoVehiculoConfirm: false,
     nuevoVehiculoGuardando: false,
     registrar: null,
+    registroChoice: false,
+    gastosCarId: 'todos',
+    gastosCat: 'todas',
+    gastosExpanded: {},
     toast: '',
     fleetFilter: 'todos',
     rankBy: 'auto',
@@ -258,6 +262,47 @@ interface RankRow {
   open: () => void;
 }
 
+interface GastoRowView {
+  id: string;
+  desc: string;
+  cat: string;
+  date: string;
+  amount: string;
+  repuestos: string;
+  manoObra: string;
+  items: { nombre: string; cantidad: string; costoUnitario: string; subtotal: string }[];
+  expanded: boolean;
+  toggle: () => void;
+}
+
+interface GastoGroupView {
+  carId: string;
+  plate: string;
+  total: string;
+  rows: GastoRowView[];
+  expanded: boolean;
+  toggle: () => void;
+}
+
+interface AlertView {
+  carId: string;
+  plate: string;
+  kind: string;
+  text: string;
+  sev: number;
+  open: () => void;
+}
+
+interface ChoferView {
+  key: string;
+  name: string;
+  initials: string;
+  cars: string;
+  carId: string;
+  cuota: string;
+  open: () => void;
+}
+
 export interface MobileView {
   screen: Screen;
   isTab: boolean;
@@ -269,9 +314,13 @@ export interface MobileView {
 
   navDash: () => void;
   navFlota: () => void;
-  navRanking: () => void;
+  navGastos: () => void;
+  navMas: () => void;
   navReportes: () => void;
-  tabActive: { dash: boolean; flota: boolean; ranking: boolean; reportes: boolean };
+  navAlertas: () => void;
+  navChoferes: () => void;
+  tabActive: { dash: boolean; flota: boolean; gastos: boolean; mas: boolean };
+  registroChoice: { open: boolean; show: () => void; close: () => void; cobro: () => void; gasto: () => void };
 
   openAssistant: () => void;
   goDetalle: (carId: string) => void;
@@ -316,6 +365,17 @@ export interface MobileView {
   };
 
   flota: { filters: Chip[]; cars: CarCardView[] };
+
+  gastos: {
+    carFilters: Chip[];
+    catFilters: Chip[];
+    groups: GastoGroupView[];
+    empty: boolean;
+  };
+
+  mas: { alertCount: number; driverCount: number; navAlertas: () => void; navChoferes: () => void; navReportes: () => void; goPerfil: () => void };
+  alertas: { items: AlertView[] };
+  choferes: { items: ChoferView[] };
 
   detalle: DetalleView | null;
 
@@ -738,6 +798,77 @@ export function useMobileView(
     ['alerta', 'Con alerta'],
   ];
 
+  // ---- gastos -------------------------------------------------------
+  // Los movimientos siguen siendo la fuente de verdad. Esta pantalla solo
+  // cambia la forma de leerlos: primero por vehículo y después por gasto.
+  const expenseCars = active.filter((c) => movs.some((m) => m.type === 'egreso' && m.carId === c.id && inR(m)));
+  const gastoGroups: GastoGroupView[] = expenseCars
+    .filter((c) => state.gastosCarId === 'todos' || c.id === state.gastosCarId)
+    .map((c) => {
+      const movements = movs.filter((m) => m.type === 'egreso' && m.carId === c.id && inR(m) && (state.gastosCat === 'todas' || (m.cat || 'Otro') === state.gastosCat));
+      const groupKey = 'car:' + c.id;
+      return {
+        carId: c.id,
+        plate: c.plate,
+        total: fmt(movements.reduce((sum, m) => sum + m.amount, 0)),
+        expanded: state.gastosExpanded[groupKey] !== false,
+        toggle: () => update((s) => ({ gastosExpanded: { ...s.gastosExpanded, [groupKey]: !(s.gastosExpanded[groupKey] !== false) } })),
+        rows: movements.map((m) => {
+          const items = m.items || [];
+          const repuestos = items.reduce((sum, item) => sum + item.subtotal, 0);
+          const rowKey = 'mov:' + m.id;
+          return {
+            id: rowKey,
+            desc: m.desc,
+            cat: m.cat || 'Otro',
+            date: dLbl(m.date),
+            amount: fmt(m.amount),
+            repuestos: fmt(repuestos),
+            manoObra: m.manoObra ? fmt(m.manoObra) : '',
+            items: items.map((item) => ({ nombre: item.nombre, cantidad: String(item.cantidad), costoUnitario: fmt(item.costoUnitario), subtotal: fmt(item.subtotal) })),
+            expanded: !!state.gastosExpanded[rowKey],
+            toggle: () => update((s) => ({ gastosExpanded: { ...s.gastosExpanded, [rowKey]: !s.gastosExpanded[rowKey] } })),
+          };
+        }),
+      };
+    })
+    .filter((g) => g.rows.length > 0);
+
+  const gastoCarFilters: Chip[] = [
+    { label: 'Todos los vehículos', ...chipStyle(state.gastosCarId === 'todos'), pick: () => update({ gastosCarId: 'todos' }) },
+    ...active.map((c) => ({ label: c.plate, ...chipStyle(state.gastosCarId === c.id), pick: () => update({ gastosCarId: c.id }) })),
+  ];
+  const gastoCatFilters: Chip[] = [
+    { label: 'Todas', ...chipStyle(state.gastosCat === 'todas', 'amber'), pick: () => update({ gastosCat: 'todas' }) },
+    ...CATS.map((cat) => ({ label: cat, ...chipStyle(state.gastosCat === cat, 'amber'), pick: () => update({ gastosCat: cat }) })),
+  ];
+
+  const alertViews: AlertView[] = alerts.map((a) => ({
+    carId: a.car.id,
+    plate: a.car.plate,
+    kind: a.kind,
+    text: a.text,
+    sev: a.sev,
+    open: () => push('detalle', { carId: a.car.id }),
+  }));
+
+  const driverGroups = new Map<string, { name: string; cars: Car[] }>();
+  active.forEach((c) => {
+    const key = c.driver === 'Sin chofer' ? 'none:' + c.id : claveDeCar(c);
+    const current = driverGroups.get(key) ?? { name: c.driver, cars: [] };
+    current.cars.push(c);
+    driverGroups.set(key, current);
+  });
+  const choferViews: ChoferView[] = [...driverGroups.entries()].map(([key, g]) => ({
+    key,
+    name: g.name,
+    initials: initials(g.name),
+    cars: g.cars.map((c) => c.plate).join(' · '),
+    carId: g.cars[0].id,
+    cuota: g.cars[0].cuota ? fmt(g.cars[0].cuota) + ' por día' : 'Sin cuota cargada',
+    open: () => push('detalle', { carId: g.cars[0].id }),
+  }));
+
   // ---- detalle -------------------------------------------------------
   let detalle: DetalleView | null = null;
   if (car) {
@@ -989,10 +1120,10 @@ export function useMobileView(
     ['baja', 'Baja', 'Fuera de la flota, no entra en los cálculos'],
   ];
 
-  const headerByScreen: Record<Screen, [string, string]> = {
+  const headerByScreen: Record<string, [string, string]> = {
     dashboard: ['MiFlota', 'Actualizado · ' + r.label],
     flota: ['Vehículos', active.length + ' activos · ' + (cars.length - active.length) + ' de baja'],
-    ranking: ['Rentabilidad', 'De más a menos rentable'],
+    ranking: ['Ganancia por vehículo', 'Comparación del período'],
     reportes: ['Reportes', 'Exportá para tu contador'],
     detalle: ['Detalle del vehículo', ''],
     nuevoVehiculo: ['Nuevo vehículo', ''],
@@ -1001,8 +1132,17 @@ export function useMobileView(
     perfil: ['Perfil', ''],
   };
 
-  const isTab = ['dashboard', 'flota', 'ranking', 'reportes'].includes(state.screen);
-  const isSub = ['detalle', 'nuevoVehiculo', 'registrar', 'perfil'].includes(state.screen);
+  Object.assign(headerByScreen, {
+    dashboard: ['Inicio', 'Actualizado · ' + r.label],
+    gastos: ['Gastos', 'Repuestos y mano de obra'],
+    mas: ['Más', 'Accesos y configuración'],
+    alertas: ['Alertas', alerts.length ? alerts.length + ' avisos para revisar' : 'Todo al día'],
+    choferes: ['Choferes', choferViews.filter((d) => d.name !== 'Sin chofer').length + ' personas asignadas'],
+    ranking: ['Ganancia por vehículo', 'Comparación del período'],
+  });
+
+  const isTab = ['dashboard', 'flota', 'gastos', 'mas'].includes(state.screen);
+  const isSub = ['detalle', 'nuevoVehiculo', 'registrar', 'reportes', 'alertas', 'choferes', 'perfil'].includes(state.screen);
   const isAssistant = state.screen === 'assistant';
 
   return {
@@ -1015,9 +1155,30 @@ export function useMobileView(
     back,
     navDash: () => replaceTab('dashboard'),
     navFlota: () => replaceTab('flota'),
-    navRanking: () => replaceTab('ranking'),
-    navReportes: () => replaceTab('reportes'),
-    tabActive: { dash: state.screen === 'dashboard', flota: state.screen === 'flota' || state.screen === 'detalle', ranking: state.screen === 'ranking', reportes: state.screen === 'reportes' },
+    navGastos: () => replaceTab('gastos'),
+    navMas: () => replaceTab('mas'),
+    navReportes: () => push('reportes'),
+    navAlertas: () => push('alertas'),
+    navChoferes: () => push('choferes'),
+    tabActive: {
+      dash: state.screen === 'dashboard',
+      flota: state.screen === 'flota' || state.screen === 'detalle' || state.screen === 'nuevoVehiculo',
+      gastos: state.screen === 'gastos',
+      mas: ['mas', 'alertas', 'choferes', 'reportes', 'perfil'].includes(state.screen),
+    },
+    registroChoice: {
+      open: state.registroChoice,
+      show: () => update({ registroChoice: true }),
+      close: () => update({ registroChoice: false }),
+      cobro: () => {
+        update({ registroChoice: false });
+        goRegistrarCobro();
+      },
+      gasto: () => {
+        update({ registroChoice: false });
+        goRegistrarGasto();
+      },
+    },
     openAssistant: () => push('assistant'),
     goDetalle: (carId) => push('detalle', { carId }),
     goNuevoVehiculo: () =>
@@ -1061,6 +1222,19 @@ export function useMobileView(
     },
 
     flota: { filters: FILT.map(([k, label]) => ({ label, ...chipStyle(state.fleetFilter === k), pick: () => update({ fleetFilter: k }) })), cars: flotaCars },
+
+    gastos: { carFilters: gastoCarFilters, catFilters: gastoCatFilters, groups: gastoGroups, empty: gastoGroups.length === 0 },
+
+    mas: {
+      alertCount: alerts.length,
+      driverCount: choferViews.filter((d) => d.name !== 'Sin chofer').length,
+      navAlertas: () => push('alertas'),
+      navChoferes: () => push('choferes'),
+      navReportes: () => push('reportes'),
+      goPerfil: () => push('perfil', { perfil: { actual: '', nueva: '', repetir: '', guardando: false } }),
+    },
+    alertas: { items: alertViews },
+    choferes: { items: choferViews },
 
     detalle,
 
@@ -1150,7 +1324,7 @@ export function useMobileView(
       byAuto: state.rankBy === 'auto',
       setAuto: () => update({ rankBy: 'auto' }),
       setModelo: () => update({ rankBy: 'modelo' }),
-      hint: state.rankBy === 'auto' ? 'Neto por auto en el período' : 'Neto total y promedio por modelo',
+      hint: state.rankBy === 'auto' ? 'Ganancia por vehículo en el período' : 'Ganancia total y promedio por modelo',
     },
 
     estadoSheet: {

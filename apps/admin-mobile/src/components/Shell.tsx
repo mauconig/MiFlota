@@ -7,12 +7,17 @@ import { Toast } from './Toast';
 import { PeriodoSheet } from './PeriodoSheet';
 import { EstadoSheet } from './EstadoSheet';
 import { ChoferSheet } from './ChoferSheet';
+import { RegistroChoiceSheet } from './RegistroChoiceSheet';
 import { Dashboard } from '../screens/Dashboard';
 import { Flota } from '../screens/Flota';
 import { Detalle } from '../screens/Detalle';
 import { NuevoVehiculo } from '../screens/NuevoVehiculo';
 import { Registrar } from '../screens/registrar/Registrar';
 import { Reportes } from '../screens/Reportes';
+import { Gastos } from '../screens/Gastos';
+import { Mas } from '../screens/Mas';
+import { Alertas } from '../screens/Alertas';
+import { Choferes } from '../screens/Choferes';
 import { Ranking } from '../screens/Ranking';
 import { Assistant } from '../screens/Assistant';
 import { Perfil } from '../screens/Perfil';
@@ -38,6 +43,10 @@ export function Shell({ v, nombre, usuario, onLogout }: { v: MobileView; nombre:
           <KeyboardAwareScrollView style={{ flex: 1 }} bottomOffset={24} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
             {v.screen === 'dashboard' && <Dashboard v={v} />}
             {v.screen === 'flota' && <Flota v={v} />}
+            {v.screen === 'gastos' && <Gastos v={v} />}
+            {v.screen === 'mas' && <Mas v={v} />}
+            {v.screen === 'alertas' && <Alertas v={v} />}
+            {v.screen === 'choferes' && <Choferes v={v} />}
             {v.screen === 'detalle' && <Detalle v={v} />}
             {v.screen === 'nuevoVehiculo' && <NuevoVehiculo v={v} />}
             {v.screen === 'registrar' && <Registrar v={v} />}
@@ -52,6 +61,7 @@ export function Shell({ v, nombre, usuario, onLogout }: { v: MobileView; nombre:
         {v.period.open && <PeriodoSheet v={v} />}
         {v.estadoSheet.open && <EstadoSheet v={v} />}
         {v.choferSheet.open && <ChoferSheet v={v} />}
+        {v.registroChoice.open && <RegistroChoiceSheet v={v} />}
         <Toast msg={v.toast} />
         <BottomNav v={v} />
       </View>

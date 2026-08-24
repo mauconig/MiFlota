@@ -27,11 +27,11 @@ export function BottomNav({ v }: { v: MobileView }) {
           <Path d="M9 17h6" />
           <Circle cx="17" cy="17" r="2" />
         </Svg>
-        <Text style={{ fontSize: 10, fontWeight: '600', color: color(c.flota) }}>Flota</Text>
+        <Text style={{ fontSize: 10, fontWeight: '600', color: color(c.flota) }}>Vehículos</Text>
       </Pressable>
       <View style={{ width: 72, alignItems: 'center' }}>
         <Pressable
-          onPress={() => v.goRegistrarCobro()}
+          onPress={v.registroChoice.show}
           accessibilityLabel="Registrar"
           style={{
             width: 56,
@@ -53,23 +53,19 @@ export function BottomNav({ v }: { v: MobileView }) {
           </Svg>
         </Pressable>
       </View>
-      <Pressable onPress={v.navRanking} style={tabBtn}>
-        <Svg viewBox="0 0 24 24" width={21} height={21} fill="none" stroke={color(c.ranking)} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
-          <Path d="M4 20V10" />
-          <Path d="M10 20V4" />
-          <Path d="M16 20v-7" />
-          <Path d="M22 20H2" />
+      <Pressable onPress={v.navGastos} style={tabBtn}>
+        <Svg viewBox="0 0 24 24" width={21} height={21} fill="none" stroke={color(c.gastos)} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
+          <Path d="M4 5h16M4 12h16M4 19h16" />
         </Svg>
-        <Text style={{ fontSize: 10, fontWeight: '600', color: color(c.ranking) }}>Ranking</Text>
+        <Text style={{ fontSize: 10, fontWeight: '600', color: color(c.gastos) }}>Gastos</Text>
       </Pressable>
-      <Pressable onPress={v.navReportes} style={tabBtn}>
-        <Svg viewBox="0 0 24 24" width={21} height={21} fill="none" stroke={color(c.reportes)} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
-          <Path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
-          <Path d="M14 2v4a2 2 0 0 0 2 2h4" />
-          <Path d="M16 13H8" />
-          <Path d="M16 17H8" />
+      <Pressable onPress={v.navMas} style={tabBtn}>
+        <Svg viewBox="0 0 24 24" width={21} height={21} fill="none" stroke={color(c.mas)} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
+          <Circle cx="5" cy="12" r="1" fill={color(c.mas)} stroke="none" />
+          <Circle cx="12" cy="12" r="1" fill={color(c.mas)} stroke="none" />
+          <Circle cx="19" cy="12" r="1" fill={color(c.mas)} stroke="none" />
         </Svg>
-        <Text style={{ fontSize: 10, fontWeight: '600', color: color(c.reportes) }}>Reportes</Text>
+        <Text style={{ fontSize: 10, fontWeight: '600', color: color(c.mas) }}>Más</Text>
       </Pressable>
     </View>
   );

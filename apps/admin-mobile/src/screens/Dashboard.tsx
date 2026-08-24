@@ -13,7 +13,7 @@ export function Dashboard({ v }: { v: MobileView }) {
   return (
     <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16, gap: 14 }}>
       <View style={{ paddingHorizontal: 4 }}>
-        <Text style={{ fontSize: 11, fontWeight: '600', letterSpacing: 1.3, textTransform: 'uppercase', color: '#6b665c' }}>Ganancia neta · {v.period.label}</Text>
+        <Text style={{ fontSize: 11, fontWeight: '600', letterSpacing: 1.3, textTransform: 'uppercase', color: '#6b665c' }}>Ganancia del período · {v.period.label}</Text>
         <View style={{ alignItems: 'flex-start', gap: 2, marginTop: 2 }}>
           <Text style={{ fontSize: 34, fontWeight: '800', letterSpacing: -1, lineHeight: 37, color: d.heroColor }}>{d.heroNet}</Text>
           <Text style={{ fontSize: 12, fontWeight: '600', color: d.heroNet.startsWith('−') ? '#c0553f' : '#2e7d5b' }}>{d.deltaTxt}</Text>
@@ -56,9 +56,9 @@ export function Dashboard({ v }: { v: MobileView }) {
 
       <View style={card}>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
-          <Text style={{ fontSize: 15, fontWeight: '700' }}>Neto por auto</Text>
-          <Pressable onPress={v.navRanking}>
-            <Text style={{ fontSize: 12, fontWeight: '600', color: '#b5791a' }}>Ver ranking →</Text>
+          <Text style={{ fontSize: 15, fontWeight: '700' }}>Ganancia por vehículo</Text>
+          <Pressable onPress={v.navGastos}>
+            <Text style={{ fontSize: 12, fontWeight: '600', color: '#b5791a' }}>Ver gastos →</Text>
           </Pressable>
         </View>
         <View style={{ marginTop: 14 }}>
