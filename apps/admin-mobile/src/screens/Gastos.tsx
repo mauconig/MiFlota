@@ -10,6 +10,7 @@ const MUTED = '#6b665c';
 const AMBER = '#b5791a';
 const RED = '#c0553f';
 const GROUP_PAGE_SIZE = 3;
+const ROW_PAGE_SIZE = 5;
 
 const card = { backgroundColor: PAPER, borderWidth: 1, borderColor: BORDER, borderRadius: 20, padding: 16 } as const;
 
@@ -56,17 +57,35 @@ function BackLink({ onPress }: { onPress: () => void }) {
 export function Gastos({ v }: { v: MobileView }) {
   const g = v.gastos;
   const [groupPage, setGroupPage] = useState(0);
-  const groupsKey = useMemo(() => `${g.selectedCarLabel}|${g.selectedCategoryLabel}|${g.groups.map((group) => group.carId).join('|')}`, [g.selectedCarLabel, g.selectedCategoryLabel, g.groups]);
+  const [rowPages, setRowPages] = useState<Record<string, number>>({});
+  const groupsKey = useMemo(() => `${g.selectedCarLabel}|${g.selectedCategoryLabel}|${g.groups.map((group) => `${group.carId}:${group.rows.length}:${group.rows[0]?.id ?? ''}:${group.rows[group.rows.length - 1]?.id ?? ''}`).join('|')}`, [g.selectedCarLabel, g.selectedCategoryLabel, g.groups]);
   const groupPageCount = Math.max(1, Math.ceil(g.groups.length / GROUP_PAGE_SIZE));
   const visibleGroups = g.groups.slice(groupPage * GROUP_PAGE_SIZE, (groupPage + 1) * GROUP_PAGE_SIZE);
 
   useEffect(() => {
     setGroupPage(0);
+    setRowPages({});
   }, [groupsKey]);
 
   useEffect(() => {
     setGroupPage((current) => Math.min(current, groupPageCount - 1));
   }, [groupPageCount]);
+
+  useEffect(() => {
+    setRowPages((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const group of g.groups) {
+        const lastPage = Math.max(0, Math.ceil(group.rows.length / ROW_PAGE_SIZE) - 1);
+        const page = next[group.carId] ?? 0;
+        if (page > lastPage) {
+          next[group.carId] = lastPage;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [g.groups]);
 
   return (
     <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 18, gap: 14 }}>
@@ -105,13 +124,16 @@ export function Gastos({ v }: { v: MobileView }) {
               <Text style={{ color: MUTED, textAlign: 'center', fontSize: 13 }}>Probá con otro vehículo o categoría, o registrá un gasto nuevo.</Text>
               <Pressable onPress={v.registroChoice.gasto} style={{ minHeight: 48, paddingHorizontal: 20, borderRadius: 16, backgroundColor: INK, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: PAPER, fontWeight: '700' }}>Registrar gasto</Text></Pressable>
             </View>
-          ) : visibleGroups.map((group) => (
+          ) : visibleGroups.map((group) => {
+            const rowPage = rowPages[group.carId] ?? 0;
+            const visibleRows = group.rows.slice(rowPage * ROW_PAGE_SIZE, (rowPage + 1) * ROW_PAGE_SIZE);
+            return (
             <View key={group.carId} style={card}>
               <Pressable onPress={group.toggle} style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <View><Text style={{ color: INK, fontSize: 16, fontWeight: '800' }}>{group.plate}</Text><Text style={{ color: MUTED, fontSize: 12, marginTop: 2 }}>{group.rows.length} gasto{group.rows.length === 1 ? '' : 's'}</Text></View>
                 <View style={{ alignItems: 'flex-end' }}><Text style={{ color: RED, fontSize: 16, fontWeight: '800' }}>{group.total}</Text><Text style={{ color: MUTED, fontSize: 11 }}>{group.expanded ? 'Ocultar' : 'Ver gastos'}</Text></View>
               </Pressable>
-              {group.expanded && group.rows.map((row) => (
+              {group.expanded && visibleRows.map((row) => (
                 <View key={row.id} style={{ borderTopWidth: 1, borderTopColor: '#f0ebe0', paddingTop: 10, marginTop: 6 }}>
                   <Pressable onPress={row.toggle} style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                     <View style={{ flex: 1, minWidth: 0 }}><Text numberOfLines={2} style={{ color: INK, fontSize: 13, fontWeight: '700' }}>{row.desc}</Text><Text style={{ color: MUTED, fontSize: 11, marginTop: 3 }}>{row.cat} · {row.date}</Text></View>
@@ -124,8 +146,10 @@ export function Gastos({ v }: { v: MobileView }) {
                   </View>}
                 </View>
               ))}
+              {group.expanded && <Pagination page={rowPage} pageSize={ROW_PAGE_SIZE} total={group.rows.length} itemLabel="gastos" onPageChange={(page) => setRowPages((current) => ({ ...current, [group.carId]: page }))} />}
             </View>
-          ))}
+            );
+          })}
           {!g.empty && <Pagination page={groupPage} pageSize={GROUP_PAGE_SIZE} total={g.groups.length} itemLabel="autos con gastos" onPageChange={setGroupPage} />}
           <BackLink onPress={g.back} />
         </>
