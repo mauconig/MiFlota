@@ -443,6 +443,17 @@ export interface MobileView {
   registrar: {
     tab: RegistrarTab;
     setTab: (t: RegistrarTab) => void;
+    step: number;
+    totalSteps: number;
+    stepTitle: string;
+    stepHint: string;
+    backStep: () => void;
+    next: () => void;
+    nextLabel: string;
+    nextDisabled: boolean;
+    success: import('./types').RegistrarSuccess | null;
+    finish: () => void;
+    again: () => void;
     amountDisplay: string;
     amountColor: string;
     amountHint: string;
@@ -597,6 +608,13 @@ export function useMobileView(
   };
   const back = () => {
     Keyboard.dismiss();
+    if (state.screen === 'registrar' && state.registrar && !state.registrar.success) {
+      const firstStep = state.registrar.tab === 'gasto' && !state.registrar.lockCar ? 0 : 0;
+      if (state.registrar.step > firstStep) {
+        update((s) => ({ registrar: s.registrar && { ...s.registrar, step: s.registrar.step - 1, otroItem: null } }));
+        return;
+      }
+    }
     if (state.screen === 'reportes') {
       const previousReportStep: Partial<Record<ReportStep, ReportStep>> = {
         cars: 'include',
@@ -1052,6 +1070,20 @@ export function useMobileView(
       };
     }
 
+    const finish = () => back();
+    const again = () => update({ registrar: blankRegistrarForm(f.tab, f.carId, f.driver, f.lockCar) });
+
+    const next = () => {
+      if (f.guardando || f.success) return;
+      if (f.tab === 'cobro') {
+        if (f.step === 0 && !f.driver) return toast('Elegí de qué chofer es el pago');
+        if (f.step === 1 && !amountNum) return toast('Ingresá cuánto pagó');
+        if (f.step === 3 && f.fecha > isoLocal(TODAY)) return toast('La fecha no puede ser futura');
+        if (f.step < 5) setF({ step: f.step + 1 });
+        return;
+      }
+    };
+
     const submit = () => {
       if (f.guardando) return;
       if (!amountNum) return toast(f.tab === 'cobro' ? 'Ingresá cuánto pagó' : 'Agregá repuestos o mano de obra');
@@ -1064,8 +1096,14 @@ export function useMobileView(
         persist
           .addPago({ driver: f.driver, carId: carSel?.id ?? null, fecha: f.fecha, monto: amountNum, tipo: f.tipo, nota: f.nota.trim() || undefined })
           .then(() => {
-            toast((f.tipo === 'ajuste' ? 'Ajuste registrado · ' : 'Pago registrado · ') + nombre + ' · ' + fmt(amountNum));
-            back();
+            const amount = fmt(amountNum);
+            update((s) => ({
+              registrar: s.registrar && {
+                ...s.registrar,
+                guardando: false,
+                success: { tab: 'cobro', title: f.tipo === 'ajuste' ? 'Ajuste registrado' : 'Pago registrado', detail: nombre, amount },
+              },
+            }));
           })
           .catch((e: Error) => {
             setF({ guardando: false });
@@ -1089,9 +1127,29 @@ export function useMobileView(
       }
     };
 
+    const cobroTitles = [
+      ['¿De qué chofer es este pago?', 'Elegí el chofer al que corresponde el cobro.'],
+      ['¿Cuánto pagó?', 'Ingresá el monto usando el teclado.'],
+      ['¿Qué tipo de movimiento es?', 'Un pago entra en caja; un ajuste cancela deuda sin ingreso.'],
+      ['¿Cuándo se recibió?', 'La fecha no puede ser posterior a hoy.'],
+      ['¿Querés agregar una nota?', 'Este dato es opcional. Podés continuar sin escribir nada.'],
+      ['Revisá el cobro', 'Confirmá los datos antes de guardarlo.'],
+    ];
+    const stepMeta = f.tab === 'cobro' ? cobroTitles[f.step] : ['Registrar gasto', ''];
     registrarView = {
       tab: f.tab,
       setTab: (t) => setF({ tab: t }),
+      step: f.step,
+      totalSteps: f.tab === 'cobro' ? 6 : 1,
+      stepTitle: stepMeta[0],
+      stepHint: stepMeta[1],
+      backStep: () => back(),
+      next,
+      nextLabel: f.tab === 'cobro' && f.step === 5 ? 'Registrar cobro' : 'Continuar',
+      nextDisabled: false,
+      success: f.success,
+      finish,
+      again,
       amountDisplay: amountNum ? fmt(amountNum) : '₲ 0',
       amountColor: amountNum ? (f.tab === 'cobro' ? COLORS.pos : COLORS.neg) : '#b3aa99',
       amountHint: amountNum ? (f.tab === 'cobro' ? 'Cobro al chofer' : 'Repuestos + mano de obra') : f.tab === 'gasto' ? 'Agregá el detalle del gasto' : 'Usá el teclado para escribir el monto',
