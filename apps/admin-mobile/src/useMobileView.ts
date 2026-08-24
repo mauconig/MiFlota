@@ -186,6 +186,7 @@ export function initialMobileState(): MobileState {
     nuevoVehiculoGuardando: false,
     registrar: null,
     registroChoice: false,
+    gastosStep: 'vehicle',
     gastosCarId: 'todos',
     gastosCat: 'todas',
     gastosExpanded: {},
@@ -310,6 +311,14 @@ interface GastoGroupView {
   toggle: () => void;
 }
 
+interface GastoChoiceView {
+  id: string;
+  label: string;
+  sub: string;
+  selected: boolean;
+  pick: () => void;
+}
+
 interface ReportPreviewItem {
   nombre: string;
   cantidad: number;
@@ -415,6 +424,12 @@ export interface MobileView {
   flota: { filters: Chip[]; cars: CarCardView[] };
 
   gastos: {
+    step: 'vehicle' | 'category' | 'results';
+    carOptions: GastoChoiceView[];
+    categoryOptions: GastoChoiceView[];
+    selectedCarLabel: string;
+    selectedCategoryLabel: string;
+    back: () => void;
     carFilters: Chip[];
     catFilters: Chip[];
     groups: GastoGroupView[];
@@ -635,7 +650,7 @@ export function useMobileView(
   const replaceTab = (screen: Screen) => {
     Keyboard.dismiss();
     stackRef.current = [];
-    update({ screen, backTo: screen, carId: null });
+    update({ screen, backTo: screen, carId: null, ...(screen === 'gastos' ? { gastosStep: 'vehicle' } : {}) });
   };
   const back = () => {
     Keyboard.dismiss();
@@ -656,6 +671,17 @@ export function useMobileView(
       const previousStep = previousReportStep[state.reportesStep];
       if (previousStep) {
         update({ reportesStep: previousStep, reportesError: '' });
+        return;
+      }
+    }
+    if (state.screen === 'gastos') {
+      const previousGastosStep: Partial<Record<MobileState['gastosStep'], MobileState['gastosStep']>> = {
+        category: 'vehicle',
+        results: 'category',
+      };
+      const previousStep = previousGastosStep[state.gastosStep];
+      if (previousStep) {
+        update({ gastosStep: previousStep });
         return;
       }
     }
@@ -936,6 +962,41 @@ export function useMobileView(
   const gastoCatFilters: Chip[] = [
     { label: 'Todas', ...chipStyle(state.gastosCat === 'todas', 'amber'), pick: () => update({ gastosCat: 'todas' }) },
     ...CATS.map((cat) => ({ label: cat, ...chipStyle(state.gastosCat === cat, 'amber'), pick: () => update({ gastosCat: cat }) })),
+  ];
+  const selectedGastoCar = active.find((c) => c.id === state.gastosCarId);
+  const selectedGastoCarLabel = selectedGastoCar?.plate ?? 'Todos los vehículos';
+  const selectedGastoCategoryLabel = state.gastosCat === 'todas' ? 'Todas las categorías' : state.gastosCat;
+  const gastoCarOptions: GastoChoiceView[] = [
+    {
+      id: 'todos',
+      label: 'Todos los vehículos',
+      sub: `${active.length} vehículo${active.length === 1 ? '' : 's'} activos`,
+      selected: state.gastosCarId === 'todos',
+      pick: () => update({ gastosCarId: 'todos', gastosStep: 'category', gastosExpanded: {} }),
+    },
+    ...active.map((c) => ({
+      id: c.id,
+      label: c.plate,
+      sub: c.model || 'Vehículo de la flota',
+      selected: state.gastosCarId === c.id,
+      pick: () => update({ gastosCarId: c.id, gastosStep: 'category', gastosExpanded: {} }),
+    })),
+  ];
+  const gastoCategoryOptions: GastoChoiceView[] = [
+    {
+      id: 'todas',
+      label: 'Todas las categorías',
+      sub: 'Mostrar todos los gastos',
+      selected: state.gastosCat === 'todas',
+      pick: () => update({ gastosCat: 'todas', gastosStep: 'results', gastosExpanded: {} }),
+    },
+    ...CATS.map((cat) => ({
+      id: cat,
+      label: cat,
+      sub: 'Mostrar sólo esta categoría',
+      selected: state.gastosCat === cat,
+      pick: () => update({ gastosCat: cat, gastosStep: 'results', gastosExpanded: {} }),
+    })),
   ];
 
   const alertViews: AlertView[] = alerts.map((a) => ({
@@ -1550,7 +1611,18 @@ export function useMobileView(
 
     flota: { filters: FILT.map(([k, label]) => ({ label, ...chipStyle(state.fleetFilter === k), pick: () => update({ fleetFilter: k }) })), cars: flotaCars },
 
-    gastos: { carFilters: gastoCarFilters, catFilters: gastoCatFilters, groups: gastoGroups, empty: gastoGroups.length === 0 },
+    gastos: {
+      step: state.gastosStep,
+      carOptions: gastoCarOptions,
+      categoryOptions: gastoCategoryOptions,
+      selectedCarLabel: selectedGastoCarLabel,
+      selectedCategoryLabel: selectedGastoCategoryLabel,
+      back: () => back(),
+      carFilters: gastoCarFilters,
+      catFilters: gastoCatFilters,
+      groups: gastoGroups,
+      empty: gastoGroups.length === 0,
+    },
 
     mas: {
       alertCount: alerts.length,

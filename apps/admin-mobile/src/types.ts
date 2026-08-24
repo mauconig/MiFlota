@@ -221,6 +221,7 @@ export interface MobileState {
   nuevoVehiculoGuardando: boolean;
   registrar: RegistrarForm | null;
   registroChoice: boolean;
+  gastosStep: 'vehicle' | 'category' | 'results';
   gastosCarId: string;
   gastosCat: string;
   gastosExpanded: Record<string, boolean>;
