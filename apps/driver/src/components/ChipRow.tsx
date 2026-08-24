@@ -1,4 +1,4 @@
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { COLORS } from '../theme';
 
 export interface Chip {
@@ -39,6 +39,8 @@ export function ChipRow({ chips, wrap = true }: { chips: Chip[]; wrap?: boolean 
 /** Variante de una fila, borde a borde, con label a la izquierda y una
  *  subetiqueta a la derecha — la usan "Forma de pago" y "Gravedad". */
 export function ChipList({ chips }: { chips: Chip[] }) {
+  const { width } = useWindowDimensions();
+  const compact = width < 380;
   return (
     <View style={{ gap: 8 }}>
       {chips.map((c, i) => {
@@ -47,10 +49,10 @@ export function ChipList({ chips }: { chips: Chip[] }) {
           <Pressable
             key={i}
             onPress={c.pick}
-            style={{ borderWidth: 1, borderColor: s.bd, backgroundColor: s.bg, borderRadius: 16, paddingVertical: 13, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 10 }}
+            style={{ borderWidth: 1, borderColor: s.bd, backgroundColor: s.bg, borderRadius: 16, paddingVertical: 13, paddingHorizontal: 16, flexDirection: compact ? 'column' : 'row', alignItems: compact ? 'stretch' : 'center', gap: compact ? 5 : 10 }}
           >
-            <Text style={{ flex: 1, fontSize: 14, fontWeight: '700', color: s.fg }}>{c.label}</Text>
-            {!!c.sub && <Text style={{ fontSize: 11, color: s.subFg }}>{c.sub}</Text>}
+            <Text style={{ flex: compact ? undefined : 1, minWidth: 0, flexShrink: 1, fontSize: 14, fontWeight: '700', color: s.fg }}>{c.label}</Text>
+            {!!c.sub && <Text style={{ flex: compact ? undefined : 1, minWidth: 0, flexShrink: 1, fontSize: 11, color: s.subFg, textAlign: compact ? 'left' : 'right' }}>{c.sub}</Text>}
           </Pressable>
         );
       })}
