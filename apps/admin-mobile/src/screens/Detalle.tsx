@@ -24,7 +24,7 @@ export function Detalle({ v }: { v: MobileView }) {
   const dc = v.detalle;
   const [alertPage, setAlertPage] = useState(0);
   const [movPage, setMovPage] = useState(0);
-  const alertKey = useMemo(() => dc?.alerts.map((alert) => `${alert.kind}-${alert.text}`).join('|') ?? '', [dc?.alerts]);
+  const alertKey = useMemo(() => dc?.alerts.map((alert) => `${alert.txt}-${alert.sub}`).join('|') ?? '', [dc?.alerts]);
   const movKey = useMemo(() => dc?.movs.map((mov) => String(mov.id)).join('|') ?? '', [dc?.movs]);
   const alertPageCount = Math.max(1, Math.ceil((dc?.alerts.length ?? 0) / ALERT_PAGE_SIZE));
   const movPageCount = Math.max(1, Math.ceil((dc?.movs.length ?? 0) / MOV_PAGE_SIZE));
