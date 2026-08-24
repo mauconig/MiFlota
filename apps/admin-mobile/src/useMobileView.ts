@@ -1156,6 +1156,7 @@ export function useMobileView(
         return;
       }
       if (f.step === 0 && !f.carId) return toast('Elegí a qué auto corresponde');
+      if (f.step === 0) return setF({ step: 1 });
       if (f.step === 1) {
         if (!f.cat) return toast('Elegí el tipo de egreso');
         return setF({ step: f.cat === 'Repuestos' ? 2 : 3 });
