@@ -310,6 +310,28 @@ interface GastoGroupView {
   toggle: () => void;
 }
 
+interface ReportPreviewItem {
+  nombre: string;
+  cantidad: number;
+  costoUnitario: number;
+  subtotal: number;
+}
+
+interface ReportPreviewRow {
+  id: string;
+  tipo: 'Ingreso' | 'Gasto';
+  fecha: string;
+  vehiculo: string;
+  chofer: string;
+  categoria: string;
+  detalle: string;
+  monto: number;
+  medio: string;
+  nota: string;
+  items: ReportPreviewItem[];
+  manoObra: number;
+}
+
 interface AlertView {
   carId: string;
   plate: string;
@@ -507,6 +529,9 @@ export interface MobileView {
     categorySelection: ReportCategorySelection;
     categoryOptions: { label: string; selected: boolean; toggle: () => void }[];
     selectAllCategories: () => void;
+    selectedCarLabels: string[];
+    selectedCategoryLabels: string[];
+    previewRows: ReportPreviewRow[];
     next: () => void;
     previous: () => void;
     reset: () => void;
@@ -1297,6 +1322,38 @@ export function useMobileView(
       return { reportesCategories: next, reportesError: '' };
     }),
   }));
+  const reportSelectedCarLabels = reportCarOptions.filter((car) => car.selected).map((car) => car.label);
+  const reportSelectedCategoryLabels = reportCategoryOptions.filter((category) => category.selected).map((category) => category.label);
+  const reportPreviewRows: ReportPreviewRow[] = [
+    ...reportIncome.map((pago) => ({
+      id: `ingreso-${pago.id}`,
+      tipo: 'Ingreso' as const,
+      fecha: dLblFull(pago.fecha),
+      vehiculo: cars.find((car) => car.id === pago.carId)?.plate ?? 'Sin vehículo',
+      chofer: pago.driver || 'Sin chofer',
+      categoria: 'Cobrado',
+      detalle: 'Ingreso cobrado',
+      monto: pago.monto,
+      medio: pago.medio || 'Sin especificar',
+      nota: pago.nota || '',
+      items: [],
+      manoObra: 0,
+    })),
+    ...reportExpenses.map((mov) => ({
+      id: `gasto-${mov.id}`,
+      tipo: 'Gasto' as const,
+      fecha: dLblFull(mov.date),
+      vehiculo: cars.find((car) => car.id === mov.carId)?.plate ?? 'Vehículo eliminado',
+      chofer: cars.find((car) => car.id === mov.carId)?.driver ?? 'Sin chofer',
+      categoria: mov.cat || 'Otros',
+      detalle: mov.desc,
+      monto: mov.items?.length ? mov.items.reduce((sum, item) => sum + item.subtotal, 0) + (mov.manoObra ?? 0) : mov.amount,
+      medio: '',
+      nota: '',
+      items: (mov.items ?? []).map((item) => ({ nombre: item.nombre, cantidad: item.cantidad, costoUnitario: item.costoUnitario, subtotal: item.subtotal })),
+      manoObra: mov.manoObra ?? 0,
+    })),
+  ];
   const reportSetInclude = (value: ReportInclude) => update({ reportesInclude: value, reportesStep: 'include', reportesError: '' });
   const reportSelectAllCars = () => update({ reportesCarIds: 'todos', reportesError: '' });
   const reportSelectAllCategories = () => update({ reportesCategories: 'todas', reportesError: '' });
@@ -1587,6 +1644,9 @@ export function useMobileView(
       categorySelection: state.reportesCategories,
       categoryOptions: reportCategoryOptions,
       selectAllCategories: reportSelectAllCategories,
+      selectedCarLabels: reportSelectedCarLabels,
+      selectedCategoryLabels: reportSelectedCategoryLabels,
+      previewRows: reportPreviewRows,
       next: reportNext,
       previous: reportPrevious,
       reset: reportReset,
