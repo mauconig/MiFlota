@@ -1,15 +1,20 @@
 import * as Location from 'expo-location';
-import Constants, { AppOwnership } from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
-import * as TaskManager from 'expo-task-manager';
+import { AppState } from 'react-native';
 import { API_BASE } from './config';
 import { TOKEN_KEY } from './session';
 
-export const LOCATION_TASK_NAME = 'miflota-driver-location';
-
 export type LocationSharingStatus = 'active' | 'permission-required' | 'services-disabled' | 'unavailable' | 'error';
 
-type LocationTaskData = { locations: Location.LocationObject[] };
+/** Cada cuánto se re-comparte la posición mientras la app está en primer plano. */
+const HORARIO_MS = 60 * 60 * 1000;
+
+/** Último envío exitoso, para saber si al volver del background hay que
+ *  compartir de nuevo o todavía está fresco. */
+let ultimoEnvio = 0;
+
+let timer: ReturnType<typeof setInterval> | null = null;
+let appStateSub: ReturnType<typeof AppState.addEventListener> | null = null;
 
 async function sendLocation(token: string, location: Location.LocationObject) {
   const response = await fetch(`${API_BASE}/api/chofer/location`, {
@@ -26,18 +31,10 @@ async function sendLocation(token: string, location: Location.LocationObject) {
   if (!response.ok) throw new Error(`location ${response.status}`);
 }
 
-// Debe definirse en el scope global: Expo levanta este modulo sin montar la UI
-// cuando Android entrega una actualizacion de ubicacion en segundo plano.
-TaskManager.defineTask<LocationTaskData>(LOCATION_TASK_NAME, async ({ data, error }) => {
-  if (error || !data?.locations?.length) return;
-  const token = await SecureStore.getItemAsync(TOKEN_KEY);
-  const location = data.locations[data.locations.length - 1];
-  if (!token || !location) return;
-  await sendLocation(token, location).catch(() => {});
-});
-
-export async function startLocationSharing(): Promise<LocationSharingStatus> {
-  if (Constants.appOwnership === AppOwnership.Expo) return 'unavailable';
+/** Toma la posición actual y la manda al servidor una sola vez. Sin seguimiento
+ *  continuo: el dueño ve la última posición conocida, que se refresca cada hora
+ *  mientras la app esté abierta (ver `startHourlySharing`). */
+export async function shareLocationOnce(): Promise<LocationSharingStatus> {
   if (!(await Location.hasServicesEnabledAsync())) return 'services-disabled';
 
   let foreground = await Location.getForegroundPermissionsAsync();
@@ -46,34 +43,40 @@ export async function startLocationSharing(): Promise<LocationSharingStatus> {
   }
   if (foreground.status !== Location.PermissionStatus.GRANTED) return 'permission-required';
 
-  let background = await Location.getBackgroundPermissionsAsync();
-  if (background.status !== Location.PermissionStatus.GRANTED) {
-    background = await Location.requestBackgroundPermissionsAsync();
-  }
-  if (background.status !== Location.PermissionStatus.GRANTED) return 'permission-required';
+  const token = await SecureStore.getItemAsync(TOKEN_KEY);
+  if (!token) return 'error';
 
-  const started = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
-  if (!started) {
-    await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-      accuracy: Location.Accuracy.Balanced,
-      distanceInterval: 100,
-      timeInterval: 60_000,
-      deferredUpdatesDistance: 100,
-      deferredUpdatesInterval: 60_000,
-      pausesUpdatesAutomatically: false,
-      showsBackgroundLocationIndicator: true,
-      foregroundService: {
-        notificationTitle: 'MiFlota comparte tu ubicación',
-        notificationBody: 'El dueño puede ver la última posición de tu auto.',
-        notificationColor: '#e8a13a',
-      },
-    });
+  try {
+    const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    await sendLocation(token, location);
+    ultimoEnvio = Date.now();
+    return 'active';
+  } catch {
+    return 'error';
   }
-  return 'active';
 }
 
-export async function stopLocationSharing() {
-  if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)) {
-    await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+/** Comparte al momento y agenda un envío por hora mientras la app esté en
+ *  primer plano. En background el timer se pausa (el intervalo no corre y no
+ *  hay task de fondo); al volver, si pasó más de una hora desde el último
+ *  envío, comparte de una vez y retoma el ciclo. */
+export function startHourlySharing(): void {
+  stopLocationSharing();
+  void shareLocationOnce();
+  timer = setInterval(() => void shareLocationOnce(), HORARIO_MS);
+  appStateSub = AppState.addEventListener('change', (next) => {
+    if (next === 'active' && Date.now() - ultimoEnvio >= HORARIO_MS) {
+      void shareLocationOnce();
+    }
+  });
+}
+
+/** Cancela el timer horario y el listener de AppState. */
+export function stopLocationSharing(): void {
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
   }
+  appStateSub?.remove();
+  appStateSub = null;
 }
