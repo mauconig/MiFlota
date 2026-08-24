@@ -1,13 +1,16 @@
 import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
 import Svg, { Path, Rect } from 'react-native-svg';
 import type { MobileView } from '../useMobileView';
 import type { ReportInclude } from '../types';
+import { Pagination } from '../components/Pagination';
 
 const PAPER = '#fffdf8';
 const BORDER = '#e6ded0';
 const INK = '#16150f';
 const MUTED = '#6b665c';
 const SOFT = '#f4f0e8';
+const PREVIEW_PAGE_SIZE = 5;
 
 const includeOptions: { value: ReportInclude; title: string; description: string; icon: string }[] = [
   { value: 'gastos', title: 'Gastos', description: 'Repuestos, mano de obra y otros gastos', icon: '−' },
@@ -72,6 +75,19 @@ function previewMoney(value: number) {
 
 export function Reportes({ v }: { v: MobileView }) {
   const rep = v.reportes;
+  const [previewPage, setPreviewPage] = useState(0);
+  const previewKey = useMemo(() => rep.previewRows.map((row) => row.id).join('|'), [rep.previewRows]);
+  const previewPageCount = Math.max(1, Math.ceil(rep.previewRows.length / PREVIEW_PAGE_SIZE));
+  const visiblePreviewRows = rep.previewRows.slice(previewPage * PREVIEW_PAGE_SIZE, (previewPage + 1) * PREVIEW_PAGE_SIZE);
+
+  useEffect(() => {
+    setPreviewPage(0);
+  }, [previewKey]);
+
+  useEffect(() => {
+    setPreviewPage((current) => Math.min(current, previewPageCount - 1));
+  }, [previewPageCount]);
+
   const isInclude = rep.step === 'include';
   const isCars = rep.step === 'cars';
   const isCategories = rep.step === 'categories';
@@ -145,7 +161,7 @@ export function Reportes({ v }: { v: MobileView }) {
               <Text style={{ color: INK, fontSize: 16, fontWeight: '800' }}>Datos que se van a exportar</Text>
               <Text style={{ color: MUTED, fontSize: 12, marginTop: 3 }}>Esta lista coincide con los filtros elegidos.</Text>
             </View>
-            {rep.previewRows.map((row) => (
+            {visiblePreviewRows.map((row) => (
               <View key={row.id} style={{ backgroundColor: PAPER, borderWidth: 1, borderColor: BORDER, borderRadius: 15, padding: 13, gap: 5 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                   <Text style={{ color: row.tipo === 'Ingreso' ? '#256b4d' : '#a65b27', fontSize: 10, fontWeight: '800', textTransform: 'uppercase' }}>{row.tipo}</Text>
@@ -162,6 +178,7 @@ export function Reportes({ v }: { v: MobileView }) {
                 {!!row.manoObra && <Text style={{ color: MUTED, fontSize: 12 }}>Mano de obra: {previewMoney(row.manoObra)}</Text>}
               </View>
             ))}
+            <Pagination page={previewPage} pageSize={PREVIEW_PAGE_SIZE} total={rep.previewRows.length} itemLabel="movimientos" onPageChange={setPreviewPage} />
           </View>
 
           <Text style={{ color: MUTED, fontSize: 13 }}>{rep.counts.total ? `Se exportarán ${rep.counts.total} movimientos con detalle completo.` : 'No hay datos para esta selección. Volvé atrás y probá otros filtros.'}</Text>
