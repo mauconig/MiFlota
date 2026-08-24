@@ -1,9 +1,14 @@
 import { Linking, Pressable, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
 import Svg, { Circle, Path } from 'react-native-svg';
 import type { MobileView } from '../useMobileView';
 import { Avatar } from '../components/Avatar';
 import { AlertCard } from '../components/AlertCard';
 import { MovRow } from '../components/MovRow';
+import { Pagination } from '../components/Pagination';
+
+const ALERT_PAGE_SIZE = 4;
+const MOV_PAGE_SIZE = 5;
 
 const GpsIcon = ({ color }: { color: string }) => (
   <Svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
@@ -17,6 +22,31 @@ const GpsIcon = ({ color }: { color: string }) => (
 
 export function Detalle({ v }: { v: MobileView }) {
   const dc = v.detalle;
+  const [alertPage, setAlertPage] = useState(0);
+  const [movPage, setMovPage] = useState(0);
+  const alertKey = useMemo(() => dc?.alerts.map((alert) => `${alert.kind}-${alert.text}`).join('|') ?? '', [dc?.alerts]);
+  const movKey = useMemo(() => dc?.movs.map((mov) => String(mov.id)).join('|') ?? '', [dc?.movs]);
+  const alertPageCount = Math.max(1, Math.ceil((dc?.alerts.length ?? 0) / ALERT_PAGE_SIZE));
+  const movPageCount = Math.max(1, Math.ceil((dc?.movs.length ?? 0) / MOV_PAGE_SIZE));
+  const visibleAlerts = dc?.alerts.slice(alertPage * ALERT_PAGE_SIZE, (alertPage + 1) * ALERT_PAGE_SIZE) ?? [];
+  const visibleMovs = dc?.movs.slice(movPage * MOV_PAGE_SIZE, (movPage + 1) * MOV_PAGE_SIZE) ?? [];
+
+  useEffect(() => {
+    setAlertPage(0);
+  }, [alertKey]);
+
+  useEffect(() => {
+    setMovPage(0);
+  }, [movKey]);
+
+  useEffect(() => {
+    setAlertPage((current) => Math.min(current, alertPageCount - 1));
+  }, [alertPageCount]);
+
+  useEffect(() => {
+    setMovPage((current) => Math.min(current, movPageCount - 1));
+  }, [movPageCount]);
+
   if (!dc) return null;
   return (
     <View style={{ paddingHorizontal: 16, paddingTop: 6, paddingBottom: 16, gap: 14 }}>
@@ -112,9 +142,10 @@ export function Detalle({ v }: { v: MobileView }) {
       {dc.hasAlerts && (
         <View style={{ gap: 8 }}>
           <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c', paddingLeft: 4 }}>Mantenimiento</Text>
-          {dc.alerts.map((a, i) => (
+          {visibleAlerts.map((a, i) => (
             <AlertCard key={i} a={a} />
           ))}
+          <Pagination page={alertPage} pageSize={ALERT_PAGE_SIZE} total={dc.alerts.length} itemLabel="avisos" onPageChange={setAlertPage} />
         </View>
       )}
 
@@ -125,10 +156,11 @@ export function Detalle({ v }: { v: MobileView }) {
         </View>
         <View style={{ backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 20, paddingHorizontal: 14 }}>
           {dc.noMovs && <Text style={{ paddingVertical: 18, textAlign: 'center', fontSize: 12, color: '#6b665c' }}>Todavía no hay movimientos en este vehículo</Text>}
-          {dc.movs.map((m) => (
+          {visibleMovs.map((m) => (
             <MovRow key={m.id} m={m} />
           ))}
         </View>
+        <Pagination page={movPage} pageSize={MOV_PAGE_SIZE} total={dc.movs.length} itemLabel="movimientos" onPageChange={setMovPage} />
       </View>
     </View>
   );
