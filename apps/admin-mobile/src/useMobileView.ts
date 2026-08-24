@@ -203,7 +203,7 @@ export function initialMobileState(): MobileState {
     registrar: null,
     registroChoice: false,
     gastosStep: 'vehicle',
-    gastosCarId: 'todos',
+    gastosCarIds: 'todos',
     gastosCat: 'todas',
     gastosExpanded: {},
     reportesStep: 'include',
@@ -451,6 +451,8 @@ export interface MobileView {
     catFilters: Chip[];
     groups: GastoGroupView[];
     empty: boolean;
+    vehicleSelectionValid: boolean;
+    continueVehicles: () => void;
   };
 
   mas: { alertCount: number; driverCount: number; navAlertas: () => void; navChoferes: () => void; navReportes: () => void; goPerfil: () => void };
@@ -943,7 +945,7 @@ export function useMobileView(
   // cambia la forma de leerlos: primero por vehículo y después por gasto.
   const expenseCars = active.filter((c) => movs.some((m) => m.type === 'egreso' && m.carId === c.id && inR(m)));
   const gastoGroups: GastoGroupView[] = expenseCars
-    .filter((c) => state.gastosCarId === 'todos' || c.id === state.gastosCarId)
+    .filter((c) => state.gastosCarIds === 'todos' || state.gastosCarIds.includes(c.id))
     .map((c) => {
       const movements = movs.filter((m) => m.type === 'egreso' && m.carId === c.id && inR(m) && (state.gastosCat === 'todas' || (m.cat || 'Otro') === state.gastosCat));
       const groupKey = 'car:' + c.id;
@@ -975,30 +977,40 @@ export function useMobileView(
     .filter((g) => g.rows.length > 0);
 
   const gastoCarFilters: Chip[] = [
-    { label: 'Todos los vehículos', ...chipStyle(state.gastosCarId === 'todos'), pick: () => update({ gastosCarId: 'todos' }) },
-    ...active.map((c) => ({ label: c.plate, ...chipStyle(state.gastosCarId === c.id), pick: () => update({ gastosCarId: c.id }) })),
+    { label: 'Todos los vehículos', ...chipStyle(state.gastosCarIds === 'todos'), pick: () => update({ gastosCarIds: 'todos' }) },
+    ...active.map((c) => ({
+      label: c.plate,
+      ...chipStyle(state.gastosCarIds !== 'todos' && state.gastosCarIds.includes(c.id)),
+      pick: () => update((s) => ({ gastosCarIds: s.gastosCarIds === 'todos' ? [c.id] : s.gastosCarIds.includes(c.id) ? s.gastosCarIds.filter((id) => id !== c.id) : [...s.gastosCarIds, c.id] })),
+    })),
   ];
   const gastoCatFilters: Chip[] = [
     { label: 'Todas', ...chipStyle(state.gastosCat === 'todas', 'amber'), pick: () => update({ gastosCat: 'todas' }) },
     ...CATS.map((cat) => ({ label: cat, ...chipStyle(state.gastosCat === cat, 'amber'), pick: () => update({ gastosCat: cat }) })),
   ];
-  const selectedGastoCar = active.find((c) => c.id === state.gastosCarId);
-  const selectedGastoCarLabel = selectedGastoCar?.plate ?? 'Todos los vehículos';
+  const selectedGastoCars = state.gastosCarIds === 'todos' ? active : active.filter((c) => state.gastosCarIds.includes(c.id));
+  const selectedGastoCarLabel = state.gastosCarIds === 'todos'
+    ? 'Todos los vehículos'
+    : selectedGastoCars.length === 0
+      ? 'Ningún vehículo'
+      : selectedGastoCars.length <= 2
+        ? selectedGastoCars.map((c) => c.plate).join(' · ')
+        : `${selectedGastoCars.length} vehículos seleccionados`;
   const selectedGastoCategoryLabel = state.gastosCat === 'todas' ? 'Todas las categorías' : state.gastosCat;
   const gastoCarOptions: GastoChoiceView[] = [
     {
       id: 'todos',
       label: 'Todos los vehículos',
       sub: `${active.length} vehículo${active.length === 1 ? '' : 's'} activos`,
-      selected: state.gastosCarId === 'todos',
-      pick: () => update({ gastosCarId: 'todos', gastosStep: 'category', gastosExpanded: {} }),
+      selected: state.gastosCarIds === 'todos',
+      pick: () => update({ gastosCarIds: 'todos' }),
     },
     ...active.map((c) => ({
       id: c.id,
       label: c.plate,
       sub: c.model || 'Vehículo de la flota',
-      selected: state.gastosCarId === c.id,
-      pick: () => update({ gastosCarId: c.id, gastosStep: 'category', gastosExpanded: {} }),
+      selected: state.gastosCarIds !== 'todos' && state.gastosCarIds.includes(c.id),
+      pick: () => update((s) => ({ gastosCarIds: s.gastosCarIds === 'todos' ? [c.id] : s.gastosCarIds.includes(c.id) ? s.gastosCarIds.filter((id) => id !== c.id) : [...s.gastosCarIds, c.id] })),
     })),
   ];
   const gastoCategoryOptions: GastoChoiceView[] = [
@@ -1017,6 +1029,14 @@ export function useMobileView(
       pick: () => update({ gastosCat: cat, gastosStep: 'results', gastosExpanded: {} }),
     })),
   ];
+
+  const continueGastoVehicles = () => {
+    if (state.gastosCarIds !== 'todos' && state.gastosCarIds.length === 0) {
+      toast('Elegí al menos un vehículo');
+      return;
+    }
+    update({ gastosStep: 'category', gastosExpanded: {} });
+  };
 
   const alertViews: AlertView[] = alerts.map((a) => ({
     carId: a.car.id,
@@ -1642,6 +1662,8 @@ export function useMobileView(
       catFilters: gastoCatFilters,
       groups: gastoGroups,
       empty: gastoGroups.length === 0,
+      vehicleSelectionValid: state.gastosCarIds === 'todos' || state.gastosCarIds.length > 0,
+      continueVehicles: continueGastoVehicles,
     },
 
     mas: {

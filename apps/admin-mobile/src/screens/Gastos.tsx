@@ -11,6 +11,7 @@ const AMBER = '#b5791a';
 const RED = '#c0553f';
 const GROUP_PAGE_SIZE = 3;
 const ROW_PAGE_SIZE = 5;
+const VEHICLE_PAGE_SIZE = 5;
 
 const card = { backgroundColor: PAPER, borderWidth: 1, borderColor: BORDER, borderRadius: 20, padding: 16 } as const;
 
@@ -56,11 +57,24 @@ function BackLink({ onPress }: { onPress: () => void }) {
 
 export function Gastos({ v }: { v: MobileView }) {
   const g = v.gastos;
+  const [vehiclePage, setVehiclePage] = useState(0);
   const [groupPage, setGroupPage] = useState(0);
   const [rowPages, setRowPages] = useState<Record<string, number>>({});
+  const vehicleOptions = g.carOptions.slice(1);
+  const visibleVehicleOptions = vehicleOptions.slice(vehiclePage * VEHICLE_PAGE_SIZE, (vehiclePage + 1) * VEHICLE_PAGE_SIZE);
+  const vehiclePageCount = Math.max(1, Math.ceil(vehicleOptions.length / VEHICLE_PAGE_SIZE));
+  const vehicleOptionsKey = g.carOptions.map((option) => option.id).join('|');
   const groupsKey = useMemo(() => `${g.selectedCarLabel}|${g.selectedCategoryLabel}|${g.groups.map((group) => `${group.carId}:${group.rows.length}:${group.rows[0]?.id ?? ''}:${group.rows[group.rows.length - 1]?.id ?? ''}`).join('|')}`, [g.selectedCarLabel, g.selectedCategoryLabel, g.groups]);
   const groupPageCount = Math.max(1, Math.ceil(g.groups.length / GROUP_PAGE_SIZE));
   const visibleGroups = g.groups.slice(groupPage * GROUP_PAGE_SIZE, (groupPage + 1) * GROUP_PAGE_SIZE);
+
+  useEffect(() => {
+    setVehiclePage(0);
+  }, [vehicleOptionsKey]);
+
+  useEffect(() => {
+    setVehiclePage((current) => Math.min(current, vehiclePageCount - 1));
+  }, [vehiclePageCount]);
 
   useEffect(() => {
     setGroupPage(0);
@@ -93,10 +107,16 @@ export function Gastos({ v }: { v: MobileView }) {
 
       {g.step === 'vehicle' && (
         <>
-          <StepHeader step={1} title="¿Qué vehículo querés ver?" hint="Elegí un vehículo o mirá toda la flota." />
+          <StepHeader step={1} title="¿Qué vehículos querés ver?" hint="Elegí uno, varios o mirá toda la flota." />
           <View style={{ gap: 10 }}>
-            {g.carOptions.map((option) => <ChoiceCard key={option.id} label={option.label} sub={option.sub} selected={option.selected} onPress={option.pick} />)}
+            {g.carOptions[0] && <ChoiceCard key={g.carOptions[0].id} label={g.carOptions[0].label} sub={g.carOptions[0].sub} selected={g.carOptions[0].selected} onPress={g.carOptions[0].pick} />}
+            {visibleVehicleOptions.map((option) => <ChoiceCard key={option.id} label={option.label} sub={option.sub} selected={option.selected} onPress={option.pick} />)}
           </View>
+          <Pagination page={vehiclePage} pageSize={VEHICLE_PAGE_SIZE} total={vehicleOptions.length} itemLabel="vehículos" onPageChange={setVehiclePage} />
+          <Text style={{ color: MUTED, fontSize: 12, textAlign: 'center' }}>{g.selectedCarLabel === 'Todos los vehículos' ? 'Toda la flota seleccionada' : g.selectedCarLabel}</Text>
+          <Pressable disabled={!g.vehicleSelectionValid} onPress={g.continueVehicles} style={{ minHeight: 52, borderRadius: 18, backgroundColor: g.vehicleSelectionValid ? INK : '#d8d1c5', alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: PAPER, fontSize: 15, fontWeight: '700' }}>Continuar</Text>
+          </Pressable>
         </>
       )}
 

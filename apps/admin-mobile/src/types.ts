@@ -222,7 +222,7 @@ export interface MobileState {
   registrar: RegistrarForm | null;
   registroChoice: boolean;
   gastosStep: 'vehicle' | 'category' | 'results';
-  gastosCarId: string;
+  gastosCarIds: ReportSelection;
   gastosCat: string;
   gastosExpanded: Record<string, boolean>;
   reportesStep: ReportStep;
