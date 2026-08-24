@@ -4,6 +4,7 @@ import { ChipRow } from '../components/ChipRow';
 import { SearchBar } from '../components/SearchBar';
 import { Screen, ScrollArea } from '../components/Screen';
 import { card, sectionTitle } from '../styles';
+import { fmtShort } from '../format';
 
 export function Reportes({ v }: { v: View }) {
   return (
@@ -31,7 +32,7 @@ export function Reportes({ v }: { v: View }) {
         <ScrollArea style={{ display: 'flex', flexDirection: 'column', padding: '4px 20px' }}>
           {!v.movRows.length && <div style={{ padding: '30px 0', fontSize: 13, color: '#6b665c', textAlign: 'center' }}>Sin movimientos con estos filtros</div>}
           {v.movRows.map((m, i) => (
-            <div key={i} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '11px 0', borderBottom: '1px solid #f4efe4' }}>
+            <div key={i} style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: '11px 0', borderBottom: '1px solid #f4efe4' }}>
               <span style={{ width: 26, flex: 'none', fontSize: 12, color: '#a9a293', textAlign: 'right' }}>{m.pos}</span>
               <span style={{ width: 52, flex: 'none', fontSize: 12, color: '#6b665c' }}>{m.dateLbl}</span>
               <span style={{ width: 34, height: 34, borderRadius: 11, background: m.iconBg, color: m.iconFg, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 15, fontWeight: 700 }}>
@@ -40,6 +41,10 @@ export function Reportes({ v }: { v: View }) {
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>{m.desc}</span>
                 <span style={{ display: 'block', fontSize: 11, color: '#6b665c', marginTop: 1 }}>{m.sub}</span>
+                {!!m.items?.length && <span style={{ display: 'block', marginTop: 7, padding: '7px 9px', background: '#faf7f0', borderRadius: 9, fontSize: 11, color: '#6b665c' }}>
+                  {m.items.map((item, j) => <span key={j} style={{ display: 'block' }}>{item.cantidad} × {item.nombre} · {fmtShort(item.subtotal)}</span>)}
+                  {!!m.manoObra && <span style={{ display: 'block', marginTop: 3, fontWeight: 600 }}>Mano de obra · {fmtShort(m.manoObra)}</span>}
+                </span>}
               </span>
               <span style={{ flex: 'none', fontSize: 13, fontWeight: 700, color: m.amtFg }}>{m.amt}</span>
             </div>

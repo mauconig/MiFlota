@@ -97,13 +97,13 @@ export interface NuevoCarPayload {
   model: string;
   year: number;
   gpsTag: string;
-  lastServiceDate: string;
-  serviceCada: number;
-  serviceUnidad: 'dias' | 'meses';
-  seguroDate: string;
-  seguroCosto: number;
-  seguroPeriodo: 'mensual' | 'anual';
-  seguroCada: number;
+  kilometraje?: number;
+  lastServiceDate?: string;
+  serviceCada?: number;
+  serviceUnidad?: 'dias' | 'meses';
+  seguroDate?: string;
+  seguroNombre?: string;
+  seguroCada?: number;
 }
 
 export interface NuevoPagoPayload {

@@ -1,7 +1,6 @@
 import type { View } from '../useFleetView';
 import { Btn } from './Btn';
 import { DateField } from './DateField';
-import { MoneyInput } from './MoneyInput';
 import { CloseIcon } from '../icons';
 import { btnPrimary, btnPrimaryHover, btnSecondary, btnSecondaryHover, fieldInput, fieldLabel, fieldLabelText, modalCloseBtn, modalCloseBtnHover, modalFooter, modalOverlay, modalPanel, modalTitle } from '../styles';
 
@@ -30,15 +29,19 @@ export function CarModal({ v }: { v: View }) {
             <input inputMode="numeric" value={v.ncar.year} onChange={v.ch.year} placeholder="2018" style={fieldInput} />
           </label>
           <label style={fieldLabel}>
-            <span style={fieldLabelText}>Último service</span>
+            <span style={fieldLabelText}>Último service · opcional</span>
             <DateField value={v.ncar.lastService} onChange={v.setLastService} max={v.hoyISO} ariaLabel="Último service" />
           </label>
           <label style={fieldLabel}>
             <span style={fieldLabelText}>GPS tag</span>
             <input value={v.ncar.gpsTag} onChange={v.ch.gpsTag} placeholder="Opcional" maxLength={40} style={fieldInput} />
           </label>
+          <label style={fieldLabel}>
+            <span style={fieldLabelText}>Kilometraje actual · opcional</span>
+            <input inputMode="numeric" value={v.ncar.kilometraje} onChange={v.ch.kilometraje} placeholder="120000" style={fieldInput} />
+          </label>
           <div style={fieldLabel}>
-            <span style={fieldLabelText}>Service cada</span>
+            <span style={fieldLabelText}>Service cada · opcional</span>
             <div style={{ display: 'flex', flexDirection: 'row', gap: 7, minWidth: 0 }}>
               <input
                 inputMode="numeric"
@@ -61,7 +64,7 @@ export function CarModal({ v }: { v: View }) {
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#6b665c', flex: 'none' }}>Seguro</span>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#6b665c', flex: 'none' }}>Seguro · opcional</span>
           <span style={{ flex: 1, height: 1, background: '#f0ebe0' }} />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
@@ -83,30 +86,10 @@ export function CarModal({ v }: { v: View }) {
               <span style={{ fontSize: 13, color: '#6b665c' }}>meses</span>
             </div>
           </div>
-          <div style={{ ...fieldLabel, gridColumn: '1 / -1' }}>
-            <span style={fieldLabelText}>Costo de la póliza</span>
-            <div style={{ display: 'flex', flexDirection: 'row', gap: 9, minWidth: 0 }}>
-              <span style={{ ...fieldInput, flex: 1, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 7, padding: '0 14px' }}>
-                <span style={{ fontSize: 13, color: '#a09a8d', flex: 'none' }}>₲</span>
-                <MoneyInput
-                  value={v.ncar.seguroCosto}
-                  onChange={v.setSeguroCosto}
-                  placeholder="400.000"
-                  ariaLabel="Costo"
-                  style={{ flex: 1, minWidth: 0, width: '100%', border: 'none', background: 'none', outline: 'none', fontSize: 14, color: '#1a1a18', fontVariantNumeric: 'tabular-nums' }}
-                />
-              </span>
-              {v.ncarPeriodoOpts.map((p) => (
-                <Btn
-                  key={p.label}
-                  onClick={p.pick}
-                  style={{ border: `1px solid ${p.bd}`, background: p.bg, color: p.fg, borderRadius: 14, minHeight: 44, padding: '0 16px', flex: 'none', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
-                >
-                  {p.label}
-                </Btn>
-              ))}
-            </div>
-          </div>
+          <label style={{ ...fieldLabel, gridColumn: '1 / -1' }}>
+            <span style={fieldLabelText}>Nombre del seguro</span>
+            <input value={v.ncar.seguroNombre} onChange={v.ch.seguroNombre} placeholder="Aseguradora" style={fieldInput} />
+          </label>
         </div>
         <p style={{ margin: 0, fontSize: 12, color: '#6b665c' }}>La cuota se define al asignarle un chofer.</p>
         <div style={modalFooter}>

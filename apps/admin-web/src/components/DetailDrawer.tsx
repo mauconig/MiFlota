@@ -68,6 +68,13 @@ export function DetailDrawer({ v }: { v: View }) {
             {d.estado}
           </span>
           <Btn
+            onClick={d.agregarDatos}
+            style={{ border: '1px solid #e0d6c4', background: '#fffdf8', color: '#8d5c10', borderRadius: 12, minHeight: 36, padding: '0 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', flex: 'none' }}
+            hoverStyle={{ background: '#f7f1e5' }}
+          >
+            Agregar datos
+          </Btn>
+          <Btn
             onClick={v.closeDetail}
             ariaLabel="Cerrar"
             style={{
@@ -308,7 +315,7 @@ export function DetailDrawer({ v }: { v: View }) {
                       }}
                       hoverStyle={{ background: '#f7f1e5' }}
                     >
-                      Renovar
+                      {doc.txt.startsWith('Datos') ? 'Agregar' : 'Renovar'}
                     </Btn>
                   </div>
                 ))}

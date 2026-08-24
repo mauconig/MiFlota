@@ -2,7 +2,6 @@ export type Estado = 'activo' | 'taller' | 'baja';
 export type ServiceUnidad = 'dias' | 'meses';
 /** Cada cuánto se paga el seguro, que no es lo mismo que cada cuánto se renueva
     la póliza: se puede pagar por mes y renovar una vez al año. */
-export type SeguroPeriodo = 'mensual' | 'anual';
 
 export interface Car {
   id: string;
@@ -20,12 +19,13 @@ export interface Car {
   serviceCada: number;
   serviceUnidad: ServiceUnidad;
   lastServiceDate: Date;
+  kilometraje: number;
+  kilometrajeActualizado: string | null;
   /** Vencimiento como fecha, no como días restantes: un contador queda
       desactualizado apenas pasa un día en la base. */
   seguroDate: Date;
   /** Costo de la póliza en guaraníes, en la periodicidad de `seguroPeriodo`. */
-  seguroCosto: number;
-  seguroPeriodo: SeguroPeriodo;
+  seguroNombre: string;
   /** Meses entre renovaciones de la póliza. */
   seguroCada: number;
 }
@@ -63,6 +63,16 @@ export interface Mov {
   driverId?: number | null;
   /** Adjunto del gasto. El archivo se pide por `/api/comprobantes/:id`. */
   comprobante?: { id: string; nombre: string; tipo: string };
+  manoObra?: number;
+  items?: GastoItem[];
+}
+
+export interface GastoItem {
+  id?: number;
+  nombre: string;
+  cantidad: number;
+  costoUnitario: number;
+  subtotal: number;
 }
 
 /** `pago` es plata que entró; `ajuste` cancela deuda sin caja (condonación).
@@ -99,14 +109,14 @@ export interface NewCarForm {
   model: string;
   year: string;
   gpsTag: string;
+  kilometraje: string;
   /** ISO `YYYY-MM-DD`, tal como lo emite un <input type="date">. */
   lastService: string;
   serviceCada: string;
   serviceUnidad: ServiceUnidad;
   /** ISO `YYYY-MM-DD`: cuándo vence la póliza vigente. */
   seguroVence: string;
-  seguroCosto: string;
-  seguroPeriodo: SeguroPeriodo;
+  seguroNombre: string;
   seguroCada: string;
 }
 
