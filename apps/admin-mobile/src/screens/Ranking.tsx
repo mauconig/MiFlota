@@ -48,7 +48,7 @@ export function Ranking({ v }: { v: MobileView }) {
       <Text style={{ fontSize: 11, color: '#6b665c', paddingLeft: 6 }}>{rk.hint}</Text>
       {visibleRows.map((r) => (
         <Pressable
-          key={i}
+          key={`${r.pos}-${r.name}`}
           onPress={r.open}
           style={{
             backgroundColor: r.pos === '1' ? '#fdf6e8' : '#fffdf8',
