@@ -13,6 +13,7 @@ const SEG_AVISO_DIAS = 20;
 /** Tope de meses entre renovaciones de la póliza. Coincide con el del servidor. */
 const SEG_CADA_MAX = 120;
 const MESES_ABR = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const REG_CATS = ['Repuestos', ...CATS] as const;
 
 // --------------------------------------------------------------------------
 // Helpers puros, portados de apps/admin-web/src/useFleetView.ts. La demo usa
@@ -135,11 +136,11 @@ export function blankRegistrarForm(tab: RegistrarTab, carId: string, driver: str
     nota: '',
     driver,
     tipo: 'pago',
-    cat: CATS[0],
+    cat: '',
     comprobante: null,
     items: [{ nombre: '', cantidad: '1', costoUnitario: '' }],
     manoObra: '',
-    step: tab === 'gasto' && !lockCar ? 0 : 0,
+    step: lockCar ? 1 : 0,
     repuestos: null,
     otroItem: null,
     lockCar,
@@ -444,6 +445,7 @@ export interface MobileView {
     tab: RegistrarTab;
     setTab: (t: RegistrarTab) => void;
     step: number;
+    progressStep: number;
     totalSteps: number;
     stepTitle: string;
     stepHint: string;
@@ -468,6 +470,10 @@ export interface MobileView {
     submit: () => void;
     guardando: boolean;
     cobro: {
+      carId: string;
+      setCarId: (v: string) => void;
+      selCars: { id: string; label: string }[];
+      lockCar: boolean;
       driver: string;
       setDriver: (v: string) => void;
       opciones: { id: string; label: string }[];
@@ -609,9 +615,11 @@ export function useMobileView(
   const back = () => {
     Keyboard.dismiss();
     if (state.screen === 'registrar' && state.registrar && !state.registrar.success) {
-      const firstStep = state.registrar.tab === 'gasto' && !state.registrar.lockCar ? 0 : 0;
+      const firstStep = state.registrar.tab === 'gasto' && state.registrar.lockCar ? 1 : 0;
       if (state.registrar.step > firstStep) {
-        update((s) => ({ registrar: s.registrar && { ...s.registrar, step: s.registrar.step - 1, otroItem: null } }));
+        let previousStep = state.registrar.step - 1;
+        if (state.registrar.tab === 'gasto' && state.registrar.step === 3 && state.registrar.cat !== 'Repuestos') previousStep = 1;
+        update((s) => ({ registrar: s.registrar && { ...s.registrar, step: previousStep } }));
         return;
       }
     }
@@ -1005,9 +1013,10 @@ export function useMobileView(
   // ---- registrar -------------------------------------------------------
   const f = state.registrar;
   function goRegistrar(tab: RegistrarTab, carId?: string) {
-    const resolvedCar = carId ?? car?.id ?? active[0]?.id ?? '';
+    const contextCar = carId ?? car?.id;
+    const resolvedCar = contextCar ?? '';
     const driver = carDe.get(resolvedCar)?.driver ?? '';
-    const lockCar = Boolean(carId ?? car);
+    const lockCar = Boolean(contextCar);
     push('registrar', { registrar: blankRegistrarForm(tab, resolvedCar, driver === 'Sin chofer' ? '' : driver, lockCar) });
   }
   const goRegistrarCobro = (carId?: string) => goRegistrar('cobro', carId);
@@ -1021,7 +1030,8 @@ export function useMobileView(
       .filter((item) => item.nombre && item.cantidad > 0 && item.costoUnitario > 0)
       .map((item) => ({ ...item, subtotal: item.cantidad * item.costoUnitario }));
     const manoObraNum = numFromInput(f.manoObra);
-    const amountNum = f.tab === 'gasto' ? gastoItems.reduce((sum, item) => sum + item.subtotal, 0) + manoObraNum : parseInt(f.digits || '0', 10);
+    const gastoStructuredTotal = gastoItems.reduce((sum, item) => sum + item.subtotal, 0) + manoObraNum;
+    const amountNum = f.tab === 'gasto' ? gastoStructuredTotal || parseInt(f.digits || '0', 10) : parseInt(f.digits || '0', 10);
     const press = (k: string) =>
       setF({
         digits: k === 'del' ? f.digits.slice(0, -1) : k === '000' ? (f.digits ? (f.digits + '000').slice(0, 10) : f.digits) : f.digits.length < 10 ? (f.digits === '' && k === '0' ? '' : f.digits + k) : f.digits,
@@ -1035,6 +1045,13 @@ export function useMobileView(
       );
       const debe = deudaPorChofer.get(f.driver) ?? 0;
       cobro = {
+        carId: f.carId,
+        setCarId: (v) => {
+          const selected = carDe.get(v);
+          setF({ carId: v, driver: selected ? claveDeCar(selected) : '' });
+        },
+        selCars: active.map((c) => ({ id: c.id, label: c.plate + ' · ' + c.driver })),
+        lockCar: f.lockCar,
         driver: f.driver,
         setDriver: (v) => setF({ driver: v }),
         opciones: opciones.map(([k, c]) => ({ id: k, label: c.driver + (deudaPorChofer.get(k) ? ' — debe ' + fmtShort(deudaPorChofer.get(k)!) : ' — al día') })),
@@ -1054,11 +1071,11 @@ export function useMobileView(
     let gasto: NonNullable<MobileView['registrar']>['gasto'] = null;
     if (f.tab === 'gasto') {
       gasto = {
-        catChips: CATS.map((name) => ({ label: name, ...chipStyle(f.cat === name, 'amber'), pick: () => setF({ cat: name }) })),
+        catChips: REG_CATS.map((name) => ({ label: name, ...chipStyle(f.cat === name, 'amber'), pick: () => setF({ cat: name }) })),
         carId: f.carId,
         setCarId: (v) => setF({ carId: v }),
         selCars: active.map((c) => ({ id: c.id, label: c.plate + ' · ' + c.driver })),
-        lockCar: !!car,
+        lockCar: f.lockCar,
         comprobante: f.comprobante,
         setComprobante: (file) => setF({ comprobante: file }),
         items: f.items,
@@ -1073,7 +1090,7 @@ export function useMobileView(
     const finish = () => back();
     const again = () => update({ registrar: blankRegistrarForm(f.tab, f.carId, f.driver, f.lockCar) });
 
-    const next = () => {
+    const legacyNext = () => {
       if (f.guardando || f.success) return;
       if (f.tab === 'cobro') {
         if (f.step === 0 && !f.driver) return toast('Elegí de qué chofer es el pago');
@@ -1084,7 +1101,7 @@ export function useMobileView(
       }
     };
 
-    const submit = () => {
+    const legacySubmit = () => {
       if (f.guardando) return;
       if (!amountNum) return toast(f.tab === 'cobro' ? 'Ingresá cuánto pagó' : 'Agregá repuestos o mano de obra');
       if (f.fecha > isoLocal(TODAY)) return toast('La fecha no puede ser futura');
@@ -1127,6 +1144,64 @@ export function useMobileView(
       }
     };
 
+    void legacyNext;
+    void legacySubmit;
+
+    const next = () => {
+      if (f.guardando || f.success) return;
+      if (f.tab === 'cobro') {
+        if (f.step === 0 && !f.carId) return toast('Elegí a qué auto corresponde');
+        if (f.step === 1 && !amountNum) return toast('Ingresá cuánto ingresó');
+        if (f.step < 2) setF({ step: f.step + 1 });
+        return;
+      }
+      if (f.step === 0 && !f.carId) return toast('Elegí a qué auto corresponde');
+      if (f.step === 1) {
+        if (!f.cat) return toast('Elegí el tipo de egreso');
+        return setF({ step: f.cat === 'Repuestos' ? 2 : 3 });
+      }
+      if (f.step === 2 && !f.nota.trim()) return toast('Escribí qué repuesto compraste');
+      if (f.step === 2) return setF({ step: 3 });
+      if (f.step === 3 && !amountNum) return toast('Ingresá cuánto gastaste');
+      if (f.step === 3) setF({ step: 4 });
+    };
+
+    const submit = () => {
+      if (f.guardando) return;
+      if (!amountNum) return toast(f.tab === 'cobro' ? 'Ingresá cuánto ingresó' : 'Ingresá cuánto gastaste');
+      if (f.fecha > isoLocal(TODAY)) return toast('La fecha no puede ser futura');
+      if (!f.carId) return toast('Elegí a qué auto corresponde');
+      setF({ guardando: true });
+      if (f.tab === 'cobro') {
+        const carSel = cars.find((c) => c.id === f.carId);
+        const driverKey = carSel ? claveDeCar(carSel) : '';
+        if (!carSel || !driverKey || driverKey === 'Sin chofer') {
+          setF({ guardando: false });
+          return toast('El auto tiene que tener un chofer');
+        }
+        persist
+          .addPago({ driver: driverKey, carId: carSel.id, fecha: f.fecha, monto: amountNum, tipo: 'pago', nota: f.nota.trim() || undefined })
+          .then(() => update((s) => ({ registrar: s.registrar && { ...s.registrar, guardando: false, success: { tab: 'cobro', title: 'Ingreso registrado', detail: carSel.plate, amount: fmt(amountNum) } } })))
+          .catch((e: Error) => {
+            setF({ guardando: false });
+            toast('No se pudo registrar: ' + e.message);
+          });
+        return;
+      }
+      const plate = carDe.get(f.carId)?.plate ?? '';
+      const simpleItems = f.cat === 'Repuestos' && f.nota.trim()
+        ? [{ nombre: f.nota.trim(), cantidad: 1, costoUnitario: amountNum, subtotal: amountNum }]
+        : [];
+      const descripcion = f.nota.trim() || f.cat;
+      persist
+        .addEgreso(f.carId, { razon: descripcion, monto: amountNum, cat: f.cat, comprobante: f.comprobante, items: simpleItems, manoObra: simpleItems.length ? 0 : undefined })
+        .then(() => update((s) => ({ registrar: s.registrar && { ...s.registrar, guardando: false, success: { tab: 'gasto', title: 'Egreso registrado', detail: plate + ' · ' + descripcion, amount: fmt(amountNum) } } })))
+        .catch((e: Error) => {
+          setF({ guardando: false });
+          toast('No se pudo registrar: ' + e.message);
+        });
+    };
+
     const cobroTitles = [
       ['¿De qué chofer es este pago?', 'Elegí el chofer al que corresponde el cobro.'],
       ['¿Cuánto pagó?', 'Ingresá el monto usando el teclado.'],
@@ -1135,17 +1210,40 @@ export function useMobileView(
       ['¿Querés agregar una nota?', 'Este dato es opcional. Podés continuar sin escribir nada.'],
       ['Revisá el cobro', 'Confirmá los datos antes de guardarlo.'],
     ];
-    const stepMeta = f.tab === 'cobro' ? cobroTitles[f.step] : ['Registrar gasto', ''];
+    const simpleCobroTitles = [
+      ['¿De qué auto es el ingreso?', 'Elegí el auto al que corresponde el pago.'],
+      ['¿Cuánto ingresó?', 'Ingresá el monto recibido.'],
+      ['Revisá el ingreso', 'Confirmá los datos antes de guardarlo.'],
+    ];
+    void cobroTitles;
+    const gastoTitles = [
+      ['¿De qué auto es el egreso?', 'Elegí el auto al que corresponde el gasto.'],
+      ['¿Qué tipo de egreso es?', 'Elegí una categoría para ordenar tus gastos.'],
+      ['¿Qué repuesto compraste?', 'Escribí una descripción corta.'],
+      ['¿Cuánto gastaste?', 'Ingresá el total del gasto.'],
+      ['Revisá el egreso', 'Confirmá los datos antes de guardarlo.'],
+    ];
+    const firstStep = f.lockCar ? 1 : 0;
+    const progressStep = f.tab === 'cobro'
+      ? f.step - firstStep
+      : f.cat === 'Repuestos'
+        ? f.step - firstStep
+        : f.step >= 3
+          ? f.step - firstStep - 1
+          : f.step - firstStep;
+    const totalSteps = f.tab === 'cobro' ? 3 - firstStep : (f.cat === 'Repuestos' ? 5 : 4) - firstStep;
+    const stepMeta = f.tab === 'cobro' ? simpleCobroTitles[f.step] : gastoTitles[f.step];
     registrarView = {
       tab: f.tab,
       setTab: (t) => setF({ tab: t }),
       step: f.step,
-      totalSteps: f.tab === 'cobro' ? 6 : 1,
+      totalSteps,
+      progressStep,
       stepTitle: stepMeta[0],
       stepHint: stepMeta[1],
       backStep: () => back(),
       next,
-      nextLabel: f.tab === 'cobro' && f.step === 5 ? 'Registrar cobro' : 'Continuar',
+      nextLabel: (f.tab === 'cobro' && f.step === 2) || (f.tab === 'gasto' && f.step === 4) ? (f.tab === 'cobro' ? 'Registrar ingreso' : 'Registrar egreso') : 'Continuar',
       nextDisabled: false,
       success: f.success,
       finish,
@@ -1160,7 +1258,7 @@ export function useMobileView(
       nota: f.nota,
       setNota: (v) => setF({ nota: v }),
       notaPh: f.tab === 'cobro' ? 'Opcional' : 'De qué es el gasto',
-      cta: { label: f.tab === 'cobro' ? 'Registrar cobro' : 'Registrar gasto', bg: amountNum ? COLORS.ink : '#e2dbcc', fg: amountNum ? COLORS.paper : '#6b665c' },
+      cta: { label: f.tab === 'cobro' ? 'Registrar ingreso' : 'Registrar egreso', bg: amountNum ? COLORS.ink : '#e2dbcc', fg: amountNum ? COLORS.paper : '#6b665c' },
       submit,
       guardando: f.guardando,
       cobro,
@@ -1305,7 +1403,7 @@ export function useMobileView(
     reportes: ['Reportes', 'Exportá para tu contador'],
     detalle: ['Detalle del vehículo', ''],
     nuevoVehiculo: ['Nuevo vehículo', ''],
-    registrar: [f?.tab === 'gasto' ? 'Registrar gasto' : 'Registrar cobro', ''],
+    registrar: [f?.tab === 'gasto' ? 'Registrar egreso' : 'Registrar ingreso', ''],
     assistant: ['MiFlota IA', ''],
     perfil: ['Perfil', ''],
   };
