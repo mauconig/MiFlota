@@ -53,7 +53,10 @@ const PORT = Number(process.env.PORT ?? 3000);
  *  fecha (ver `TODAY` en el cliente), y sin poder alinear las dos el servidor
  *  rechazaría por "futuro" todo lo que se cargue desde esa app. En producción
  *  no se define y manda el reloj real. */
-const hoyISO = () => process.env.MIFLOTA_HOY ?? new Date().toISOString().slice(0, 10);
+const hoyISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 const diasEntreISO = (desde: string | null, hasta = hoyISO()) => (desde ? Math.floor((Date.parse(`${hasta}T12:00:00Z`) - Date.parse(`${desde}T12:00:00Z`)) / 86400000) : Number.POSITIVE_INFINITY);
 const ASSISTANT_REPORTS_DIR = process.env.MIFLOTA_ASSISTANT_REPORTS ?? join(dirname(DB_PATH), 'assistant-reports');
 await mkdir(ASSISTANT_REPORTS_DIR, { recursive: true });
@@ -747,7 +750,13 @@ function reportPeriodRange(period: FleetReportExportBody['period']): { from: str
   if (from) return { from, to };
   if (type === 'semana') return { from: isoOffset(to, -6), to };
   if (type === 'mes') return { from: `${to.slice(0, 7)}-01`, to };
-  if (type === 'jul') return { from: `${to.slice(0, 4)}-07-01`, to: `${to.slice(0, 4)}-07-31` <= to ? `${to.slice(0, 4)}-07-31` : to };
+  if (type === 'jul') {
+    const pivot = new Date(to + 'T12:00:00');
+    const previous = new Date(pivot.getFullYear(), pivot.getMonth() - 1, 1, 12);
+    const last = new Date(pivot.getFullYear(), pivot.getMonth(), 0, 12);
+    const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return { from: iso(previous), to: iso(last) };
+  }
   if (type === 'd90') return { from: isoOffset(to, -89), to };
   return { from: '1970-01-01', to };
 }
@@ -1020,7 +1029,7 @@ const CAMPOS: Record<string, { col: string; ok: (v: unknown) => boolean }> = {
   gpsTag: { col: 'gps_tag', ok: (v) => typeof v === 'string' && v.length <= 40 },
   kilometraje: { col: 'kilometraje', ok: (v) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 10_000_000 },
   seguroNombre: { col: 'seguro_nombre', ok: (v) => typeof v === 'string' && v.trim().length <= 120 },
-  serviceCada: { col: 'service_cada', ok: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 3650 },
+  serviceCada: { col: 'service_cada', ok: (v) => v === 0 || (Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 3650) },
   serviceUnidad: { col: 'service_unidad', ok: (v) => v === 'dias' || v === 'meses' },
   lastServiceDate: { col: 'last_service_date', ok: (v) => v === '' || (typeof v === 'string' && FECHA.test(v)) },
   seguroDate: { col: 'seguro_date', ok: (v) => v === '' || (typeof v === 'string' && FECHA.test(v)) },
@@ -1071,6 +1080,7 @@ app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (re
   if (!actual) return reply.code(404).send({ error: 'Vehículo inexistente' });
 
   const body = req.body ?? ({} as CarPatch);
+  if (body.kilometraje !== undefined && (typeof body.kilometraje !== 'number' || body.kilometraje < actual.kilometraje)) return reply.code(400).send({ error: 'El kilometraje no puede disminuir' });
   const normalizedPlate = body.plate === undefined ? undefined : body.plate.trim().toUpperCase();
   if (normalizedPlate !== undefined) {
     const duplicate = db.prepare('SELECT 1 FROM cars WHERE owner_id = ? AND id <> ? AND UPPER(plate) = ?').get(u.id, req.params.id, normalizedPlate);
@@ -1273,7 +1283,7 @@ app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
   const dup = db.prepare('SELECT id FROM cars WHERE UPPER(plate) = ? AND owner_id = ?').get(plate, u.id);
   if (dup) return reply.code(409).send({ error: 'Ya existe un vehículo con esa chapa' });
 
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyISO();
   // El vencimiento del seguro lo trae el alta. Si faltara, un año desde hoy es
   // el único supuesto razonable, pero se acepta para no romper clientes viejos.
   if (b.seguroDate !== undefined && b.seguroDate !== '' && !(typeof b.seguroDate === 'string' && FECHA.test(b.seguroDate))) {
@@ -1364,7 +1374,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
   if (!razon) return reply.code(400).send({ error: 'Indicá el motivo de la entrada a taller' });
   if (monto <= 0) return reply.code(400).send({ error: 'Indicá cuánto se gasta en el taller' });
 
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyISO();
   const info = db
     .prepare(
       `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
@@ -1468,7 +1478,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
   const total = items.length || manoObra > 0 ? detalleTotal : monto;
   if (monto > 0 && (items.length || manoObra > 0) && monto !== detalleTotal) return reply.code(400).send({ error: 'El total no coincide con los ítems y la mano de obra' });
   if (total <= 0 || total > 1_000_000_000) return reply.code(400).send({ error: 'Indicá cuánto se gastó' });
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyISO();
   const info = db.transaction(() => {
     const created = db
       .prepare(
@@ -1485,6 +1495,95 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
 
   const mov = db.prepare('SELECT * FROM movs WHERE id = ?').get(info.lastInsertRowid) as MovRow;
   return reply.code(201).send({ mov: movToJson(mov, selItems.all(mov.id) as GastoItemRow[]) });
+});
+
+/** Registra un service y, si tuvo costo, su gasto asociado en una sola
+ * operación. El archivo se escribe antes de la transacción porque SQLite no
+ * puede esperar una escritura async; si algo falla, se elimina el archivo
+ * recién creado para no dejar comprobantes huérfanos. */
+app.post<{ Params: { id: string } }>('/api/cars/:id/service', async (req, reply) => {
+  const u = quien(req);
+  const car = selCar.get(req.params.id, u.id) as CarRow | undefined;
+  if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
+
+  let fecha = '';
+  let descripcion = '';
+  let kilometraje: number | undefined;
+  let costo: number | undefined;
+  let archivoPendiente: { buf: Buffer; nombre: string; tipo: string; id: string } | null = null;
+
+  try {
+    for await (const parte of req.parts()) {
+      if (parte.type === 'field') {
+        if (parte.fieldname === 'fecha') fecha = String(parte.value).trim();
+        if (parte.fieldname === 'descripcion') descripcion = String(parte.value).trim().slice(0, 160);
+        if (parte.fieldname === 'kilometraje') {
+          const raw = String(parte.value).trim();
+          kilometraje = raw === '' ? undefined : Number(raw.replace(/\D/g, ''));
+        }
+        if (parte.fieldname === 'costo') {
+          const raw = String(parte.value).trim();
+          costo = raw === '' ? undefined : Number(raw.replace(/\D/g, ''));
+        }
+        continue;
+      }
+      if (parte.fieldname !== 'comprobante') {
+        await parte.toBuffer();
+        continue;
+      }
+      const ext = TIPOS_COMPROBANTE[parte.mimetype];
+      if (!ext) {
+        await parte.toBuffer();
+        return reply.code(415).send({ error: 'El comprobante tiene que ser una foto o un PDF' });
+      }
+      const buf = await parte.toBuffer();
+      if (buf.length) archivoPendiente = { buf, nombre: String(parte.filename || 'comprobante').slice(0, 120), tipo: parte.mimetype, id: randomUUID() + '.' + ext };
+    }
+  } catch (e) {
+    const err = e as { code?: string };
+    if (err.code === 'FST_REQ_FILE_TOO_LARGE') return reply.code(413).send({ error: 'El comprobante no puede pasar de 8 MB' });
+    throw e;
+  }
+
+  const hoy = hoyISO();
+  if (!FECHA.test(fecha) || fecha > hoy) return reply.code(400).send({ error: 'La fecha del service no es válida' });
+  if (!descripcion) return reply.code(400).send({ error: 'Contá qué service se hizo' });
+  if (kilometraje !== undefined && (!Number.isInteger(kilometraje) || kilometraje < car.kilometraje || kilometraje > 10_000_000)) {
+    return reply.code(400).send({ error: 'El kilometraje no puede ser menor al actual' });
+  }
+  if (costo !== undefined && (!Number.isInteger(costo) || costo < 0 || costo > 1_000_000_000)) return reply.code(400).send({ error: 'El costo del service no es válido' });
+
+  const archivo = archivoPendiente
+    ? { id: archivoPendiente.id, nombre: archivoPendiente.nombre, tipo: archivoPendiente.tipo }
+    : null;
+  if (archivoPendiente) await writeFile(join(COMPROBANTES_DIR, archivoPendiente.id), archivoPendiente.buf);
+
+  try {
+    const info = db.transaction(() => {
+      const updates = ['last_service_date = ?'];
+      const values: unknown[] = [fecha];
+      if (kilometraje !== undefined) {
+        updates.push('kilometraje = ?', 'kilometraje_actualizado = ?');
+        values.push(kilometraje, hoy);
+      }
+      db.prepare(`UPDATE cars SET ${updates.join(', ')} WHERE id = ? AND owner_id = ?`).run(...values, car.id, u.id);
+      if (costo === undefined || costo === 0) return null;
+      return db
+        .prepare(
+          `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, mano_obra, comprobante, comprobante_nombre, comprobante_tipo)
+           VALUES (?, ?, 'egreso', ?, ?, ?, 'Service', NULL, 0, ?, ?, ?)`,
+        )
+        .run(u.id, car.id, costo, fecha, descripcion, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
+    })();
+
+    const actualizado = db.prepare('SELECT * FROM cars WHERE id = ? AND owner_id = ?').get(car.id, u.id) as CarRow;
+    const mov = info ? (db.prepare('SELECT * FROM movs WHERE id = ?').get(info.lastInsertRowid) as MovRow) : undefined;
+    req.log.info({ car: car.plate, costo: costo ?? 0, comprobante: !!archivo }, 'service registrado');
+    return reply.code(201).send({ car: carToJson(actualizado), ...(mov ? { mov: movToJson(mov, []) } : {}) });
+  } catch (error) {
+    if (archivo) await rm(join(COMPROBANTES_DIR, archivo.id), { force: true });
+    throw error;
+  }
 });
 
 /** Descarga del comprobante. Se resuelve por el movimiento y no por el nombre

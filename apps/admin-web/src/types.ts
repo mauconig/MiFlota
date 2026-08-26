@@ -96,9 +96,10 @@ export interface Pago {
   tipo: PagoTipo;
   medio?: string;
   nota?: string;
+  comprobante?: { id: string; nombre: string; tipo: string };
 }
 
-export type Nav = 'resumen' | 'flota' | 'choferes' | 'alertas' | 'reportes' | 'cobros';
+export type Nav = 'resumen' | 'flota' | 'movimientos' | 'choferes' | 'alertas' | 'reportes' | 'cobros';
 export type Period = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
 export type FleetFilter = 'todos' | 'activo' | 'taller' | 'baja';
 export type MovType = 'todos' | 'ingreso' | 'egreso';
@@ -118,6 +119,14 @@ export interface NewCarForm {
   seguroVence: string;
   seguroNombre: string;
   seguroCada: string;
+}
+
+export interface EditCarForm extends NewCarForm {
+  estado: Estado;
+  driver: string;
+  cuota: string;
+  section: 'general' | 'chofer' | 'mantenimiento' | 'seguro' | 'gps' | 'danger';
+  guardando: boolean;
 }
 
 export interface NewDriverForm {
@@ -152,6 +161,10 @@ export interface UIState {
   alertQ: string;
   pendQ: string;
   movQ: string;
+  movMonth: string;
+  movPage: number;
+  movVehicle: string;
+  movExpanded: string | null;
   modal: ModalKind;
   ncar: NewCarForm;
   ndrv: NewDriverForm;
@@ -169,6 +182,8 @@ export interface UIState {
   npago: { driver: string | number; fecha: string; monto: string; tipo: PagoTipo; nota: string; guardando: boolean } | null;
   /** Acción destructiva esperando confirmación. */
   confirm: { tipo: 'borrarAuto' | 'quitarChofer'; carId: string } | null;
+  editCar: EditCarForm | null;
+  service: { carId: string; step: number; fecha: string; descripcion: string; kilometraje: string; costo: string; comprobante: File | null; guardando: boolean } | null;
   /** Id del vehículo cuyo chofer se está viendo en detalle. */
   detailCarId: string | null;
 }

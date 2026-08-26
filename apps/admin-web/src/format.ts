@@ -7,7 +7,10 @@ export const COLORS = {
   paper: '#fffdf8',
 } as const;
 
-export const TODAY = new Date(2026, 7, 28);
+const now = new Date();
+/** Fecha local del navegador, fijada al mediodía para que los cambios de zona
+ * horaria no corran el día al convertirla en una fecha de negocio. */
+export const TODAY = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
 
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 

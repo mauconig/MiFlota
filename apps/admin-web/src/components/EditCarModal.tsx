@@ -1,0 +1,42 @@
+import type { View } from '../useFleetView';
+import { Btn } from './Btn';
+import { DateField } from './DateField';
+import { CloseIcon } from '../icons';
+import { btnPrimary, btnPrimaryHover, btnSecondary, btnSecondaryHover, fieldInput, fieldLabel, fieldLabelText, modalCloseBtn, modalCloseBtnHover, modalOverlay, modalTitle } from '../styles';
+
+const sections = [
+  ['general', 'General'],
+  ['chofer', 'Chofer'],
+  ['mantenimiento', 'Mantenimiento'],
+  ['seguro', 'Seguro'],
+  ['gps', 'GPS'],
+  ['danger', 'Zona de peligro'],
+] as const;
+
+export function EditCarModal({ v }: { v: View }) {
+  if (!v.editCarModal) return null;
+  const f = v.editCar;
+  const change = v.editCarChange;
+  return (
+    <div onClick={v.editCarClose} style={modalOverlay}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: '#fffdf8', borderRadius: 24, width: 790, maxWidth: '100%', height: 'min(650px, 90vh)', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 24px 60px rgba(22,21,15,0.3)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '20px 24px', borderBottom: '1px solid #f0ebe0', flex: 'none' }}><span style={modalTitle}>Editar datos del vehículo</span><Btn onClick={v.editCarClose} ariaLabel="Cerrar" style={modalCloseBtn} hoverStyle={modalCloseBtnHover}><CloseIcon size={16} /></Btn></div>
+        <div style={{ display: 'flex', minHeight: 0, flex: 1 }}>
+          <nav style={{ width: 170, flex: 'none', padding: 14, background: '#f7f3eb', borderRight: '1px solid #f0ebe0' }}>{sections.map(([key, label]) => <button key={key} type="button" onClick={() => change('section', key)} style={{ display: 'block', width: '100%', border: 'none', borderRadius: 11, background: f.section === key ? '#16150f' : 'transparent', color: f.section === key ? '#fffdf8' : '#5f5a51', textAlign: 'left', padding: '11px 12px', marginBottom: 4, font: 'inherit', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{label}</button>)}</nav>
+          <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: 24 }}>
+            {f.section === 'general' && <Section title="Datos básicos" hint="La información que identifica al vehículo."><div className="edit-grid"><Field label="Chapa"><input value={f.plate} onChange={(e) => change('plate', e.target.value)} style={{ ...fieldInput, textTransform: 'uppercase' }} /></Field><Field label="Marca y modelo"><input value={f.model} onChange={(e) => change('model', e.target.value)} style={fieldInput} /></Field><Field label="Año"><input inputMode="numeric" value={f.year} onChange={(e) => change('year', e.target.value)} style={fieldInput} /></Field></div><div style={{ marginTop: 20 }}><div style={fieldLabelText}>Estado</div><div style={{ display: 'flex', gap: 8, marginTop: 7 }}>{([['activo', 'Activo'], ['taller', 'En taller'], ['baja', 'Baja']] as const).map(([key, label]) => <button key={key} type="button" onClick={() => change('estado', key)} style={{ flex: 1, minHeight: 42, border: `1px solid ${f.estado === key ? '#16150f' : '#e0d6c4'}`, background: f.estado === key ? '#16150f' : '#fffdf8', color: f.estado === key ? '#fffdf8' : '#3d3a34', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>{label}</button>)}</div>{f.estado === 'taller' && <div style={{ padding: 10, marginTop: 10, borderRadius: 10, background: '#fdf6e8', color: '#8a641c', fontSize: 12 }}>Al guardar se va a abrir el registro de ingreso a taller.</div>}</div></Section>}
+            {f.section === 'chofer' && <Section title="Chofer y cuota" hint="Asigná quién usa este vehículo y cuánto paga por día."><Field label="Chofer"><input value={f.driver} onChange={(e) => change('driver', e.target.value)} placeholder="Sin chofer" style={fieldInput} /></Field><Field label="Cuota diaria"><input inputMode="numeric" value={f.cuota} onChange={(e) => change('cuota', e.target.value)} placeholder="190.000" style={fieldInput} /></Field><p style={{ fontSize: 12, color: '#6b665c', lineHeight: 1.5 }}>Si cambiás el chofer, antes de guardar vas a revisar sus datos de acceso a MiFlota Chofer.</p></Section>}
+            {f.section === 'mantenimiento' && <Section title="Mantenimiento" hint="Estos datos ayudan a saber cuándo volver a revisar el auto."><Field label="Kilometraje actual"><input inputMode="numeric" value={f.kilometraje} onChange={(e) => change('kilometraje', e.target.value)} placeholder="120.000" style={fieldInput} /></Field><div className="edit-grid"><Field label="Último service"><DateField value={f.lastService} onChange={(x) => change('lastService', x)} max={v.hoyISO} ariaLabel="Último service" /></Field><Field label="Service cada"><div style={{ display: 'flex', gap: 8 }}><input inputMode="numeric" value={f.serviceCada} onChange={(e) => change('serviceCada', e.target.value)} placeholder="6" style={{ ...fieldInput, width: 80 }} /><select className="field-select" value={f.serviceUnidad} onChange={(e) => change('serviceUnidad', e.target.value as 'dias' | 'meses')} style={fieldInput}><option value="meses">meses</option><option value="dias">días</option></select></div></Field></div></Section>}
+            {f.section === 'seguro' && <Section title="Seguro" hint="Podés dejar toda esta sección vacía si el auto no tiene datos cargados."><Field label="Aseguradora"><input value={f.seguroNombre} onChange={(e) => change('seguroNombre', e.target.value)} placeholder="Nombre de la aseguradora" style={fieldInput} /></Field><div className="edit-grid"><Field label="Vencimiento"><DateField value={f.seguroVence} onChange={(x) => change('seguroVence', x)} ariaLabel="Vencimiento del seguro" /></Field><Field label="Renovar cada"><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><input inputMode="numeric" value={f.seguroCada} onChange={(e) => change('seguroCada', e.target.value)} placeholder="12" style={{ ...fieldInput, width: 80 }} /><span style={{ fontSize: 13, color: '#6b665c' }}>meses</span></div></Field></div></Section>}
+            {f.section === 'gps' && <Section title="GPS y ubicación" hint="Son dos cosas diferentes: el identificador se carga a mano y la ubicación llega desde el teléfono del chofer."><Field label="Identificador GPS"><input value={f.gpsTag} onChange={(e) => change('gpsTag', e.target.value)} placeholder="Ej. GPS-04" style={fieldInput} /></Field><div style={{ padding: 14, borderRadius: 13, background: '#f7f3eb', color: '#6b665c', fontSize: 12, lineHeight: 1.5 }}>La última ubicación recibida se consulta en la ficha del vehículo. Este campo no determina si el teléfono está enviando señal.</div></Section>}
+            {f.section === 'danger' && <Section title="Zona de peligro" hint="Eliminar un vehículo también elimina sus movimientos asociados y no se puede deshacer."><div style={{ padding: 16, border: '1px solid #f0d0c6', borderRadius: 15, background: '#fff5f2' }}><div style={{ fontSize: 14, fontWeight: 700, color: '#a8412f' }}>Eliminar este vehículo</div><p style={{ margin: '7px 0 14px', fontSize: 12, lineHeight: 1.5, color: '#7d5148' }}>Usá esta opción sólo si querés borrar el historial. Si dejó de circular, conviene marcarlo como Baja.</p><Btn onClick={v.editCarDelete} style={{ border: '1px solid #e6b9ad', background: '#fffdf8', color: '#a8412f', borderRadius: 12, minHeight: 40, padding: '0 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Eliminar vehículo</Btn></div></Section>}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, padding: '14px 24px', borderTop: '1px solid #f0ebe0', flex: 'none' }}><Btn onClick={v.editCarClose} style={btnSecondary} hoverStyle={btnSecondaryHover}>Cancelar</Btn><Btn onClick={v.editCarSave} disabled={f.guardando} style={btnPrimary} hoverStyle={btnPrimaryHover} disabledStyle={{ opacity: 0.6 }}>{f.guardando ? 'Guardando…' : 'Guardar cambios'}</Btn></div>
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, hint, children }: { title: string; hint: string; children: React.ReactNode }) { return <><h2 style={{ margin: 0, fontSize: 19 }}>{title}</h2><p style={{ margin: '6px 0 22px', fontSize: 12, color: '#6b665c', lineHeight: 1.5 }}>{hint}</p>{children}</>; }
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label style={{ ...fieldLabel, marginBottom: 16 }}><span style={fieldLabelText}>{label}</span>{children}</label>; }

@@ -117,6 +117,29 @@ export interface NuevoPagoPayload {
   nota?: string;
 }
 
+export interface RegistrarServicePayload {
+  fecha: string;
+  descripcion: string;
+  kilometraje?: number;
+  costo?: number;
+  comprobante?: File | null;
+}
+
+export interface ReportExportPayload {
+  period: { type: 'semana' | 'mes' | 'jul' | 'd90' | 'custom'; from?: string; to?: string };
+  include: 'gastos' | 'ingresos' | 'ambos';
+  carIds: 'todos' | string[];
+  categories: 'todas' | string[];
+  format: 'pdf' | 'xlsx';
+}
+
+export interface ReportExportResponse {
+  file: { name: string; url: string; mimeType: string };
+  counts: { ingresos: number; gastos: number; total: number };
+}
+
+export const exportFleetReport = (payload: ReportExportPayload) => req<ReportExportResponse>('/api/reports/export', { method: 'POST', body: JSON.stringify(payload) });
+
 export interface DriverCredentials {
   username: string;
   password: string;
@@ -135,11 +158,14 @@ export interface FleetStore {
   cargando: boolean;
   error: string;
   patchCar: (id: string, patch: Partial<Car>) => void;
+  updateCar: (id: string, patch: Partial<Car>) => Promise<Car>;
   previewDriverCredentials: (id: string, driver: string) => Promise<DriverCredentials>;
   assignDriver: (id: string, payload: AssignDriverPayload) => Promise<Car>;
   addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
   deleteCar: (id: string) => Promise<{ plate: string; movs: number }>;
   mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: File | null }) => Promise<void>;
+  registrarService: (id: string, datos: RegistrarServicePayload) => Promise<{ car: Car; mov?: Mov }>;
+  exportReport: (payload: ReportExportPayload) => Promise<ReportExportResponse>;
   addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
   deletePago: (id: number) => Promise<void>;
 }
@@ -224,6 +250,14 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     [],
   );
 
+  const updateCar = useCallback(async (id: string, patch: Partial<Car>) => {
+    const dto: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) dto[k] = v instanceof Date ? isoDate(v) : v;
+    const car = toCar(await req<CarDto>(`/api/cars/${id}`, { method: 'PATCH', body: JSON.stringify(dto) }));
+    setCars((cs) => cs.map((c) => (c.id === id ? car : c)));
+    return car;
+  }, []);
+
   const assignDriver = useCallback(async (id: string, payload: AssignDriverPayload) => {
     const r = await req<{ car: CarDto }>(`/api/cars/${id}/asignar-chofer`, {
       method: 'POST',
@@ -262,6 +296,22 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     setMovs((ms) => [toMov(r.mov), ...ms]);
   }, []);
 
+  const registrarService = useCallback(async (id: string, datos: RegistrarServicePayload) => {
+    const fd = new FormData();
+    fd.append('fecha', datos.fecha);
+    fd.append('descripcion', datos.descripcion);
+    if (datos.kilometraje !== undefined) fd.append('kilometraje', String(datos.kilometraje));
+    if (datos.costo !== undefined) fd.append('costo', String(datos.costo));
+    if (datos.comprobante) fd.append('comprobante', datos.comprobante);
+    const r = await req<{ car: CarDto; mov?: MovDto }>(`/api/cars/${id}/service`, { method: 'POST', body: fd });
+    const car = toCar(r.car);
+    setCars((cs) => cs.map((c) => (c.id === id ? car : c)));
+    if (r.mov) setMovs((ms) => [toMov(r.mov!), ...ms]);
+    return { car, ...(r.mov ? { mov: toMov(r.mov) } : {}) };
+  }, []);
+
+  const exportReport = useCallback((payload: ReportExportPayload) => exportFleetReport(payload), []);
+
   // Un pago no se aplica en optimista: cuánto cancela de cada cuota lo decide
   // la imputación sobre el conjunto, así que hasta que el servidor no lo
   // confirma no hay forma de saber qué mostrar.
@@ -284,11 +334,14 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     cargando,
     error,
     patchCar,
+    updateCar,
     previewDriverCredentials,
     assignDriver,
     addCar,
     deleteCar,
     mandarATaller,
+    registrarService,
+    exportReport,
     addPago,
     deletePago,
   };

@@ -11,6 +11,7 @@ import { Flota } from './screens/Flota';
 import { Choferes } from './screens/Choferes';
 import { Alertas } from './screens/Alertas';
 import { Reportes } from './screens/Reportes';
+import { Movimientos } from './screens/Movimientos';
 import { Cobros } from './screens/Cobros';
 import { DetailDrawer } from './components/DetailDrawer';
 import { DriverDetail } from './components/DriverDetail';
@@ -21,6 +22,11 @@ import { CarModal } from './components/CarModal';
 import { DriverModal } from './components/DriverModal';
 import { PagoModal } from './components/PagoModal';
 import { Toast } from './components/Toast';
+import { EditCarModal } from './components/EditCarModal';
+import { ServiceModal } from './components/ServiceModal';
+import { TODAY, isoLocal } from './format';
+
+const currentMonthStart = isoLocal(new Date(TODAY.getFullYear(), TODAY.getMonth(), 1, 12));
 
 const initialState: UIState = {
   period: 'mes',
@@ -30,8 +36,8 @@ const initialState: UIState = {
   hide: false,
   nav: 'resumen',
   toast: '',
-  cFrom: '2026-08-01',
-  cTo: '2026-08-28',
+  cFrom: currentMonthStart,
+  cTo: isoLocal(TODAY),
   movType: 'todos',
   movCat: 'todas',
   alertKind: 'todas',
@@ -42,6 +48,10 @@ const initialState: UIState = {
   alertQ: '',
   pendQ: '',
   movQ: '',
+  movMonth: isoLocal(TODAY).slice(0, 7),
+  movPage: 1,
+  movVehicle: 'todos',
+  movExpanded: null,
   modal: null,
   ncar: blankCar(),
   ndrv: blankDrv(),
@@ -54,6 +64,8 @@ const initialState: UIState = {
   npago: null,
   detailCarId: null,
   confirm: null,
+  editCar: null,
+  service: null,
 };
 
 function App() {
@@ -110,6 +122,7 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
         {v.sFlota && <Flota v={v} />}
         {v.sChoferes && <Choferes v={v} />}
         {v.sAlertas && <Alertas v={v} />}
+        {v.sMovimientos && <Movimientos v={v} />}
         {v.sReportes && <Reportes v={v} />}
         {v.sCobros && <Cobros v={v} />}
       </main>
@@ -120,6 +133,8 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
       <Confirm v={v} />
       <TallerModal v={v} />
       <CarModal v={v} />
+      <EditCarModal v={v} />
+      <ServiceModal v={v} />
       <DriverModal v={v} />
       <PagoModal v={v} />
       <Toast v={v} />

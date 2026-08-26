@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef } from 'react';
-import type { Car, CarLocation, Mov, Pago, UIState, NewCarForm, NewDriverForm } from './types';
-import type { DriverCredentials, NuevoCarPayload, NuevoPagoPayload } from './api';
+import type { Car, CarLocation, Mov, Pago, UIState, NewCarForm, NewDriverForm, EditCarForm } from './types';
+import type { DriverCredentials, NuevoCarPayload, NuevoPagoPayload, ReportExportPayload } from './api';
 import type { Aplicacion } from './cobranza';
 import { imputar } from './cobranza';
 import { CATS, CATCOLORS } from './data';
@@ -236,6 +236,36 @@ export interface MovRow {
   manoObra?: number;
 }
 
+export interface LedgerRow {
+  id: string;
+  dateLbl: string;
+  type: 'ingreso' | 'egreso';
+  typeLbl: string;
+  vehicle: string;
+  driver: string;
+  desc: string;
+  category: string;
+  note: string;
+  medio: string;
+  amount: string;
+  amountFg: string;
+  comprobante: string;
+  items: { nombre: string; cantidad: number; costoUnitario: number; subtotal: number }[];
+  manoObra: number;
+}
+
+export interface MovementMonth {
+  key: string;
+  label: string;
+  year: string;
+  count: string;
+  income: string;
+  expense: string;
+  net: string;
+  active: boolean;
+  select: () => void;
+}
+
 export interface DetailDoc {
   label: string;
   txt: string;
@@ -299,6 +329,8 @@ export interface DetailView {
   svcFg: string;
   svcPct: string;
   svcBar: string;
+  kilometraje: string;
+  kilometrajeSub: string;
   /** Intervalo en edición: el campo muestra el borrador, no lo guardado. */
   svcCada: string;
   svcSetCada: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -312,6 +344,7 @@ export interface DetailView {
   months: DetailMonth[];
   movs: DetailMov[];
   markService: () => void;
+  verHistorial: () => void;
   editDriver: () => void;
   clearDriver: () => void;
   borrar: () => void;
@@ -333,6 +366,7 @@ export interface View {
   sAlertas: boolean;
   sReportes: boolean;
   sCobros: boolean;
+  sMovimientos: boolean;
   navItems: NavItem[];
   periodChips: Chip[];
   isCustom: boolean;
@@ -349,6 +383,7 @@ export interface View {
   goAlertas: () => void;
   goReportes: () => void;
   goCobros: () => void;
+  goMovimientos: (carId?: string) => void;
 
   fleetFilters: Chip[];
   cols: ColItem[];
@@ -410,6 +445,22 @@ export interface View {
   movIngTotal: string;
   movNetTotal: string;
   exportar: () => void;
+  exportarPdf: () => void;
+  movementMonths: MovementMonth[];
+  movementRows: LedgerRow[];
+  movementTotalRows: number;
+  movementPage: number;
+  movementPageCount: number;
+  movementMonth: string;
+  movementExpandedId: string | null;
+  movementVehicle: string;
+  movementVehicleChips: Chip[];
+  movementTypeChips: Chip[];
+  movementCategoryChips: Chip[];
+  setMovementVehicle: (id: string) => void;
+  movementPrevPage: () => void;
+  movementNextPage: () => void;
+  movementOpenRow: (id: string) => void;
 
   hasDetail: boolean;
   detail: DetailView;
@@ -440,6 +491,20 @@ export interface View {
   closeDriverDetail: () => void;
 
   carModal: boolean;
+  editCarModal: boolean;
+  editCar: EditCarForm;
+  editCarChange: <K extends keyof EditCarForm>(key: K, value: EditCarForm[K]) => void;
+  editCarSave: () => void;
+  editCarClose: () => void;
+  editCarDelete: () => void;
+  serviceModal: boolean;
+  service: UIState['service'];
+  serviceVehicle: string;
+  serviceSet: (patch: Partial<NonNullable<UIState['service']>>) => void;
+  serviceNext: () => void;
+  serviceBack: () => void;
+  serviceSave: () => void;
+  serviceClose: () => void;
   drvModal: boolean;
   ncar: NewCarForm;
   ch: Record<Exclude<keyof NewCarForm, 'serviceUnidad' | 'lastService' | 'seguroVence'>, (e: React.ChangeEvent<HTMLInputElement>) => void>;
@@ -513,6 +578,10 @@ async function downloadXlsx(filename: string, sheetName: string, headerIn: strin
   a.click();
   URL.revokeObjectURL(url);
 }
+
+// La exportación usa el endpoint del servidor; se conserva esta función para
+// compatibilidad con el código histórico mientras se termina de retirar.
+void downloadXlsx;
 
 function blankCar(): NewCarForm {
   return {
@@ -634,19 +703,26 @@ const iniDia = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
 function range(state: UIState) {
   const k = state.period;
   if (k === 'semana') return { start: addD(TODAY, -6), end: finDia(TODAY), label: 'Últimos 7 días', short: '7 días' };
-  if (k === 'jul') return { start: new Date(2026, 6, 1), end: new Date(2026, 6, 31, 23, 59), label: 'Julio 2026', short: 'julio' };
+  if (k === 'jul') {
+    const start = new Date(TODAY.getFullYear(), TODAY.getMonth() - 1, 1, 12);
+    const end = finDia(new Date(TODAY.getFullYear(), TODAY.getMonth(), 0, 12));
+    return { start, end, label: `${MESES_LARGO[start.getMonth()]} ${start.getFullYear()}`, short: 'mes anterior' };
+  }
   if (k === 'd90') return { start: addD(TODAY, -89), end: finDia(TODAY), label: 'Últimos 90 días', short: '90 días' };
   if (k === 'custom') {
     let start = new Date(state.cFrom + 'T00:00:00');
     let end = new Date(state.cTo + 'T23:59:59');
     if (isNaN(+start) || isNaN(+end) || end < start) {
-      start = new Date(2026, 7, 1);
+      start = new Date(TODAY.getFullYear(), TODAY.getMonth(), 1);
       end = finDia(TODAY);
     }
     return { start, end, label: dLbl(start) + ' – ' + dLbl(end), short: 'el rango' };
   }
-  return { start: new Date(2026, 7, 1), end: finDia(TODAY), label: 'Agosto 2026', short: 'agosto' };
+  const start = new Date(TODAY.getFullYear(), TODAY.getMonth(), 1, 12);
+  return { start, end: finDia(TODAY), label: `${MESES_LARGO[TODAY.getMonth()]} ${TODAY.getFullYear()}`, short: MESES_LARGO[TODAY.getMonth()] };
 }
+
+const MESES_LARGO = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
 export function useFleetView(
   cars: Car[],
@@ -657,11 +733,14 @@ export function useFleetView(
   update: (patch: Partial<UIState> | ((s: UIState) => Partial<UIState>)) => void,
   persist: {
     patchCar: (id: string, patch: Partial<Car>) => void;
+    updateCar: (id: string, patch: Partial<Car>) => Promise<Car>;
     previewDriverCredentials: (id: string, driver: string) => Promise<DriverCredentials>;
     assignDriver: (id: string, payload: DriverCredentials & { driver: string; cuota: number }) => Promise<Car>;
     addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
     deleteCar: (id: string) => Promise<{ plate: string; movs: number }>;
     mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: File | null }) => Promise<void>;
+    registrarService: (id: string, datos: { fecha: string; descripcion: string; kilometraje?: number; costo?: number; comprobante?: File | null }) => Promise<{ car: Car; mov?: Mov }>;
+    exportReport: (payload: ReportExportPayload) => Promise<{ file: { name: string; url: string; mimeType: string }; counts: { ingresos: number; gastos: number; total: number } }>;
     addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
     deletePago: (id: number) => Promise<void>;
   },
@@ -677,7 +756,13 @@ export function useFleetView(
   const go = (nav: UIState['nav'], extra?: Partial<UIState>) => update({ nav, ...(extra || {}) });
 
   const patchCar = persist.patchCar;
-  const locationByCar = new Map(locations.map((location) => [location.carId, location]));
+  // La API entrega las posiciones de cada auto de la más nueva a la más vieja.
+  // No usar directamente `new Map(entries)`: eso terminaría sobrescribiendo la
+  // posición actual con la última fila (la más antigua) del mismo vehículo.
+  const locationByCar = new Map<string, CarLocation>();
+  locations.forEach((location) => {
+    if (!locationByCar.has(location.carId)) locationByCar.set(location.carId, location);
+  });
 
   const locationView = (location: CarLocation | undefined): DetailView['location'] => {
     if (!location) return null;
@@ -1019,8 +1104,8 @@ export function useFleetView(
       net: fmtShort(x.net, st.hide),
       netColor: statusColor(x.net, UMBRAL_VERDE),
       netPct: Math.round((Math.abs(x.net) / maxNet) * 100) + '%',
-      gpsTag: x.c.gpsTag || 'Sin GPS',
-      gpsFg: x.c.gpsTag ? '#6b665c' : '#a09a8d',
+       gpsTag: x.c.gpsTag || (locationByCar.has(x.c.id) ? 'Ubicación activa' : 'Sin GPS'),
+       gpsFg: x.c.gpsTag || locationByCar.has(x.c.id) ? '#6b665c' : '#a09a8d',
       tag: t[0],
       tagBg: t[1],
       tagFg: t[2],
@@ -1046,13 +1131,204 @@ export function useFleetView(
   const movCatTotal = Object.values(movTot.byCat).reduce((a, b) => a + b, 0) || 1;
   const movCatMax = Math.max(...CATS.map((c) => movTot.byCat[c] || 0), 1);
 
+  type RealMovement = {
+    id: string;
+    date: Date;
+    type: 'ingreso' | 'egreso';
+    carId: string | null;
+    vehicle: string;
+    driver: string;
+    desc: string;
+    category: string;
+    note: string;
+    medio: string;
+    amount: number;
+    comprobante: string;
+    items: { nombre: string; cantidad: number; costoUnitario: number; subtotal: number }[];
+    manoObra: number;
+  };
+
+  const editCarFrom = (c: Car): EditCarForm => ({
+    plate: c.plate,
+    model: c.model,
+    year: String(c.year),
+    gpsTag: c.gpsTag,
+    kilometraje: c.kilometraje ? String(c.kilometraje) : '',
+    lastService: c.lastServiceDate.getFullYear() > 1970 ? isoLocal(c.lastServiceDate) : '',
+    serviceCada: c.serviceCada ? String(c.serviceCada) : '',
+    serviceUnidad: c.serviceUnidad,
+    seguroVence: c.seguroDate.getFullYear() > 1970 ? isoLocal(c.seguroDate) : '',
+    seguroNombre: c.seguroNombre,
+    seguroCada: c.seguroCada ? String(c.seguroCada) : '',
+    estado: c.estado,
+    driver: c.driver === 'Sin chofer' ? '' : c.driver,
+    cuota: c.cuota ? miles(String(c.cuota)) : '',
+    section: 'general',
+    guardando: false,
+  });
+  const editCar = st.editCar || {
+    plate: '', model: '', year: '', gpsTag: '', kilometraje: '', lastService: '', serviceCada: '', serviceUnidad: 'meses' as const,
+    seguroVence: '', seguroNombre: '', seguroCada: '', estado: 'activo' as const, driver: '', cuota: '', section: 'general' as const, guardando: false,
+  };
+  const editCarChange = <K extends keyof EditCarForm>(key: K, value: EditCarForm[K]) => update((s) => ({ editCar: s.editCar ? { ...s.editCar, [key]: value } : s.editCar }));
+  const editCarSave = () => {
+    const f = st.editCar;
+    if (!f || f.guardando) return;
+    const c = cars.find((x) => x.id === st.detailId);
+    if (!c) return;
+    const year = numFromInput(f.year);
+    const km = f.kilometraje.trim() ? numFromInput(f.kilometraje) : undefined;
+    const serviceCada = f.serviceCada.trim() ? numFromInput(f.serviceCada) : 0;
+    const seguroCada = f.seguroCada.trim() ? numFromInput(f.seguroCada) : 0;
+    const serviceStarted = Boolean(f.lastService || f.serviceCada);
+    const insuranceStarted = Boolean(f.seguroNombre.trim() || f.seguroVence || f.seguroCada);
+    if (!f.plate.trim() || !f.model.trim()) return toast('Completá chapa y marca/modelo');
+    if (!Number.isInteger(year) || year < 1951 || year > 2099) return toast('El año no es válido');
+    if (km !== undefined && (km < c.kilometraje || km > 10_000_000)) return toast('El kilometraje no puede disminuir');
+    if (serviceStarted && (!f.lastService || !serviceCada)) return toast('Completá fecha e intervalo del service');
+    if (insuranceStarted && (!f.seguroNombre.trim() || !f.seguroVence || !seguroCada)) return toast('Completá todos los datos del seguro');
+    if (f.driver.trim() && !numFromInput(f.cuota)) return toast('Indicá la cuota diaria del chofer');
+    const patch: Partial<Car> = {
+      plate: f.plate.trim().toUpperCase(),
+      model: f.model.trim(),
+      year,
+      gpsTag: f.gpsTag.trim(),
+      estado: f.estado === 'taller' && c.estado !== 'taller' ? c.estado : f.estado,
+      serviceCada,
+      serviceUnidad: f.serviceUnidad,
+      lastServiceDate: f.lastService ? new Date(f.lastService + 'T12:00:00') : new Date('1970-01-01T12:00:00'),
+      seguroNombre: f.seguroNombre.trim(),
+      seguroDate: f.seguroVence ? new Date(f.seguroVence + 'T12:00:00') : new Date('1970-01-01T12:00:00'),
+      seguroCada,
+      ...(km !== undefined ? { kilometraje: km } : {}),
+    };
+    const targetDriver = f.driver.trim();
+    const currentDriver = c.driver === 'Sin chofer' ? '' : c.driver;
+    if (targetDriver === currentDriver) patch.cuota = targetDriver ? numFromInput(f.cuota) : 0;
+    else if (!targetDriver) {
+      patch.driver = 'Sin chofer';
+      patch.cuota = 0;
+    }
+    update({ editCar: { ...f, guardando: true } });
+    persist.updateCar(c.id, patch)
+      .then(() => {
+        if (targetDriver && targetDriver !== currentDriver) {
+          update({ editCar: null, modal: 'drv', ndrv: { name: targetDriver, carId: c.id, cuota: f.cuota }, driverCredentials: null, driverCredentialsLoading: false });
+          return;
+        }
+        if (f.estado === 'taller' && c.estado !== 'taller') {
+          update({ editCar: null, taller: { carId: c.id, razon: '', monto: '', archivo: null, guardando: false } });
+          return;
+        }
+        update({ editCar: null });
+        toast('Datos del vehículo actualizados');
+      })
+      .catch((e: Error) => update({ editCar: { ...f, guardando: false }, toast: 'No se pudo guardar: ' + e.message }));
+  };
+  const serviceSet = (patch: Partial<NonNullable<UIState['service']>>) => update((s) => ({ service: s.service ? { ...s.service, ...patch } : s.service }));
+  const serviceNext = () => {
+    const s = st.service;
+    if (!s || s.guardando) return;
+    if (s.step === 0 && (!s.fecha || !s.descripcion.trim())) return toast('Completá la fecha y qué se hizo');
+    if (s.step < 2) serviceSet({ step: s.step + 1 });
+  };
+  const serviceBack = () => {
+    if (!st.service || st.service.guardando) return;
+    if (st.service.step === 0) update({ service: null });
+    else serviceSet({ step: st.service.step - 1 });
+  };
+  const serviceSave = () => {
+    const s = st.service;
+    const c = s && cars.find((x) => x.id === s.carId);
+    if (!s || !c || s.guardando) return;
+    const km = s.kilometraje.trim() ? numFromInput(s.kilometraje) : undefined;
+    const costo = s.costo.trim() ? numFromInput(s.costo) : undefined;
+    if (!s.fecha || s.fecha > isoLocal(TODAY) || !s.descripcion.trim()) return toast('Revisá los datos del service');
+    if (km !== undefined && (km < c.kilometraje || km > 10_000_000)) return toast('El kilometraje no puede disminuir');
+    update({ service: { ...s, guardando: true } });
+    persist.registrarService(c.id, { fecha: s.fecha, descripcion: s.descripcion.trim(), kilometraje: km, costo, comprobante: s.comprobante })
+      .then(() => update({ service: null, toast: costo ? 'Service registrado y gasto agregado' : 'Service registrado' }))
+      .catch((e: Error) => update({ service: { ...s, guardando: false }, toast: 'No se pudo registrar: ' + e.message }));
+  };
+  const realMovements: RealMovement[] = [
+    ...pagos
+      .filter((p) => p.tipo === 'pago')
+      .map((p) => {
+        const c = p.carId ? carDe.get(p.carId) : undefined;
+        return {
+          id: 'pago-' + p.id,
+          date: p.fecha,
+          type: 'ingreso' as const,
+          carId: p.carId,
+          vehicle: c ? c.plate + ' · ' + c.model : 'Sin vehículo asociado',
+          driver: p.driver || 'Sin chofer',
+          desc: 'Pago recibido',
+          category: 'Pago',
+          note: p.nota || '',
+          medio: p.medio || 'Sin especificar',
+          amount: p.monto,
+           comprobante: p.comprobante ? '/api/comprobantes/' + p.comprobante.id : '',
+          items: [],
+          manoObra: 0,
+        };
+      }),
+    ...movs
+      .filter((m) => m.type === 'egreso')
+      .map((m) => {
+        const c = carDe.get(m.carId);
+        return {
+          id: 'egreso-' + m.id,
+          date: m.date,
+          type: 'egreso' as const,
+          carId: m.carId,
+          vehicle: c ? c.plate + ' · ' + c.model : 'Vehículo eliminado',
+          driver: c?.driver || 'Sin chofer',
+          desc: m.desc,
+          category: m.cat || 'Otros',
+          note: '',
+          medio: '',
+          amount: m.amount,
+          comprobante: m.comprobante ? '/api/comprobantes/' + m.comprobante.id : '',
+          items: m.items || [],
+          manoObra: m.manoObra || 0,
+        };
+      }),
+  ].sort((a, b) => +b.date - +a.date || b.id.localeCompare(a.id));
+
+  const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const monthDate = (key: string) => new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1, 12);
+  const monthLabel = (key: string) => {
+    const d = monthDate(key);
+    return `${MESES_LARGO[d.getMonth()]} ${d.getFullYear()}`;
+  };
+  const monthKeys = new Set(realMovements.map((m) => monthKey(m.date)));
+  monthKeys.add(monthKey(TODAY));
+  const movementMonths = [...monthKeys]
+    .sort((a, b) => b.localeCompare(a))
+    .map((key) => {
+      const rows = realMovements.filter((m) => monthKey(m.date) === key);
+      const income = rows.filter((m) => m.type === 'ingreso').reduce((sum, m) => sum + m.amount, 0);
+      const expense = rows.filter((m) => m.type === 'egreso').reduce((sum, m) => sum + m.amount, 0);
+      return { key, rows, income, expense };
+    });
+  const selectedMovementMonth = monthKeys.has(st.movMonth) ? st.movMonth : monthKey(TODAY);
+  const selectedMonth = movementMonths.find((m) => m.key === selectedMovementMonth) || movementMonths[0];
+  const filteredRealMovements = (selectedMonth?.rows || []).filter((m) => {
+    const categoryOk = st.movCat === 'todas' || (m.type === 'egreso' && m.category === st.movCat);
+    return (st.movType === 'todos' || m.type === st.movType) && (st.movVehicle === 'todos' || m.carId === st.movVehicle) && categoryOk && matches(st.movQ, m.desc, m.category, m.vehicle, m.driver, m.note, m.medio);
+  });
+  const movementPageCount = Math.max(1, Math.ceil(filteredRealMovements.length / 20));
+  const movementPage = Math.min(Math.max(1, st.movPage), movementPageCount);
+  const movementPageRows = filteredRealMovements.slice((movementPage - 1) * 20, movementPage * 20);
+
   const nav = st.nav;
   const TITLES: Record<string, [string, string]> = {
     resumen: [r.label, 'Resumen'],
     flota: ['Vehículos', 'Flota'],
     choferes: ['Choferes', 'Equipo'],
     alertas: ['Alertas', 'Mantenimiento'],
-    reportes: ['Reportes', 'Movimientos'],
+    movimientos: ['Movimientos', 'Libro de caja'],
+    reportes: ['Reportes', 'Resumen financiero'],
     cobros: ['Cobros', 'Ingresos'],
   };
   const SUBS: Record<string, string> = {
@@ -1060,10 +1336,20 @@ export function useFleetView(
     flota: sorted.length + ' vehículos en la vista · tocá una columna para ordenar',
     choferes: new Set(active.filter((c) => c.driver !== 'Sin chofer').map((c) => claveDeCar(c))).size + ' choferes asignados · cobros de ' + r.short,
     alertas: alertList.length + ' avisos de mantenimiento y documentos',
-    reportes: movsSorted.length + ' movimientos en ' + r.short,
+    movimientos: realMovements.length + ' movimientos reales registrados',
+    reportes: 'Ingresos reales, gastos y resultado de ' + r.short,
     cobros: 'Cobrado ' + fmt(tot.ing, st.hide) + ' de ' + fmt(tot.fact, st.hide) + ' facturado en ' + r.short + (pendTotal ? ' · deben ' + fmt(pendTotal, st.hide) : ''),
   };
 
+  const openEditCar = () => {
+    const c = cars.find((x) => x.id === st.detailId);
+    if (c) update({ editCar: editCarFrom(c) });
+  };
+  const editCarClose = () => update({ editCar: null });
+  const editCarDelete = () => {
+    const c = cars.find((x) => x.id === st.detailId);
+    if (c) update({ editCar: null, confirm: { tipo: 'borrarAuto', carId: c.id } });
+  };
   const detail: DetailView = (() => {
     const c = cars.find((c2) => c2.id === st.detailId);
     if (!c) {
@@ -1089,8 +1375,10 @@ export function useFleetView(
         svcLbl: '',
         svcSub: '',
         svcFg: '',
-        svcPct: '0%',
-        svcBar: '',
+         svcPct: '0%',
+         svcBar: '',
+         kilometraje: '',
+         kilometrajeSub: '',
         svcCada: '',
         svcSetCada: () => {},
         svcUnidadOpts: [],
@@ -1103,6 +1391,7 @@ export function useFleetView(
         months: [],
         movs: [],
         markService: () => {},
+        verHistorial: () => {},
         editDriver: () => {},
         clearDriver: () => {},
         borrar: () => {},
@@ -1115,9 +1404,9 @@ export function useFleetView(
     const MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
     const months: { label: string; ing: number; egr: number; net: number }[] = [];
     for (let k = 5; k >= 0; k--) {
-      const d = new Date(2026, 7 - k, 1);
+      const d = new Date(TODAY.getFullYear(), TODAY.getMonth() - k, 1);
       const m0 = d.getMonth();
-      const enMes = (f: Date) => f.getMonth() === m0 && f.getFullYear() === 2026;
+      const enMes = (f: Date) => f.getMonth() === m0 && f.getFullYear() === d.getFullYear();
       const s2 = stats(movs, aplicaciones, (m) => m.carId === c.id && enMes(m.date), (a) => a.carId === c.id && enMes(a.fecha), pagos, (p) => p.carId === c.id && enMes(p.fecha));
       months.push({ label: MES[m0], ing: s2.ing, egr: s2.egr, net: s2.net });
     }
@@ -1138,36 +1427,7 @@ export function useFleetView(
     const borOk = bor.cada !== '' && Number.isInteger(borN) && borN >= 1 && borN <= SVC_MAX;
     const borCambio = borOk && (borN !== c.serviceCada || bor.unidad !== c.serviceUnidad);
     const editarSvc = (patch: Partial<typeof bor>) => update({ svcEdit: { ...bor, ...patch } });
-    const agregarDatos = () => {
-      if (!configuredService) {
-        const fecha = window.prompt('Último service (AAAA-MM-DD)', isoLocal(TODAY))?.trim() ?? '';
-        const cada = numFromInput(window.prompt('Service cada cuántos días/meses', '') ?? '');
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || fecha > isoLocal(TODAY) || !cada) {
-          toast('Completá una fecha válida y el intervalo del service');
-          return;
-        }
-        patchCar(c.id, { lastServiceDate: new Date(fecha + 'T12:00:00'), serviceCada: cada, serviceUnidad: 'meses' });
-      }
-      if (!c.seguroNombre.trim() || c.seguroCada <= 0 || c.seguroDate.getFullYear() <= 1970) {
-        const nombre = window.prompt('Nombre del seguro', c.seguroNombre)?.trim() ?? '';
-        const fecha = window.prompt('Vencimiento del seguro (AAAA-MM-DD)', '')?.trim() ?? '';
-        const cada = numFromInput(window.prompt('Seguro: renovar cada cuántos meses', '') ?? '');
-        if (!nombre || !/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !cada || cada > SEG_CADA_MAX) {
-          toast('Completá nombre, vencimiento e intervalo del seguro');
-          return;
-        }
-        patchCar(c.id, { seguroNombre: nombre, seguroDate: new Date(fecha + 'T12:00:00'), seguroCada: cada });
-      }
-      if (!c.kilometrajeActualizado) {
-        const km = numFromInput(window.prompt('Kilometraje actual', '') ?? '');
-        if (!km) {
-          toast('Ingresá un kilometraje válido');
-          return;
-        }
-        patchCar(c.id, { kilometraje: km });
-      }
-      toast('Datos del auto actualizados');
-    };
+    const agregarDatos = openEditCar;
 
     return {
       plate: c.plate,
@@ -1183,7 +1443,7 @@ export function useFleetView(
       net: fmt(cs.net, st.hide),
       netFg: statusColor(cs.net, UMBRAL_VERDE),
       cuotaFmt: c.cuota ? fmt(c.cuota, st.hide) : '—',
-      gpsTag: c.gpsTag || 'Sin GPS',
+      gpsTag: c.gpsTag ? 'Identificador GPS: ' + c.gpsTag : 'Identificador GPS: no configurado',
       gpsFg: c.gpsTag ? '#3d3a34' : '#a09a8d',
       location: locationView(locationByCar.get(c.id)),
       cobradas: cuotasCobradas + ' cuotas cobradas',
@@ -1191,8 +1451,10 @@ export function useFleetView(
       svcLbl: configuredService ? (dLeft < 0 ? 'Service vencido hace ' + durLbl(dLeft) : dLeft === 0 ? 'El service vence hoy' : 'Próximo service en ' + durLbl(dLeft)) + ' · ' + dLblFull(svcNextDate(c)) : 'Datos de service sin cargar',
       svcSub: configuredService ? 'Último service: ' + dLblFull(c.lastServiceDate) : 'Agregá el último service y su intervalo',
       svcFg: configuredService ? (dLeft < 0 ? COLORS.neg : dLeft <= SVC_AVISO_DIAS ? COLORS.warn : COLORS.pos) : COLORS.warn,
-      svcPct: configuredService ? Math.max(4, Math.min(100, Math.round(((svcTotalDias - dLeft) / svcTotalDias) * 100))) + '%' : '0%',
-      svcBar: configuredService ? (dLeft < 0 ? COLORS.neg : dLeft <= SVC_AVISO_DIAS ? COLORS.warn : COLORS.pos) : '#e8a13a',
+       svcPct: configuredService ? Math.max(4, Math.min(100, Math.round(((svcTotalDias - dLeft) / svcTotalDias) * 100))) + '%' : '0%',
+       svcBar: configuredService ? (dLeft < 0 ? COLORS.neg : dLeft <= SVC_AVISO_DIAS ? COLORS.warn : COLORS.pos) : '#e8a13a',
+       kilometraje: c.kilometraje ? c.kilometraje.toLocaleString('es-PY') + ' km' : 'No informado',
+       kilometrajeSub: c.kilometrajeActualizado ? 'Actualizado el ' + dLbl(new Date(c.kilometrajeActualizado + 'T12:00:00')) : 'Todavía no se cargó',
       svcCada: bor.cada,
       // Solo dígitos: así "no es un número" deja de ser un estado posible y el
       // único error que queda es el rango.
@@ -1264,32 +1526,26 @@ export function useFleetView(
         ingPct: Math.round((m.ing / mMax) * 100) + '%',
         egrPct: Math.round((m.egr / mMax) * 100) + '%',
       })),
-      movs: movs
+      movs: realMovements
         .filter((m) => m.carId === c.id)
-        .sort((a, b) => +b.date - +a.date)
         .slice(0, 8)
-        .map((m) => {
-          const inc = m.type === 'ingreso';
-          const cob = cobradoDe(m);
-          const deuda = inc ? m.amount - cob : 0;
-          return {
-            dateLbl: dLbl(m.date),
-            desc: m.desc,
-            // En un cobro a medias el monto que se muestra es el que entró, y el
-            // subtítulo aclara cuánto falta: si no, un "+540k" con 270k cobrados
-            // se lee como si hubiera pagado todo.
-            sub: inc ? (deuda > 0 ? (cob > 0 ? 'Pagó ' + fmtShort(cob, st.hide) + ' de ' + fmtShort(m.amount, st.hide) + ' · debe ' + fmtShort(deuda, st.hide) : 'Sin cobrar · debe ' + fmtShort(deuda, st.hide)) : 'Cobrado') : m.cat!,
-            comprobante: m.comprobante ? '/api/comprobantes/' + m.comprobante.id : '',
-            amt: (inc ? '+' : '−') + fmtShort(inc ? cob : m.amount, st.hide),
-            amtFg: inc ? COLORS.pos : COLORS.neg,
-            iconBg: inc ? '#eef4f0' : '#fdeeea',
-            iconFg: inc ? '#2e7d5b' : '#a8412f',
-            sign: inc ? '↓' : '↑',
-          };
-        }),
+        .map((m) => ({
+          dateLbl: dLbl(m.date),
+          desc: m.desc,
+          sub: m.type === 'ingreso' ? m.driver + (m.medio ? ' · ' + m.medio : '') : m.category,
+          comprobante: m.comprobante,
+          amt: (m.type === 'ingreso' ? '+' : '−') + fmtShort(m.amount, st.hide),
+          amtFg: m.type === 'ingreso' ? COLORS.pos : COLORS.neg,
+          iconBg: m.type === 'ingreso' ? '#eef4f0' : '#fdeeea',
+          iconFg: m.type === 'ingreso' ? '#2e7d5b' : '#a8412f',
+          sign: m.type === 'ingreso' ? '↓' : '↑',
+        })),
+      verHistorial: () => {
+        const latest = realMovements.find((m) => m.carId === c.id);
+        update({ detailId: null, nav: 'movimientos', movVehicle: c.id, movMonth: latest ? monthKey(latest.date) : monthKey(TODAY), movPage: 1, movExpanded: null });
+      },
       markService: () => {
-        patchCar(c.id, { lastServiceDate: TODAY });
-        toast('Service registrado el ' + dLblFull(TODAY) + ' · próximo en ' + svcIntervalo(c.serviceCada, c.serviceUnidad));
+        return update({ service: { carId: c.id, step: 0, fecha: isoLocal(TODAY), descripcion: '', kilometraje: '', costo: '', comprobante: null, guardando: false } });
       },
       editDriver: () =>
         update({
@@ -1421,6 +1677,7 @@ export function useFleetView(
     sFlota: nav === 'flota',
     sChoferes: nav === 'choferes',
     sAlertas: nav === 'alertas',
+    sMovimientos: nav === 'movimientos',
     sReportes: nav === 'reportes',
     sCobros: nav === 'cobros',
     navItems: (
@@ -1430,6 +1687,7 @@ export function useFleetView(
         ['choferes', 'Choferes', 'M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8M4 21c0-4 3.6-6 8-6s8 2 8 6', String(active.filter((c) => c.driver !== 'Sin chofer').length)],
         ['alertas', 'Alertas', 'M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01', String(alertList.length)],
         ['cobros', 'Cobros', 'M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4', String(pendMovs.length)],
+        ['movimientos', 'Movimientos', 'M4 6h16M4 12h16M4 18h10', String(realMovements.length)],
         ['reportes', 'Reportes', 'M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7ZM14 2v4a2 2 0 0 0 2 2h4M16 13H8M16 17H8', ''],
       ] as [UIState['nav'], string, string, string][]
     ).map(([k, label, icon, badge]) => ({
@@ -1445,8 +1703,8 @@ export function useFleetView(
     periodChips: (
       [
         ['semana', '7 días'],
-        ['mes', 'Agosto'],
-        ['jul', 'Julio'],
+        ['mes', MESES_LARGO[TODAY.getMonth()]],
+        ['jul', MESES_LARGO[(TODAY.getMonth() + 11) % 12]],
         ['d90', '90 días'],
         ['custom', 'Rango'],
       ] as [UIState['period'], string][]
@@ -1469,6 +1727,10 @@ export function useFleetView(
     goFlota: () => go('flota'),
     goFlotaTop: () => go('flota', { sortK: 'net', sortDir: -1, filter: 'activo' }),
     goAlertas: () => go('alertas'),
+    goMovimientos: (carId) => {
+      const latest = carId ? realMovements.find((m) => m.carId === carId) : undefined;
+      update({ nav: 'movimientos', movVehicle: carId || 'todos', movMonth: latest ? monthKey(latest.date) : monthKey(TODAY), movPage: 1, movExpanded: null });
+    },
     goReportes: () => go('reportes'),
     goCobros: () => go('cobros'),
 
@@ -1788,6 +2050,16 @@ export function useFleetView(
     movIngTotal: fmt(movTot.ing, st.hide),
     movNetTotal: fmt(movTot.net, st.hide),
     exportar: async () => {
+      const periodPayload = { type: st.period, ...(st.period === 'custom' ? { from: st.cFrom, to: st.cTo } : { to: isoLocal(TODAY) }) } as ReportExportPayload['period'];
+      try {
+        const result = await persist.exportReport({ period: periodPayload, include: 'ambos', carIds: 'todos', categories: 'todas', format: 'xlsx' });
+        const a = document.createElement('a'); a.href = result.file.url; a.download = result.file.name; a.click();
+        toast('Excel descargado · ' + result.counts.total + ' movimientos');
+      } catch (e) { toast('No se pudo exportar: ' + (e as Error).message); }
+      return;
+    },
+      // Legacy client-side export retained below as historical context.
+    /*
       if (!movsFiltered.length) return toast('No hay movimientos para exportar con estos filtros');
       try {
         await downloadXlsx(
@@ -1829,6 +2101,60 @@ export function useFleetView(
         toast('No se pudo generar el Excel — probá de nuevo');
       }
     },
+    */
+    exportarPdf: async () => {
+      const periodPayload = { type: st.period, ...(st.period === 'custom' ? { from: st.cFrom, to: st.cTo } : { to: isoLocal(TODAY) }) } as ReportExportPayload['period'];
+      try {
+        const result = await persist.exportReport({ period: periodPayload, include: 'ambos', carIds: 'todos', categories: 'todas', format: 'pdf' });
+        const a = document.createElement('a'); a.href = result.file.url; a.download = result.file.name; a.click();
+        toast('PDF descargado · ' + result.counts.total + ' movimientos');
+      } catch (e) { toast('No se pudo exportar: ' + (e as Error).message); }
+    },
+
+    movementMonths: movementMonths.map((m) => ({
+      key: monthKey(m.rows[0]?.date || monthDate(m.key)),
+      label: monthLabel(m.key),
+      year: m.key.slice(0, 4),
+      count: String(m.rows.length),
+      income: fmtShort(m.income, st.hide),
+      expense: fmtShort(m.expense, st.hide),
+      net: fmtShort(m.income - m.expense, st.hide),
+      active: m.key === selectedMovementMonth,
+      select: () => update({ movMonth: m.key, movPage: 1, movExpanded: null }),
+    })),
+    movementRows: movementPageRows.map((m) => ({
+      id: m.id,
+      dateLbl: dLbl(m.date),
+      type: m.type,
+      typeLbl: m.type === 'ingreso' ? 'Ingreso' : 'Gasto',
+      vehicle: m.vehicle,
+      driver: m.driver,
+      desc: m.desc,
+      category: m.category,
+      note: m.note,
+      medio: m.medio,
+      amount: (m.type === 'ingreso' ? '+' : '−') + fmtShort(m.amount, st.hide),
+      amountFg: m.type === 'ingreso' ? COLORS.pos : COLORS.neg,
+      comprobante: m.comprobante,
+      items: m.items,
+      manoObra: m.manoObra,
+    })),
+    movementTotalRows: filteredRealMovements.length,
+    movementPage,
+    movementPageCount,
+    movementMonth: selectedMovementMonth,
+    movementExpandedId: st.movExpanded,
+    movementVehicle: st.movVehicle,
+    movementVehicleChips: [
+      { label: 'Todos los vehículos', ...CH(st.movVehicle === 'todos'), pick: () => update({ movVehicle: 'todos', movPage: 1, movExpanded: null }) },
+      ...cars.map((c) => ({ label: c.plate, ...CH(st.movVehicle === c.id), pick: () => update({ movVehicle: c.id, movPage: 1, movExpanded: null }) })),
+    ],
+    movementTypeChips: (['todos', 'ingreso', 'egreso'] as const).map((k) => ({ label: k === 'todos' ? 'Todos' : k === 'ingreso' ? 'Ingresos' : 'Gastos', ...CH(st.movType === k), pick: () => update({ movType: k, movPage: 1, movExpanded: null }) })),
+    movementCategoryChips: [['todas', 'Todas'], ...CATS.map((c) => [c, c] as [string, string])].map(([k, label]) => ({ label, ...CH(st.movCat === k), pick: () => update({ movCat: k, movType: k === 'todas' ? st.movType : 'egreso', movPage: 1, movExpanded: null }) })),
+    setMovementVehicle: (id) => update({ movVehicle: id, movPage: 1, movExpanded: null }),
+    movementPrevPage: () => update({ movPage: Math.max(1, movementPage - 1), movExpanded: null }),
+    movementNextPage: () => update({ movPage: Math.min(movementPageCount, movementPage + 1), movExpanded: null }),
+    movementOpenRow: (id) => update((s) => ({ movExpanded: s.movExpanded === id ? null : id })),
 
     hasDetail: !!st.detailId,
     detail,
@@ -1928,6 +2254,20 @@ export function useFleetView(
     closeDriverDetail: () => update({ detailCarId: null }),
 
     carModal: st.modal === 'car',
+    editCarModal: !!st.editCar,
+    editCar,
+    editCarChange,
+    editCarSave,
+    editCarClose,
+    editCarDelete,
+    serviceModal: !!st.service,
+    service: st.service,
+    serviceVehicle: st.service ? (cars.find((c) => c.id === st.service!.carId)?.plate ?? '') : '',
+    serviceSet,
+    serviceNext,
+    serviceBack,
+    serviceSave,
+    serviceClose: () => update({ service: null }),
     drvModal: st.modal === 'drv',
     ncar: st.ncar,
     ch,
