@@ -37,7 +37,14 @@ const claveChofer = (m: Mov, c?: Car): string => {
 };
 const claveDeCar = (c: Car): string => (c.driverId != null ? String(c.driverId) : c.driver);
 
-function stats(movs: Mov[], aplicaciones: Aplicacion[], fm: (m: Mov) => boolean, fa: (a: Aplicacion) => boolean) {
+function stats(
+  movs: Mov[],
+  aplicaciones: Aplicacion[],
+  fm: (m: Mov) => boolean,
+  fa: (a: Aplicacion) => boolean,
+  pagos?: Pago[],
+  fp?: (p: Pago) => boolean,
+) {
   let fact = 0;
   let egr = 0;
   const byCat: Record<string, number> = {};
@@ -50,9 +57,17 @@ function stats(movs: Mov[], aplicaciones: Aplicacion[], fm: (m: Mov) => boolean,
     }
   });
   let ing = 0;
-  aplicaciones.forEach((a) => {
-    if (a.tipo === 'pago' && fa(a)) ing += a.monto;
-  });
+  if (pagos && fp) {
+    // Cobrado es caja: un pago válido cuenta aunque todavía no haya una
+    // cuota de ingreso contra la cual imputarlo.
+    pagos.forEach((p) => {
+      if (p.tipo === 'pago' && fp(p)) ing += p.monto;
+    });
+  } else {
+    aplicaciones.forEach((a) => {
+      if (a.tipo === 'pago' && fa(a)) ing += a.monto;
+    });
+  }
   return { ing, fact, egr, net: ing - egr, byCat };
 }
 
@@ -246,7 +261,7 @@ interface AlertCardView {
 }
 
 interface MovRowView {
-  id: number;
+  id: string;
   desc: string;
   sub: string;
   icon: string;
@@ -282,6 +297,9 @@ interface DetalleView {
   movs: MovRowView[];
   noMovs: boolean;
   movCount: string;
+  cuotas: MovRowView[];
+  noCuotas: boolean;
+  cuotaCount: string;
   goCobro: () => void;
   goGasto: () => void;
   openEstadoSheet: () => void;
@@ -810,9 +828,11 @@ export function useMobileView(
   const inPrev = (m: Mov) => m.date >= prevStart && m.date <= prevEnd;
   const inRA = (a: Aplicacion) => a.fecha >= r.start && a.fecha <= r.end;
   const inPrevA = (a: Aplicacion) => a.fecha >= prevStart && a.fecha <= prevEnd;
+  const inRP = (p: Pago) => p.fecha >= r.start && p.fecha <= r.end;
+  const inPrevP = (p: Pago) => p.fecha >= prevStart && p.fecha <= prevEnd;
 
-  const tot = stats(movs, aplicaciones, inR, inRA);
-  const prev = stats(movs, aplicaciones, inPrev, inPrevA);
+  const tot = stats(movs, aplicaciones, inR, inRA, pagos, inRP);
+  const prev = stats(movs, aplicaciones, inPrev, inPrevA, pagos, inPrevP);
 
   const alerts = buildAlerts(active);
   const alertsByCar = new Map<string, Alerta[]>();
@@ -822,7 +842,7 @@ export function useMobileView(
     alertsByCar.set(a.car.id, arr);
   });
 
-  const perCarNet = (c: Car) => stats(movs, aplicaciones, (m) => m.carId === c.id && inR(m), (a) => a.carId === c.id && inRA(a)).net;
+  const perCarNet = (c: Car) => stats(movs, aplicaciones, (m) => m.carId === c.id && inR(m), (a) => a.carId === c.id && inRA(a), pagos, (p) => p.carId === c.id && inRP(p)).net;
   const sorted = active.map((c) => ({ c, n: perCarNet(c) })).sort((a, b) => b.n - a.n);
   const maxAbs = Math.max(...sorted.map((x) => Math.abs(x.n)), 1);
 
@@ -894,7 +914,7 @@ export function useMobileView(
     const mo = d.getMonth();
     const fm = (m: Mov) => m.date.getFullYear() === y && m.date.getMonth() === mo;
     const fa = (a: Aplicacion) => a.fecha.getFullYear() === y && a.fecha.getMonth() === mo;
-    monthNets.push(stats(movs, aplicaciones, fm, fa).net);
+    monthNets.push(stats(movs, aplicaciones, fm, fa, pagos, (p) => p.fecha.getFullYear() === y && p.fecha.getMonth() === mo).net);
     monthLbls.push(MESES_ABR[mo][0].toUpperCase() + MESES_ABR[mo].slice(1));
   }
   const tMin = Math.min(...monthNets);
@@ -1067,18 +1087,18 @@ export function useMobileView(
   // ---- detalle -------------------------------------------------------
   let detalle: DetalleView | null = null;
   if (car) {
-    const cs = stats(movs, aplicaciones, (m) => m.carId === car.id && inR(m), (a) => a.carId === car.id && inRA(a));
+    const cs = stats(movs, aplicaciones, (m) => m.carId === car.id && inR(m), (a) => a.carId === car.id && inRA(a), pagos, (p) => p.carId === car.id && inRP(p));
     const carAlerts = alertsByCar.get(car.id) ?? [];
     const carMovs = movs.filter((m) => m.carId === car.id).sort((a, b) => +b.date - +a.date);
-    const timeline: MovRowView[] = carMovs.map((m) => {
+    const cuotaRows: MovRowView[] = carMovs.filter((m) => m.type === 'ingreso').map((m) => {
       const isIng = m.type === 'ingreso';
       const deuda = isIng ? deudaDe(m) : 0;
       const cobradoM = isIng ? cobradoDe(m) : 0;
-      const showTag = isIng && deuda > 0;
-      const tag = showTag ? (cobradoM > 0 ? 'Parcial' : 'Pendiente') : '';
-      const tagColors = tag === 'Parcial' ? ['#fdf0dd', '#9a6a12'] : ['#fdeeea', '#a8412f'];
+      const showTag = isIng;
+      const tag = deuda <= 0 ? 'Pagada' : cobradoM > 0 ? 'Parcial' : 'Pendiente';
+      const tagColors = tag === 'Pagada' ? ['#e7f2ec', '#256b4d'] : tag === 'Parcial' ? ['#fdf0dd', '#9a6a12'] : ['#fdeeea', '#a8412f'];
       return {
-        id: m.id,
+        id: 'cuota-' + m.id,
         desc: m.desc,
         sub: dLbl(m.date) + ' · ' + (isIng ? paidBy(m, car) : (m.cat ?? '') + (m.comprobante ? ' · comprobante' : '')),
         icon: isIng ? '↓' : '↑',
@@ -1091,6 +1111,41 @@ export function useMobileView(
         tagFg: tagColors[1],
       };
     });
+    const movementRowsWithDate: { fecha: Date; row: MovRowView }[] = [
+      ...pagos.filter((p) => p.carId === car.id).map((p) => ({
+        fecha: p.fecha,
+        row: {
+          id: 'pago-' + p.id,
+          desc: p.tipo === 'ajuste' ? 'Ajuste registrado' : 'Pago recibido',
+          sub: dLbl(p.fecha) + ' · ' + (p.driver || car.driver) + (p.nota ? ' · ' + p.nota : ''),
+          icon: '↓',
+          iconBg: '#e7f2ec',
+          color: COLORS.pos,
+          amt: '+' + fmtShort(p.monto),
+          showTag: false,
+          tag: '',
+          tagBg: '#e7f2ec',
+          tagFg: '#256b4d',
+        },
+      })),
+      ...carMovs.filter((m) => m.type === 'egreso').map((m) => ({
+        fecha: m.date,
+        row: {
+          id: 'gasto-' + m.id,
+          desc: m.desc,
+          sub: dLbl(m.date) + ' · ' + (m.cat ?? '') + (m.comprobante ? ' · comprobante' : ''),
+          icon: '↑',
+          iconBg: '#fdeeea',
+          color: COLORS.neg,
+          amt: '−' + fmtShort(m.amount),
+          showTag: false,
+          tag: '',
+          tagBg: '#fdeeea',
+          tagFg: '#a8412f',
+        },
+      })),
+    ];
+    const timeline = movementRowsWithDate.sort((a, b) => +b.fecha - +a.fecha).map((item) => item.row);
     detalle = {
       car,
       plate: car.plate,
@@ -1119,8 +1174,11 @@ export function useMobileView(
       })),
       hasAlerts: carAlerts.length > 0,
       movs: timeline,
-      noMovs: carMovs.length === 0,
-      movCount: carMovs.length + ' en total',
+      noMovs: timeline.length === 0,
+      movCount: timeline.length + ' en total',
+      cuotas: cuotaRows,
+      noCuotas: cuotaRows.length === 0,
+      cuotaCount: cuotaRows.length + ' en total',
       goCobro: () => goRegistrar('cobro', car.id),
       goGasto: () => goRegistrar('gasto', car.id),
       openEstadoSheet: () => update({ estadoSheet: true }),

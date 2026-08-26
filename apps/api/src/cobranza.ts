@@ -54,7 +54,8 @@ export function imputar(cargos: MovRow[], pagos: PagoRow[], choferDe: (m: MovRow
   // `driver_id` si lo traen, o el nombre como fallback en datos previos a ese
   // campo. Así un pago de un chofer que cambió de auto sí cancela las cuotas
   // que le corresponden a su id, no a su nombre de hoy.
-  for (const p of pagos) cuenta(p.driver_id != null ? p.driver_id : p.driver).pagos.push(p);
+  // Normalizar el ID evita separar "56" (cargo) de 56 (pago).
+  for (const p of pagos) cuenta(p.driver_id != null ? String(p.driver_id) : p.driver).pagos.push(p);
 
   for (const [driver, c] of cuentas) {
     c.cargos.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id));

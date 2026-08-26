@@ -9,6 +9,7 @@ import { Pagination } from '../components/Pagination';
 
 const ALERT_PAGE_SIZE = 4;
 const MOV_PAGE_SIZE = 5;
+const CUOTA_PAGE_SIZE = 5;
 
 const GpsIcon = ({ color }: { color: string }) => (
   <Svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
@@ -24,12 +25,16 @@ export function Detalle({ v }: { v: MobileView }) {
   const dc = v.detalle;
   const [alertPage, setAlertPage] = useState(0);
   const [movPage, setMovPage] = useState(0);
+  const [cuotaPage, setCuotaPage] = useState(0);
   const alertKey = useMemo(() => dc?.alerts.map((alert) => `${alert.txt}-${alert.sub}`).join('|') ?? '', [dc?.alerts]);
   const movKey = useMemo(() => dc?.movs.map((mov) => String(mov.id)).join('|') ?? '', [dc?.movs]);
+  const cuotaKey = useMemo(() => dc?.cuotas.map((cuota) => String(cuota.id)).join('|') ?? '', [dc?.cuotas]);
   const alertPageCount = Math.max(1, Math.ceil((dc?.alerts.length ?? 0) / ALERT_PAGE_SIZE));
   const movPageCount = Math.max(1, Math.ceil((dc?.movs.length ?? 0) / MOV_PAGE_SIZE));
+  const cuotaPageCount = Math.max(1, Math.ceil((dc?.cuotas.length ?? 0) / CUOTA_PAGE_SIZE));
   const visibleAlerts = dc?.alerts.slice(alertPage * ALERT_PAGE_SIZE, (alertPage + 1) * ALERT_PAGE_SIZE) ?? [];
   const visibleMovs = dc?.movs.slice(movPage * MOV_PAGE_SIZE, (movPage + 1) * MOV_PAGE_SIZE) ?? [];
+  const visibleCuotas = dc?.cuotas.slice(cuotaPage * CUOTA_PAGE_SIZE, (cuotaPage + 1) * CUOTA_PAGE_SIZE) ?? [];
 
   useEffect(() => {
     setAlertPage(0);
@@ -40,12 +45,20 @@ export function Detalle({ v }: { v: MobileView }) {
   }, [movKey]);
 
   useEffect(() => {
+    setCuotaPage(0);
+  }, [cuotaKey]);
+
+  useEffect(() => {
     setAlertPage((current) => Math.min(current, alertPageCount - 1));
   }, [alertPageCount]);
 
   useEffect(() => {
     setMovPage((current) => Math.min(current, movPageCount - 1));
   }, [movPageCount]);
+
+  useEffect(() => {
+    setCuotaPage((current) => Math.min(current, cuotaPageCount - 1));
+  }, [cuotaPageCount]);
 
   if (!dc) return null;
   return (
@@ -164,6 +177,20 @@ export function Detalle({ v }: { v: MobileView }) {
           ))}
         </View>
         <Pagination page={movPage} pageSize={MOV_PAGE_SIZE} total={dc.movs.length} itemLabel="movimientos" onPageChange={setMovPage} />
+      </View>
+
+      <View style={{ gap: 8 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 4 }}>
+          <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c' }}>Cuotas</Text>
+          <Text style={{ fontSize: 11, color: '#6b665c' }}>{dc.cuotaCount}</Text>
+        </View>
+        <View style={{ backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 20, paddingHorizontal: 14 }}>
+          {dc.noCuotas && <Text style={{ paddingVertical: 18, textAlign: 'center', fontSize: 12, color: '#6b665c' }}>Todavía no hay cuotas en este vehículo</Text>}
+          {visibleCuotas.map((m) => (
+            <MovRow key={m.id} m={m} />
+          ))}
+        </View>
+        <Pagination page={cuotaPage} pageSize={CUOTA_PAGE_SIZE} total={dc.cuotas.length} itemLabel="cuotas" onPageChange={setCuotaPage} />
       </View>
     </View>
   );

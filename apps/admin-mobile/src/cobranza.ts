@@ -66,7 +66,8 @@ export function imputar(cargos: Mov[], pagos: Pago[], choferDe: (m: Mov) => stri
     return c;
   };
   for (const m of cargos) cuenta(choferDe(m)).cargos.push(m);
-  for (const p of pagos) cuenta(p.driverId != null ? p.driverId : p.driver).pagos.push(p);
+  // Normalizar el ID evita separar "56" (cargo) de 56 (pago).
+  for (const p of pagos) cuenta(p.driverId != null ? String(p.driverId) : p.driver).pagos.push(p);
 
   for (const [driver, c] of cuentas) {
     // El id desempata las fechas iguales para que la imputación sea estable:
