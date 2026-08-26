@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Keyboard, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Keyboard, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { KeyboardChatScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useSharedValue } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
-import { askAssistant, SinSesion, type AssistantAction, type AssistantCard, type AssistantFollowUp, type AssistantHistoryItem, type AssistantTable } from '../api';
+import { askAssistant, SinSesion, type AssistantAction, type AssistantCard, type AssistantChart, type AssistantFollowUp, type AssistantHistoryItem, type AssistantTable } from '../api';
 import { API_BASE } from '../config';
 import { Pagination } from '../components/Pagination';
 
@@ -12,6 +12,7 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   text: string;
   cards?: AssistantCard[];
+  chart?: AssistantChart;
   table?: AssistantTable;
   followUps?: AssistantFollowUp[];
   filters?: { label: string; question: string }[];
@@ -58,44 +59,100 @@ function ResultCard({ card, onAction }: { card: AssistantCard; onAction: (action
   ) : content;
 }
 
-function ResultTable({ table, onAction }: { table: AssistantTable; onAction: (action: AssistantAction) => void }) {
-  const PAGE_SIZE = 5;
+function TableContent({ table, rows, onAction }: { table: AssistantTable; rows: AssistantTable['rows']; onAction: (action: AssistantAction) => void }) {
+  return (
+    <View style={styles.table}>
+      <View style={styles.tableRow}>
+        {table.columns.map((column) => <Text key={column.key} style={[styles.tableCell, styles.tableHeader]}>{column.label}</Text>)}
+      </View>
+      {rows.map((row) => {
+        const content = (
+          <View style={styles.tableRow}>
+            {table.columns.map((column) => <Text key={column.key} style={styles.tableCell} numberOfLines={2}>{row.cells[column.key] || '—'}</Text>)}
+          </View>
+        );
+        return row.action ? (
+          <Pressable key={row.id} onPress={() => onAction(row.action!)} accessibilityRole="button" accessibilityLabel={row.action.label}>
+            {content}
+          </Pressable>
+        ) : <View key={row.id}>{content}</View>;
+      })}
+    </View>
+  );
+}
+
+function ResultTable({ table, onAction, onOpen }: { table: AssistantTable; onAction: (action: AssistantAction) => void; onOpen: (table: AssistantTable) => void }) {
+  const previewRows = table.rows.slice(0, 5);
+  return (
+    <View style={styles.resultTable}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tableScroll}>
+        <TableContent table={table} rows={previewRows} onAction={onAction} />
+      </ScrollView>
+      {table.rows.length > previewRows.length ? (
+        <Pressable onPress={() => onOpen(table)} style={styles.moreTableButton} accessibilityRole="button">
+          <Text style={styles.moreTableText}>Ver más · {table.rows.length} filas</Text>
+        </Pressable>
+      ) : (
+        <Text style={styles.tableCount}>{table.rows.length} {table.rows.length === 1 ? 'fila' : 'filas'}</Text>
+      )}
+    </View>
+  );
+}
+
+function ResultChart({ chart }: { chart: AssistantChart }) {
+  const max = Math.max(...chart.items.map((item) => Math.abs(item.value)), 1);
+  return (
+    <View style={styles.chartBox}>
+      <Text style={styles.chartTitle}>{chart.title}</Text>
+      {chart.items.map((item) => (
+        <View key={`${item.label}-${item.value}`} style={styles.chartItem}>
+          <View style={styles.chartItemHeader}>
+            <Text style={styles.chartLabel} numberOfLines={1}>{item.label}</Text>
+            <Text style={[styles.chartValue, item.value < 0 && styles.chartNegative]}>{item.displayValue}</Text>
+          </View>
+          <View style={styles.chartTrack}>
+            <View style={[styles.chartBar, item.value < 0 && styles.chartBarNegative, { width: `${Math.max(2, Math.round((Math.abs(item.value) / max) * 100))}%` }]} />
+          </View>
+          {!!item.subtitle && <Text style={styles.chartSubtitle} numberOfLines={1}>{item.subtitle}</Text>}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function AssistantTableSheet({ table, onAction, onClose }: { table: AssistantTable | null; onAction: (action: AssistantAction) => void; onClose: () => void }) {
+  const PAGE_SIZE = 10;
   const [page, setPage] = useState(0);
-  const resetKey = useMemo(() => table.rows.map((row) => row.id).join('|'), [table.rows]);
-  const pageCount = Math.max(1, Math.ceil(table.rows.length / PAGE_SIZE));
-  const visibleRows = table.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const rows = table?.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE) ?? [];
 
   useEffect(() => {
     setPage(0);
-  }, [resetKey]);
-
-  useEffect(() => {
-    setPage((current) => Math.min(current, pageCount - 1));
-  }, [pageCount]);
+  }, [table]);
 
   return (
-    <View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tableScroll}>
-        <View style={styles.table}>
-          <View style={styles.tableRow}>
-            {table.columns.map((column) => <Text key={column.key} style={[styles.tableCell, styles.tableHeader]}>{column.label}</Text>)}
+    <Modal visible={!!table} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.sheetBackdrop}>
+        <View style={styles.tableSheet}>
+          <View style={styles.sheetHeader}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.sheetTitle}>Detalle de resultados</Text>
+              {!!table && <Text style={styles.sheetSubtitle}>{table.rows.length} filas en total</Text>}
+            </View>
+            <Pressable onPress={onClose} style={styles.sheetClose} accessibilityRole="button" accessibilityLabel="Cerrar detalle">
+              <Text style={styles.sheetCloseText}>Cerrar</Text>
+            </Pressable>
           </View>
-          {visibleRows.map((row) => {
-            const content = (
-              <View style={styles.tableRow}>
-                {table.columns.map((column) => <Text key={column.key} style={styles.tableCell} numberOfLines={2}>{row.cells[column.key] || '—'}</Text>)}
-              </View>
-            );
-            return row.action ? (
-              <Pressable key={row.id} onPress={() => onAction(row.action!)} accessibilityRole="button" accessibilityLabel={row.action.label}>
-                {content}
-              </Pressable>
-            ) : <View key={row.id}>{content}</View>;
-          })}
+          {!!table && (
+            <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetScrollContent} showsVerticalScrollIndicator>
+              <ScrollView horizontal showsHorizontalScrollIndicator>
+                <TableContent table={table} rows={rows} onAction={onAction} />
+              </ScrollView>
+            </ScrollView>
+          )}
+          {!!table && <Pagination page={page} pageSize={PAGE_SIZE} total={table.rows.length} itemLabel="filas" onPageChange={setPage} />}
         </View>
-      </ScrollView>
-      <Pagination page={page} pageSize={PAGE_SIZE} total={table.rows.length} itemLabel="filas" onPageChange={setPage} />
-    </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -103,6 +160,7 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
   const [messages, setMessages] = useState<ChatMessage[]>([INTRO]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [tableSheet, setTableSheet] = useState<AssistantTable | null>(null);
   const listRef = useRef<React.ElementRef<typeof KeyboardChatScrollView>>(null);
   const composerHeight = useSharedValue(0);
   const nextId = useRef(1);
@@ -142,6 +200,7 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
           role: 'assistant',
           text: reply.answer,
           cards: reply.cards,
+          chart: reply.chart,
           table: reply.table,
           followUps: reply.followUps ?? reply.filters,
           filters: reply.filters,
@@ -191,7 +250,8 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
             ))}
           </View>
         )}
-        {!!item.table?.rows.length && <ResultTable table={item.table} onAction={activateAction} />}
+        {!!item.chart?.items.length && <ResultChart chart={item.chart} />}
+        {!!item.table?.rows.length && <ResultTable table={item.table} onAction={activateAction} onOpen={setTableSheet} />}
         {!!(item.followUps ?? item.filters)?.length && !item.error && (
           <View style={styles.followUps}>
             <Text style={styles.followUpsLabel}>TAMBIÉN PODÉS PREGUNTAR</Text>
@@ -284,6 +344,7 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
           </Svg>
         </Pressable>
       </KeyboardStickyView>
+      <AssistantTableSheet table={tableSheet} onAction={activateAction} onClose={() => setTableSheet(null)} />
     </View>
   );
 }
@@ -310,11 +371,35 @@ const styles = StyleSheet.create({
   resultTitle: { color: '#2a2823', fontSize: 12, fontWeight: '700' },
   resultSubtitle: { color: '#756f65', fontSize: 10, marginTop: 2 },
   resultValue: { color: '#256b4d', fontSize: 13, fontWeight: '800' },
+  chartBox: { alignSelf: 'stretch', borderRadius: 16, borderWidth: 1, borderColor: '#e6ded0', backgroundColor: '#fffdf8', padding: 13, gap: 10, marginTop: 2 },
+  chartTitle: { color: '#3b3831', fontSize: 12, fontWeight: '800' },
+  chartItem: { gap: 4 },
+  chartItemHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  chartLabel: { flex: 1, color: '#5b554b', fontSize: 10, fontWeight: '600' },
+  chartValue: { color: '#256b4d', fontSize: 10, fontWeight: '800' },
+  chartNegative: { color: '#a34f3c' },
+  chartTrack: { height: 8, borderRadius: 4, backgroundColor: '#eee7dc', overflow: 'hidden' },
+  chartBar: { height: '100%', borderRadius: 4, backgroundColor: '#d1912e' },
+  chartBarNegative: { backgroundColor: '#b96a55' },
+  chartSubtitle: { color: '#817b71', fontSize: 9 },
+  resultTable: { alignSelf: 'stretch', gap: 6, marginTop: 2 },
   tableScroll: { alignSelf: 'stretch', marginTop: 3 },
   table: { minWidth: '100%', borderWidth: 1, borderColor: '#e6ded0', borderRadius: 14, overflow: 'hidden', backgroundColor: '#fffdf8' },
   tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#eee7dc', paddingHorizontal: 10, paddingVertical: 9 },
   tableCell: { minWidth: 104, flex: 1, color: '#3b3831', fontSize: 10, lineHeight: 14, paddingRight: 8 },
   tableHeader: { color: '#7e5a1e', fontWeight: '800', fontSize: 9 },
+  tableCount: { color: '#817b71', fontSize: 10, marginLeft: 3 },
+  moreTableButton: { alignSelf: 'flex-start', borderRadius: 14, borderWidth: 1, borderColor: '#e4d7c3', backgroundColor: '#fff8e9', paddingHorizontal: 12, paddingVertical: 8 },
+  moreTableText: { color: '#6e4a13', fontSize: 10, fontWeight: '800' },
+  sheetBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(22, 21, 15, 0.35)' },
+  tableSheet: { maxHeight: '86%', borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: '#f4f0e8', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 20, gap: 10 },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  sheetTitle: { color: '#2a2823', fontSize: 16, fontWeight: '800' },
+  sheetSubtitle: { color: '#817b71', fontSize: 10, marginTop: 3 },
+  sheetClose: { minHeight: 44, borderRadius: 14, backgroundColor: '#16150f', justifyContent: 'center', paddingHorizontal: 13 },
+  sheetCloseText: { color: '#fffdf8', fontSize: 11, fontWeight: '800' },
+  sheetScroll: { minHeight: 0 },
+  sheetScrollContent: { paddingBottom: 4 },
   followUps: { alignSelf: 'stretch', flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 2 },
   followUpsLabel: { width: '100%', color: '#8a5d16', fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
   followUp: { borderWidth: 1, borderColor: '#e4d7c3', backgroundColor: '#fff8e9', borderRadius: 16, paddingHorizontal: 11, paddingVertical: 8 },

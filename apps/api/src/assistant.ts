@@ -34,6 +34,19 @@ export interface AssistantTable {
   rows: AssistantTableRow[];
 }
 
+export interface AssistantChartItem {
+  label: string;
+  value: number;
+  displayValue: string;
+  subtitle?: string;
+}
+
+export interface AssistantChart {
+  kind: 'bars';
+  title: string;
+  items: AssistantChartItem[];
+}
+
 export interface AssistantFilter {
   label: string;
   question: string;
@@ -47,6 +60,7 @@ export interface AssistantFollowUp {
 export interface AssistantReply {
   answer: string;
   cards: AssistantCard[];
+  chart?: AssistantChart;
   table?: AssistantTable;
   followUps?: AssistantFollowUp[];
   /** Compatibilidad temporal con respuestas de servidores anteriores. */
@@ -165,7 +179,7 @@ export function buildAssistantSnapshot(cars: CarRow[], movs: MovRow[], pagos: Pa
   const charges = movs.filter((mov) => mov.type === 'ingreso' && mov.date <= asOf);
   const availablePayments = pagos.filter((pago) => pago.fecha <= asOf);
   const driverOf = (mov: MovRow) => mov.driver || carById.get(mov.car_id)?.driver || 'Sin chofer';
-  const { aplicaciones, cobrado, saldoAFavor } = imputar(charges, availablePayments, driverOf);
+  const { cobrado, saldoAFavor } = imputar(charges, availablePayments, driverOf);
   const monthFrom = asOf.slice(0, 7) + '-01';
   const weekFrom = startOfWeek(asOf);
 
@@ -185,10 +199,10 @@ export function buildAssistantSnapshot(cars: CarRow[], movs: MovRow[], pagos: Pa
         expenseCategories[category] = (expenseCategories[category] ?? 0) + mov.amount;
       }
     }
-    for (const application of aplicaciones) {
-      if (application.tipo !== 'pago') continue;
-      if (carId && application.carId !== carId) continue;
-      if (inRange(application.fecha, from, asOf)) collected += application.monto;
+    for (const payment of availablePayments) {
+      if (payment.tipo !== 'pago') continue;
+      if (carId && payment.car_id !== carId) continue;
+      if (inRange(payment.fecha, from, asOf)) collected += payment.monto;
     }
 
     return { from, to: asOf, billed, collected, expenses, net: collected - expenses, expenseCategories };
@@ -396,11 +410,12 @@ function sanitizeFollowUps(value: unknown, currentQuestion: string): AssistantFo
   return result;
 }
 
-function withLocalFollowUps(reply: AssistantReply, question: string): AssistantReply {
-  if (isNoResultAnswer(reply.answer)) return { ...reply, followUps: undefined, filters: undefined };
+function withLocalFollowUps(reply: AssistantReply, question: string, snapshot: AssistantSnapshot): AssistantReply {
+  const visuals = deterministicVisuals(question, snapshot);
+  if (isNoResultAnswer(reply.answer)) return { ...reply, ...visuals, followUps: undefined, filters: undefined };
   const candidates = reply.followUps ?? reply.filters ?? fallbackFollowUps(question);
   const followUps = sanitizeFollowUps(candidates, question);
-  return { ...reply, followUps, filters: undefined };
+  return { ...reply, ...visuals, followUps, filters: undefined };
 }
 
 /** Respuestas exactas para las consultas más frecuentes, incluso sin API key. */
@@ -664,7 +679,7 @@ export async function answerAssistant(
 ): Promise<AssistantReply> {
   const wantsFile = /\b(pdf|excel|xlsx|reporte|exporta|exportar|archivo)\b/i.test(question);
   const local = wantsFile ? null : localAssistantReply(question, snapshot);
-  if (local) return withLocalFollowUps(local, question);
+  if (local) return withLocalFollowUps(local, question, snapshot);
 
   const apiKey = options.apiKey?.trim();
   if (!apiKey) return fallbackReply(snapshot, 'Falta configurar OPENROUTER_API_KEY en el servidor.');
@@ -717,7 +732,7 @@ async function answerAssistantWithTools(
   const baseUrl = (options.baseUrl?.trim() || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
   const model = options.model?.trim() || 'inclusionai/ling-3.0-flash';
   const facts = JSON.stringify(snapshot);
-  const system = `You are MiFlota assistant for a fleet owner in Paraguay. Answer in clear Spanish. Use only the facts in this JSON; money is PYG. Never invent numbers, people, vehicles or dates. Net income means collected money minus expenses. If the user asks for PDF, Excel, XLSX, a report or an export, call generate_fleet_report.\n\nAfter answering, return ONLY valid JSON in this exact shape: {"answer":"respuesta para el usuario","followUps":[{"label":"texto corto","question":"pregunta concreta"}]}. Include 2 or 3 useful follow-up questions based on the current question and recent conversation. If there is no data, no result, an error, or no useful follow-up, use an empty followUps array. Do not use Markdown outside the JSON.\n\nFLEET DATA (cutoff ${snapshot.asOf}):\n${facts}`;
+  const system = `You are MiFlota assistant for a fleet owner in Paraguay. Answer in clear Spanish. Use only the facts in this JSON; money is PYG. Never invent numbers, people, vehicles or dates. Net income means collected money minus expenses. If the user asks for PDF, Excel, XLSX, a report or an export, call generate_fleet_report. The server calculates all cards, charts and tables; do not create visual data, tables or long lists in the answer.\n\nAfter answering, return ONLY valid JSON in this exact shape: {"answer":"respuesta breve para el usuario","followUps":[{"label":"texto corto","question":"pregunta concreta"}]}. Include 2 or 3 useful follow-up questions based on the current question and recent conversation. If there is no data, no result, an error, or no useful follow-up, use an empty followUps array. Do not use Markdown outside the JSON.\n\nFLEET DATA (cutoff ${snapshot.asOf}):\n${facts}`;
   const messages: OpenRouterMessage[] = [
     { role: 'system', content: system },
     ...history.slice(-6).map((item) => ({ role: item.role, content: item.content.slice(0, 1200) })),
@@ -764,14 +779,125 @@ async function answerAssistantWithTools(
   }
   const parsed = parseAssistantContent(typeof message?.content === 'string' ? message.content : '', question);
   if (!parsed.answer) throw new Error('OpenRouter returned an empty answer');
+  const visuals = isNoResultAnswer(parsed.answer) ? {} : deterministicVisuals(question, snapshot);
   return {
     answer: parsed.answer,
     cards: [],
+    ...visuals,
     followUps: parsed.followUps,
     asOf: snapshot.asOf,
     mode: 'openrouter',
     ...(files.length ? { files } : {}),
   };
+}
+
+function bars(title: string, items: AssistantChartItem[]): AssistantChart | undefined {
+  const visible = items.filter((item) => Number.isFinite(item.value)).slice(0, 5);
+  return visible.length ? { kind: 'bars', title, items: visible } : undefined;
+}
+
+function deterministicVisuals(question: string, snapshot: AssistantSnapshot): Partial<Pick<AssistantReply, 'cards' | 'chart' | 'table'>> {
+  const q = normalise(question);
+  const namedDriver = snapshot.drivers.find((driver) => q.includes(normalise(driver.name)));
+
+  if (namedDriver && /(cuanto|que|debe|deuda|adeuda)/.test(q)) {
+    const cars = snapshot.cars.filter((car) => car.driver === namedDriver.name);
+    return {
+      cards: [{
+        kind: 'driver',
+        title: namedDriver.name,
+        value: fmt(namedDriver.debt),
+        subtitle: namedDriver.currentCars.join(' · ') || 'Sin auto asignado actualmente',
+        action: driverAction(namedDriver),
+      }],
+      table: cars.length ? {
+        columns: [{ key: 'plate', label: 'Auto' }, { key: 'model', label: 'Modelo' }, { key: 'status', label: 'Estado' }],
+        rows: cars.map((car) => ({ id: car.id, cells: { plate: car.plate, model: car.model, status: car.status }, action: carAction(car) })),
+      } : undefined,
+    };
+  }
+
+  if (/(quienes|quien|lista|listame).*(atras|deben|deuda)/.test(q) || /atrasados|morosos/.test(q)) {
+    const debtors = snapshot.drivers.filter((driver) => driver.debt > 0).sort((a, b) => b.debt - a.debt);
+    return {
+      cards: debtors.slice(0, 3).map((driver) => ({ kind: 'driver', title: driver.name, value: fmt(driver.debt), subtitle: driver.currentCars.join(' · ') || 'Sin auto asignado', action: driverAction(driver) })),
+      chart: bars('Deuda por chofer', debtors.map((driver) => ({ label: driver.name, value: driver.debt, displayValue: fmt(driver.debt), subtitle: driver.currentCars.join(' · ') || 'Sin auto' }))),
+      table: debtors.length ? debtTable(debtors) : undefined,
+    };
+  }
+
+  if (/(quien|chofer).*(debe mas|mayor deuda)|(debe mas|mayor deuda).*(quien|chofer)/.test(q)) {
+    const debtors = snapshot.drivers.filter((driver) => driver.debt > 0).sort((a, b) => b.debt - a.debt);
+    const first = debtors[0];
+    return {
+      cards: first ? [{ kind: 'driver', title: first.name, value: fmt(first.debt), subtitle: first.currentCars.join(' · ') || 'Sin auto asignado', action: driverAction(first) }] : [],
+      chart: bars('Deuda por chofer', debtors.map((driver) => ({ label: driver.name, value: driver.debt, displayValue: fmt(driver.debt), subtitle: driver.currentCars.join(' · ') || 'Sin auto' }))),
+      table: debtors.length ? debtTable(debtors) : undefined,
+    };
+  }
+
+  if (/(auto|vehiculo).*(rinde|rindio|rentable|ganancia|neto).*(mas|mejor)|(cual|que).*(auto|vehiculo).*(rinde|rentable)/.test(q)) {
+    const period = selectedPeriod(snapshot, question);
+    const ranked = snapshot.cars.filter((car) => car.status !== 'baja').sort((a, b) => b[period.carField].net - a[period.carField].net);
+    return {
+      cards: ranked.slice(0, 3).map((car) => ({
+        kind: 'car',
+        title: `${car.plate} · ${car.model}`,
+        value: fmt(car[period.carField].net),
+        subtitle: `${fmt(car[period.carField].collected)} cobrado · ${fmt(car[period.carField].expenses)} gastado`,
+        action: carAction(car),
+      })),
+      chart: ranked.some((car) => car[period.carField].collected !== 0 || car[period.carField].expenses !== 0)
+        ? bars(`Ganancia por vehículo · ${period.label}`, ranked.map((car) => ({
+          label: `${car.plate} · ${car.model}`,
+          value: car[period.carField].net,
+          displayValue: fmt(car[period.carField].net),
+          subtitle: `${fmt(car[period.carField].collected)} cobrado · ${fmt(car[period.carField].expenses)} gastos`,
+        })))
+        : undefined,
+      table: ranked.length ? {
+        columns: [{ key: 'car', label: 'Auto' }, { key: 'net', label: 'Ganancia' }, { key: 'collected', label: 'Cobrado' }, { key: 'expenses', label: 'Gastos' }],
+        rows: ranked.map((car) => ({
+          id: car.id,
+          cells: { car: `${car.plate} · ${car.model}`, net: fmt(car[period.carField].net), collected: fmt(car[period.carField].collected), expenses: fmt(car[period.carField].expenses) },
+          action: carAction(car),
+        })),
+      } : undefined,
+    };
+  }
+
+  if (/(cuanto|total).*(cobre|cobrado|ingreso)|(cobre|cobrado).*(cuanto|total)/.test(q)) {
+    const period = selectedPeriod(snapshot, question);
+    return {
+      cards: [
+        { kind: 'metric', title: 'Cobrado', value: fmt(period.summary.collected), subtitle: period.label },
+        { kind: 'metric', title: 'Neto', value: fmt(period.summary.net), subtitle: 'Cobrado menos gastos' },
+      ],
+    };
+  }
+
+  if (/(cuanto|total|que).*(gaste|gastos|egresos)|(gaste|gastos|egresos).*(cuanto|total)/.test(q)) {
+    const period = selectedPeriod(snapshot, question);
+    const categories = Object.entries(period.summary.expenseCategories).sort((a, b) => b[1] - a[1]);
+    return {
+      cards: categories.slice(0, 3).map(([category, amount]) => ({ kind: 'metric', title: category, value: fmt(amount) })),
+      chart: bars(`Gastos por categoría · ${period.label}`, categories.map(([category, amount]) => ({ label: category, value: amount, displayValue: fmt(amount) }))),
+    };
+  }
+
+  if (/^(busca|buscar|encontra|encontrar|mostrame|mostrar)\b/.test(q)) {
+    const terms = q.replace(/^(busca|buscar|encontra|encontrar|mostrame|mostrar)\s+/, '');
+    const cars = snapshot.cars.filter((car) => normalise(`${car.plate} ${car.model} ${car.driver}`).includes(terms)).slice(0, 5);
+    const drivers = snapshot.drivers.filter((driver) => normalise(driver.name).includes(terms)).slice(0, 5);
+    return {
+      cards: [
+        ...cars.map((car): AssistantCard => ({ kind: 'car', title: `${car.plate} · ${car.model}`, value: car.status, subtitle: car.driver, action: carAction(car) })),
+        ...drivers.map((driver): AssistantCard => ({ kind: 'driver', title: driver.name, value: fmt(driver.debt), subtitle: driver.currentCars.join(' · ') || 'Sin auto asignado', action: driverAction(driver) })),
+      ],
+    };
+  }
+
+  return {};
 }
 
 export function unavailableAssistantReply(snapshot: AssistantSnapshot, detail?: string): AssistantReply {

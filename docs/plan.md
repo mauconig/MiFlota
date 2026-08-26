@@ -1,79 +1,101 @@
-# Estado de la autenticación MiFlota
+# Plan y estado de MiFlota
 
-> **El auth de MiFlota ya es 100% in-house** (sin Clerk ni IdP externo). La
-> implementación real está documentada en [docs/auth.md](./auth.md). Este
-> documento quedó como tracker del diseño y de lo que falta.
+Última actualización: 26/08/2026
 
-## Estado
+## Criterio de producto
 
-- La autenticación in-house está implementada y desplegada en la VPS (cookie de
-  sesión para el dueño, bearer token para el chofer, scrypt, tokens hasheados).
-- No hay Clerk en ningún cliente ni en el API (verificado en código e historial).
+MiFlota debe pedir una decisión por vez. Las pantallas móviles priorizan
+preguntas simples, botones grandes, textos cotidianos y una acción principal
+clara. Los datos detallados aparecen después de elegir el vehículo, período o
+tipo de movimiento correspondiente.
 
-## Diseño y cobertura actual
+## Estado actual
 
-### Identidades y roles
+### Administración móvil
 
-- ✅ Tabla `users` para dueños/administradores.
-- ⏳ Tabla `drivers` o identidad estable separada de los vehículos (hoy el
-  chofer es un string en `cars`; la deuda lo sigue por snapshot del nombre).
-- ⏳ Roles explícitos (`owner`, `admin`, `driver`) y estado de cuenta
-  (`active`, `disabled`).
-- ⏳ Un chofer podrá cambiar de vehículo sin perder su identidad ni su historial.
+- ✅ Navegación principal: **Inicio**, **Vehículos**, **Registrar**, **Gastos** y
+  **Más**.
+- ✅ Ranking reemplazado por **Ganancia por vehículo** dentro de Inicio.
+- ✅ Pantallas de Gastos, Alertas, Choferes y Reportes integradas a la
+  navegación.
+- ✅ Paginación en listas de vehículos, choferes, alertas, gastos, reportes,
+  resultados de la IA y detalle de vehículo.
+- ✅ Detalle de vehículo con edición de datos y selector entre Movimientos y
+  Cuotas.
+- ✅ Registro desde el botón `+` con elección de Ingreso o Egreso y flujo
+  guiado.
+- ✅ Egresos con selección de vehículo, categoría, descripción, repuestos,
+  mano de obra, nota, comprobante opcional para el dueño y resumen previo.
+- ✅ Se pueden agregar varios repuestos y el total se calcula como repuestos +
+  mano de obra.
+- ✅ Reportes paso a paso: contenido, vehículos, categorías, vista previa de
+  datos y exportación a PDF o Excel.
+- ✅ Las listas de selección de vehículos y categorías tienen scroll interno,
+  sin mover toda la pantalla.
+- ✅ Datos de service, seguro y kilometraje opcionales al crear un vehículo,
+  con edición posterior desde el detalle.
+- ✅ Íconos opacos y diferenciados para Admin Mobile y MiFlota Chofer.
 
-### Contraseñas
+### API y datos
 
-- ✅ Hash con `scrypt` con salt aleatorio; nunca se guarda ni recupera en claro.
-- ⏳ Restablecimiento mediante token de un solo uso y vencimiento corto (hoy
-  solo por CLI con `crear-usuario.js --reset`).
-- ✅ Comandos demo para crear/resetear cuentas (`crear-usuario.js`,
-  `provision-demo.js`).
+- ✅ Reportes autenticados en PDF/XLSX con filtros server-side, aislamiento por
+  dueño y nombres únicos con fecha y hora.
+- ✅ PDF con resumen, tabla y diseño visual.
+- ✅ Gastos detallados por ítem, cantidad, costo unitario, subtotal y mano de
+  obra, manteniendo compatibilidad con gastos antiguos.
+- ✅ Los cobros se calculan como dinero efectivamente cobrado, incluyendo
+  cobros que todavía no fueron asociados a una cuota.
+- ✅ Movimientos y cuotas se muestran como conceptos separados.
+- ✅ Pagos registrados por el chofer: sólo transferencia y comprobante
+  obligatorio. El dueño conserva sus medios de pago actuales.
+- ✅ Identidad y sesiones in-house, con aislamiento por dueño y roles de dueño
+  y chofer.
+- ✅ IA conectada al proveedor configurado, con herramientas para consultar la
+  flota y generar archivos descargables.
 
-### Sesiones y tokens
+### MiFlota Chofer
 
-- ✅ Sesiones opacas, aleatorias y revocables; solo hashes en la base.
-- ✅ Expiración absoluta (30 días); ✅ expiración por inactividad server-side
-  (ventana deslizante: dueño 7 días, chofer 30 minutos; `ultimo_uso` en las
-  tablas de sesión).
-- ✅ Revocación por dispositivo desde la UI ("Sesiones activas" en el panel:
-  listar, cerrar una puntual, cerrar todas menos la actual; el dueño también
-  puede patear la sesión de un chofer sin regenerarle credenciales).
-- ✅ Cookies `httpOnly`, `SameSite` y `Secure` en producción.
-- ✅ Token del chofer en SecureStore; ⏳ la sesión del dueño en admin-mobile
-  depende de la cookie del fetch de RN (no hay token propio en SecureStore).
-- ✅ Cookies de dueño y bearer de chofer nunca se mezclan.
+- ✅ Actualización semanal de kilometraje.
+- ✅ Recordatorios de kilometraje sin bloquear el uso de la app.
+- ✅ Aviso al dueño cuando el kilometraje lleva siete días sin actualizarse.
+- ✅ Biometría y pagos por transferencia implementados.
 
-### API
+## Pendiente inmediato
 
-- ✅ Un contrato único de login/logout/me por tipo de identidad.
-- ✅ Respuestas de error consistentes, sin revelar si existe el usuario.
-- ✅ Rate limiting persistente por IP + identidad (tabla `login_fallos`;
-  sobrevive reinicios del proceso).
-- ✅ Auditoría de login exitoso, fallido, bloqueado, logout, reset y revocación
-  (tabla `auth_log`, retención de 90 días).
-- ✅ Middleware central de sesión + owner-scoping en todas las consultas.
+1. **Validar definitivamente el teclado del chat en el teléfono conectado.**
+   El código ya usa `KeyboardChatScrollView`, `KeyboardStickyView` sin offset
+   fijo, medición dinámica del composer y oculta la barra inferior sólo mientras
+   el teclado está abierto. Falta confirmar visualmente foco, escritura,
+   multilinea, respuesta larga y apertura/cierre repetido en un teléfono viejo.
+2. Revisar en el teléfono conectado las pantallas de Registrar, Gastos,
+   Reportes y formularios largos con teclado abierto.
+3. Corregir cualquier problema de textos, tamaños o desbordes detectado en la
+   prueba de UI angosta.
+4. Revisar la UI pendiente de Admin Web después de cerrar la validación móvil.
+5. Generar las APK de Admin Mobile y MiFlota Chofer sólo después de validar la
+   interfaz móvil en desarrollo.
 
-### Migración
+## Criterios de validación
 
-- ✅ Se inventariaron cuentas/sesiones de la VPS; las credenciales demo quedaron
-  sincronizadas en la base persistente.
-- ⏳ Migrar choferes desde credenciales por vehículo a identidades estables.
+- El teclado nunca tapa el input activo ni deja una franja artificial.
+- La barra inferior aparece con el teclado cerrado y desaparece sólo en
+  MiFlota IA mientras se escribe.
+- El botón físico Atrás conserva las respuestas del flujo y vuelve al paso
+  anterior.
+- Los filtros de reportes afectan tanto la vista previa como el PDF y el Excel.
+- Los totales de gastos coinciden con repuestos más mano de obra.
+- Las listas largas se pueden usar en pantalla angosta y teléfono antiguo.
+- Cada dueño sólo ve sus propios vehículos, movimientos, gastos, cobros y
+  reportes.
+- No se genera una nueva APK hasta completar la validación visual en el
+  teléfono.
 
-## Validación realizada
+## Historial reciente
 
-- ✅ Login/logout de dueño en web y Admin Mobile (prueba de interoperabilidad
-  contra la VPS, 15/15 pasos).
-- ✅ Login/logout de chofer desde MiFlota Chofer.
-- ✅ Cambio/reset de contraseña por CLI.
-- ✅ Bloqueo temporal tras intentos fallidos (rate limit de login).
-- ✅ Aislamiento entre dueños y entre roles (owner-scoping, bearer de chofer
-  rechazado en rutas de dueño).
-
-## Pendiente (solo si se decide retomar)
-
-1. Identidad estable de chofer (tabla `drivers`) + roles/estado en `users`. ✅
-2. Reset de contraseña por token con vencimiento corto.
-3. Caducidad por inactividad y rate limit persistente en el servidor. ✅
-4. Auditoría de auth. ✅
-5. Gestión/revocación de sesiones por dispositivo desde la UI. ✅
-6. Sesión del dueño de admin-mobile persistida en SecureStore.
+- `494b0d4` — teclado móvil y ocultamiento contextual de la barra inferior.
+- `3eab3e1` — separación de Movimientos y Cuotas.
+- `1b2dda9` — paginación y selección múltiple de vehículos en Gastos.
+- `e8c021e` — edición de datos del vehículo.
+- `747e4b9` — reportes guiados desde móvil.
+- `4073c79` — PDF visual y nombres únicos de exportación.
+- `a1cd04f` — navegación simplificada y pantalla de Gastos.

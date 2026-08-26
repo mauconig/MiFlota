@@ -257,6 +257,12 @@ export interface AssistantTable {
   rows: { id: string; cells: Record<string, string>; action?: AssistantAction }[];
 }
 
+export interface AssistantChart {
+  kind: 'bars';
+  title: string;
+  items: { label: string; value: number; displayValue: string; subtitle?: string }[];
+}
+
 export interface AssistantFilter {
   label: string;
   question: string;
@@ -270,6 +276,7 @@ export interface AssistantFollowUp {
 export interface AssistantReply {
   answer: string;
   cards: AssistantCard[];
+  chart?: AssistantChart;
   table?: AssistantTable;
   followUps?: AssistantFollowUp[];
   /** Compatibilidad temporal con respuestas de servidores anteriores. */
