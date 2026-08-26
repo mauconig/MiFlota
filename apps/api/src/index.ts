@@ -1374,7 +1374,15 @@ app.post<{ Body: NuevoPago }>('/api/pagos', async (req, reply) => {
   const u = quien(req);
   const b = req.body ?? ({} as NuevoPago);
 
-  const driver = String(b.driver ?? '').trim();
+  const driverInput = String(b.driver ?? '').trim();
+  // admin-mobile puede enviar la identidad estable del chofer al elegir un
+  // auto. Las versiones anteriores enviaban el nombre, por eso aceptamos
+  // ambas formas y normalizamos siempre a nombre + driver_id antes de guardar.
+  const driverById = /^\d+$/.test(driverInput)
+    ? (db.prepare('SELECT id, nombre FROM drivers WHERE owner_id = ? AND id = ?').get(u.id, Number(driverInput)) as { id: number; nombre: string } | undefined)
+    : undefined;
+  const driverByName = driverById ?? (db.prepare('SELECT id, nombre FROM drivers WHERE owner_id = ? AND nombre = ?').get(u.id, driverInput) as { id: number; nombre: string } | undefined);
+  const driver = driverByName?.nombre ?? driverInput;
   if (!driver || driver === 'Sin chofer') return reply.code(400).send({ error: 'Indicá de qué chofer es el pago' });
   if (!conoceChofer.get(u.id, driver, u.id, driver, u.id, driver)) return reply.code(404).send({ error: 'Ese chofer no es de tu flota' });
 
@@ -1398,7 +1406,7 @@ app.post<{ Body: NuevoPago }>('/api/pagos', async (req, reply) => {
     carId = b.carId;
   }
 
-  const driverId = (db.prepare('SELECT id FROM drivers WHERE owner_id = ? AND nombre = ?').get(u.id, driver) as { id: number } | undefined)?.id ?? null;
+  const driverId = driverByName?.id ?? (db.prepare('SELECT id FROM drivers WHERE owner_id = ? AND nombre = ?').get(u.id, driver) as { id: number } | undefined)?.id ?? null;
   const info = db
     .prepare('INSERT INTO pagos (owner_id, car_id, driver, driver_id, fecha, monto, tipo, medio, nota) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(u.id, carId, driver, driverId, fecha, monto, tipo, String(b.medio ?? '').trim().slice(0, 40) || null, String(b.nota ?? '').trim().slice(0, 200) || null);
