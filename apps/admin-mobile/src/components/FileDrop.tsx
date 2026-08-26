@@ -38,7 +38,7 @@ export function FileDrop({ file, onChange }: { file: PickedFile | null; onChange
         <Circle cx="12" cy="13" r="3" />
       </Svg>
       <Text style={{ fontSize: 13, fontWeight: '600', color: file ? '#8a6410' : '#6b665c' }}>
-        {file ? file.name.slice(0, 28) + ' · quitar' : 'Adjuntar foto del comprobante'}
+        {file ? file.name.slice(0, 28) + ' · quitar' : 'Adjuntar captura o foto del comprobante'}
       </Text>
     </Pressable>
   );

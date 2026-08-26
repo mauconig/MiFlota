@@ -33,6 +33,19 @@
 - Revisar específicamente el caso mostrado: el diálogo oscuro del navegador que pide `Nombre del seguro` no debe volver a aparecer.
 - Validar la vista en desktop y móvil antes de desplegarla.
 
+## 3. Kilometraje diario de los choferes
+
+- El dueño podrá cargar el kilometraje inicial al crear o editar un vehículo.
+- Después de esa carga, el chofer será responsable de actualizar el kilometraje todos los días.
+- La app del chofer mostrará claramente el kilometraje actual y un campo para informar el nuevo valor.
+- El nuevo valor deberá ser un número entero y no podrá ser menor al anterior.
+- Cada actualización guardará automáticamente la fecha y hora del registro.
+- El chofer recibirá una notificación diaria mientras no haya actualizado el kilometraje del día.
+- Las notificaciones continuarán hasta que complete la actualización diaria.
+- El dueño podrá ver qué vehículos fueron actualizados y cuáles están pendientes.
+- Si el chofer acumula siete días sin actualizar, se enviará además una alerta al dueño.
+- La falta de actualización no bloqueará la app ni impedirá registrar movimientos.
+
 ## Estado al cerrar hoy
 
 - La build EAS remota quedó cancelada.

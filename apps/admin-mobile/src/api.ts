@@ -23,6 +23,27 @@ const toPago = (p: PagoDto): Pago => ({ ...p, fecha: parseDate(p.fecha) });
 
 export class SinSesion extends Error {}
 
+type JsonResponse = Pick<Response, 'ok' | 'status' | 'json'>;
+
+function requestMultipart(url: string, init: RequestInit, authHeaders: Record<string, string>): Promise<JsonResponse> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(init.method ?? 'GET', url);
+    Object.entries({ ...authHeaders, ...((init.headers ?? {}) as Record<string, string>) }).forEach(([key, value]) => xhr.setRequestHeader(key, value));
+    xhr.onload = () => {
+      const body = xhr.responseText;
+      resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        json: async () => (body ? JSON.parse(body) : null),
+      });
+    };
+    xhr.onerror = () => reject(new Error('No se pudo enviar el archivo'));
+    xhr.ontimeout = () => reject(new Error('Se agotó el tiempo al enviar el archivo'));
+    xhr.send(init.body as XMLHttpRequestBodyInit);
+  });
+}
+
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   // El Content-Type solo va cuando hay cuerpo: si se anuncia JSON y el cuerpo
   // llega vacío (DELETE, logout), Fastify rechaza el pedido con un 400 antes de
@@ -36,7 +57,11 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
   // A diferencia del browser, React Native no tiene un origin de página contra
   // el que resolver una URL relativa: sin este prefijo, `/api/...` termina
   // pegándole al propio servidor de Metro en vez de a la API.
-  const res = await fetch(API_BASE + url, { ...init, headers: { ...(headers ?? {}), ...authHeaders, ...((init?.headers ?? {}) as Record<string, string>) } as Record<string, string> });
+  const requestHeaders = { ...(headers ?? {}), ...authHeaders, ...((init?.headers ?? {}) as Record<string, string>) } as Record<string, string>;
+  const isMultipart = !!init?.body && init.body instanceof FormData;
+  const res = isMultipart
+    ? await requestMultipart(API_BASE + url, init!, requestHeaders)
+    : await fetch(API_BASE + url, { ...init, headers: requestHeaders });
   if (!res.ok) {
     const cuerpo = await res.json().catch(() => null);
     const msg = (cuerpo as { error?: string } | null)?.error ?? `Error ${res.status}`;

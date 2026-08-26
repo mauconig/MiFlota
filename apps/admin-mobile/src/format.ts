@@ -7,7 +7,11 @@ export const COLORS = {
   paper: '#fffdf8',
 } as const;
 
-export const TODAY = new Date(2026, 7, 28);
+// La fecha de los formularios debe ser la del teléfono, no la fecha fija que
+// se usaba para la base demo. Se fija al mediodía local para evitar que un
+// cambio de huso horario la muestre como el día anterior.
+const now = new Date();
+export const TODAY = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
 
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 

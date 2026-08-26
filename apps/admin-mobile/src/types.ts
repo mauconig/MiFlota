@@ -142,6 +142,9 @@ export interface DriverCredentialDraft {
 
 export interface RegistrarForm {
   tab: RegistrarTab;
+  /** Atajo para registrar mantenimiento: se guarda como gasto Service y
+   * actualiza la ficha del vehículo. */
+  serviceMode: boolean;
   /** Auto de contexto: fijo si se abrió desde la ficha de un vehículo, editable
       si se abrió desde el FAB del dashboard sin auto en contexto. */
   carId: string;

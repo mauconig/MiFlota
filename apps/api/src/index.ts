@@ -1380,7 +1380,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
 });
 
 /** Categorías válidas para un gasto suelto. Mismo set que `CATS` en el cliente. */
-const CATS_EGRESO = new Set(['Taller', 'Combustible', 'Seguro', 'Multas', 'Documentación', 'Otros']);
+const CATS_EGRESO = new Set(['Repuestos', 'Service', 'Taller', 'Combustible', 'Seguro', 'Multas', 'Documentación', 'Otros']);
 
 interface GastoItemInput {
   nombre?: unknown;

@@ -13,5 +13,9 @@ export function RegistroChoiceSheet({ v }: { v: MobileView }) {
       <Text style={{ fontSize: 16, fontWeight: '800', color: '#9a6a12' }}>Registrar egreso</Text>
       <Text style={{ fontSize: 12, color: '#80642f', marginTop: 4 }}>Cargar un gasto de un auto</Text>
     </Pressable>
+    <Pressable onPress={choice.service} style={{ minHeight: 76, borderRadius: 18, backgroundColor: '#eef0f8', borderWidth: 1, borderColor: '#d9ddeb', padding: 16, justifyContent: 'center' }}>
+      <Text style={{ fontSize: 16, fontWeight: '800', color: '#4d587e' }}>Registrar service</Text>
+      <Text style={{ fontSize: 12, color: '#626b8d', marginTop: 4 }}>Guardar mantenimiento y actualizar el vehículo</Text>
+    </Pressable>
   </BottomSheet>;
 }

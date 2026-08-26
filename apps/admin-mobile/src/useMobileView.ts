@@ -13,12 +13,12 @@ const SEG_AVISO_DIAS = 20;
 /** Tope de meses entre renovaciones de la póliza. Coincide con el del servidor. */
 const SEG_CADA_MAX = 120;
 const MESES_ABR = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
-const REG_CATS = ['Repuestos', ...CATS] as const;
+const REG_CATS = CATS;
 
 // --------------------------------------------------------------------------
-// Helpers puros, portados de apps/admin-web/src/useFleetView.ts. La demo usa
-// `TODAY` fijo (no `new Date()`) para quedar alineada con el `MIFLOTA_HOY`
-// del servidor — nunca llamar al reloj real acá.
+// Helpers puros, portados de apps/admin-web/src/useFleetView.ts. Los datos
+// nuevos usan la fecha local real del teléfono; las fechas de la demo sólo
+// sirven para los registros sembrados en la base.
 
 const svcConfigured = (c: Car) => c.serviceCada > 0 && c.lastServiceDate.getFullYear() > 1970;
 const svcNextDate = (c: Car) => (c.serviceUnidad === 'meses' ? addM(c.lastServiceDate, c.serviceCada) : addD(c.lastServiceDate, c.serviceCada));
@@ -142,9 +142,10 @@ const TAG: Record<Car['estado'], [string, string, string]> = {
   baja: ['Baja', '#f0ece3', '#6b665c'],
 };
 
-export function blankRegistrarForm(tab: RegistrarTab, carId: string, driver: string, lockCar = false): import('./types').RegistrarForm {
+export function blankRegistrarForm(tab: RegistrarTab, carId: string, driver: string, lockCar = false, serviceMode = false): import('./types').RegistrarForm {
   return {
     tab,
+    serviceMode,
     carId,
     digits: '',
     fecha: isoLocal(TODAY),
@@ -412,13 +413,14 @@ export interface MobileView {
   navAlertas: () => void;
   navChoferes: () => void;
   tabActive: { dash: boolean; flota: boolean; gastos: boolean; mas: boolean };
-  registroChoice: { open: boolean; show: () => void; close: () => void; cobro: () => void; gasto: () => void };
+  registroChoice: { open: boolean; show: () => void; close: () => void; cobro: () => void; gasto: () => void; service: () => void };
 
   openAssistant: () => void;
   goDetalle: (carId: string) => void;
   goNuevoVehiculo: () => void;
   goRegistrarCobro: (carId?: string) => void;
   goRegistrarGasto: (carId?: string) => void;
+  goRegistrarService: (carId?: string) => void;
   goPerfil: () => void;
 
   hide: boolean;
@@ -569,6 +571,17 @@ export interface MobileView {
       removeItem: (index: number) => void;
       manoObra: string;
       setManoObra: (v: string) => void;
+    } | null;
+    service: {
+      carId: string;
+      setCarId: (v: string) => void;
+      selCars: { id: string; label: string }[];
+      lockCar: boolean;
+      kilometraje: string;
+      setKilometraje: (v: string) => void;
+      tieneCosto: boolean;
+      comprobante: PickedFile | null;
+      setComprobante: (f: PickedFile | null) => void;
     } | null;
   } | null;
 
@@ -1195,15 +1208,16 @@ export function useMobileView(
 
   // ---- registrar -------------------------------------------------------
   const f = state.registrar;
-  function goRegistrar(tab: RegistrarTab, carId?: string) {
+  function goRegistrar(tab: RegistrarTab, carId?: string, serviceMode = false) {
     const contextCar = carId ?? car?.id;
     const resolvedCar = contextCar ?? '';
     const driver = carDe.get(resolvedCar)?.driver ?? '';
     const lockCar = Boolean(contextCar);
-    push('registrar', { registrar: blankRegistrarForm(tab, resolvedCar, driver === 'Sin chofer' ? '' : driver, lockCar) });
+    push('registrar', { registrar: { ...blankRegistrarForm(tab, resolvedCar, driver === 'Sin chofer' ? '' : driver, lockCar, serviceMode), ...(serviceMode ? { cat: 'Service' } : {}) } });
   }
   const goRegistrarCobro = (carId?: string) => goRegistrar('cobro', carId);
   const goRegistrarGasto = (carId?: string) => goRegistrar('gasto', carId);
+  const goRegistrarService = (carId?: string) => goRegistrar('gasto', carId, true);
 
   let registrarView: MobileView['registrar'] = null;
   if (f) {
@@ -1214,7 +1228,7 @@ export function useMobileView(
       .map((item) => ({ ...item, subtotal: item.cantidad * item.costoUnitario }));
     const manoObraNum = numFromInput(f.manoObra);
     const gastoStructuredTotal = gastoItems.reduce((sum, item) => sum + item.subtotal, 0) + manoObraNum;
-    const amountNum = f.tab === 'gasto' ? gastoStructuredTotal || parseInt(f.digits || '0', 10) : parseInt(f.digits || '0', 10);
+    const amountNum = f.serviceMode ? parseInt(f.digits || '0', 10) : f.tab === 'gasto' ? gastoStructuredTotal || parseInt(f.digits || '0', 10) : parseInt(f.digits || '0', 10);
     const press = (k: string) =>
       setF({
         digits: k === 'del' ? f.digits.slice(0, -1) : k === '000' ? (f.digits ? (f.digits + '000').slice(0, 10) : f.digits) : f.digits.length < 10 ? (f.digits === '' && k === '0' ? '' : f.digits + k) : f.digits,
@@ -1252,7 +1266,7 @@ export function useMobileView(
     }
 
     let gasto: NonNullable<MobileView['registrar']>['gasto'] = null;
-    if (f.tab === 'gasto') {
+    if (f.tab === 'gasto' && !f.serviceMode) {
       gasto = {
         catChips: REG_CATS.map((name) => ({ label: name, ...chipStyle(f.cat === name, 'amber'), pick: () => setF({ cat: name }) })),
         carId: f.carId,
@@ -1270,8 +1284,23 @@ export function useMobileView(
       };
     }
 
+    let service: NonNullable<MobileView['registrar']>['service'] = null;
+    if (f.serviceMode) {
+      service = {
+        carId: f.carId,
+        setCarId: (v) => setF({ carId: v }),
+        selCars: active.map((c) => ({ id: c.id, label: c.plate + ' · ' + c.driver })),
+        lockCar: f.lockCar,
+        kilometraje: f.manoObra,
+        setKilometraje: (v) => setF({ manoObra: v.replace(/\D/g, '').slice(0, 10) }),
+        tieneCosto: amountNum > 0,
+        comprobante: f.comprobante,
+        setComprobante: (file) => setF({ comprobante: file }),
+      };
+    }
+
     const finish = () => back();
-    const again = () => update({ registrar: blankRegistrarForm(f.tab, f.carId, f.driver, f.lockCar) });
+    const again = () => update({ registrar: blankRegistrarForm(f.tab, f.carId, f.driver, f.lockCar, f.serviceMode) });
 
     const legacyNext = () => {
       if (f.guardando || f.success) return;
@@ -1332,6 +1361,12 @@ export function useMobileView(
 
     const next = () => {
       if (f.guardando || f.success) return;
+      if (f.serviceMode) {
+        if (f.step === 0 && !f.carId) return toast('Elegí a qué auto corresponde');
+        if (f.step === 1 && !f.nota.trim()) return toast('Contá qué service se hizo');
+        if (f.step < 5) setF({ step: f.step + 1 });
+        return;
+      }
       if (f.tab === 'cobro') {
         if (f.step === 0 && !f.carId) return toast('Elegí a qué auto corresponde');
         if (f.step === 1 && !amountNum) return toast('Ingresá cuánto ingresó');
@@ -1350,6 +1385,27 @@ export function useMobileView(
 
     const submit = () => {
       if (f.guardando) return;
+      if (f.serviceMode) {
+        if (!f.carId) return toast('Elegí a qué auto corresponde');
+        if (!f.nota.trim()) return toast('Contá qué service se hizo');
+        if (f.fecha > isoLocal(TODAY)) return toast('La fecha no puede ser futura');
+        const mileage = numFromInput(f.manoObra);
+        const plate = carDe.get(f.carId)?.plate ?? '';
+        setF({ guardando: true });
+        const saveExpense = amountNum > 0
+          ? persist.addEgreso(f.carId, { razon: f.nota.trim(), monto: amountNum, cat: 'Service', comprobante: f.comprobante, items: [], manoObra: amountNum })
+          : Promise.resolve();
+        saveExpense
+          .then(() => {
+            persist.patchCar(f.carId, { lastServiceDate: new Date(f.fecha + 'T12:00:00'), ...(mileage ? { kilometraje: mileage } : {}) });
+            update((s) => ({ registrar: s.registrar && { ...s.registrar, guardando: false, success: { tab: 'gasto', title: 'Service registrado', detail: plate + ' · ' + f.nota.trim(), amount: amountNum ? fmt(amountNum) : 'Sin costo' } } }));
+          })
+          .catch((e: Error) => {
+            setF({ guardando: false });
+            toast('No se pudo registrar: ' + e.message);
+          });
+        return;
+      }
       if (!amountNum) return toast(f.tab === 'cobro' ? 'Ingresá cuánto ingresó' : 'Ingresá cuánto gastaste');
       if (f.fecha > isoLocal(TODAY)) return toast('La fecha no puede ser futura');
       if (!f.carId) return toast('Elegí a qué auto corresponde');
@@ -1405,12 +1461,20 @@ export function useMobileView(
       ['¿Cuánto gastaste?', 'Ingresá el total del gasto.'],
       ['Revisá el egreso', 'Confirmá los datos antes de guardarlo.'],
     ];
+    const serviceTitles = [
+      ['¿De qué auto es el service?', 'Elegí el vehículo al que corresponde.'],
+      ['¿Qué se hizo?', 'Escribí una descripción breve del mantenimiento.'],
+      ['¿Cuánto costó? (opcional)', 'Si lo completás, también aparecerá en Gastos.'],
+      ['¿Cuándo se hizo?', 'La fecha no puede ser posterior a hoy.'],
+      ['¿Cuál era el kilometraje?', 'Podés dejarlo vacío si no lo sabés.'],
+      ['Revisá el service', 'Confirmá los datos antes de guardarlo.'],
+    ];
     const firstStep = f.lockCar ? 1 : 0;
-    const viewStep = f.tab === 'gasto' ? Math.min(f.step, 3) : f.step;
+    const viewStep = f.serviceMode ? Math.min(f.step, 5) : f.tab === 'gasto' ? Math.min(f.step, 3) : f.step;
     const progressStep = viewStep - firstStep;
-    const totalSteps = f.tab === 'cobro' ? 3 - firstStep : 4 - firstStep;
+    const totalSteps = f.serviceMode ? 6 - firstStep : f.tab === 'cobro' ? 3 - firstStep : 4 - firstStep;
     const gastoStepMeta = [gastoTitles[0], gastoTitles[1], gastoTitles[3], gastoTitles[4]][viewStep];
-    const stepMeta = f.tab === 'cobro' ? simpleCobroTitles[f.step] : gastoStepMeta;
+    const stepMeta = f.serviceMode ? serviceTitles[viewStep] : f.tab === 'cobro' ? simpleCobroTitles[f.step] : gastoStepMeta;
     registrarView = {
       tab: f.tab,
       setTab: (t) => setF({ tab: t }),
@@ -1421,14 +1485,14 @@ export function useMobileView(
       stepHint: stepMeta[1],
       backStep: () => back(),
       next,
-      nextLabel: (f.tab === 'cobro' && f.step === 2) || (f.tab === 'gasto' && f.step >= 3) ? (f.tab === 'cobro' ? 'Registrar ingreso' : 'Registrar egreso') : 'Continuar',
+      nextLabel: f.serviceMode ? (f.step >= 5 ? 'Registrar service' : 'Continuar') : (f.tab === 'cobro' && f.step === 2) || (f.tab === 'gasto' && f.step >= 3) ? (f.tab === 'cobro' ? 'Registrar ingreso' : 'Registrar egreso') : 'Continuar',
       nextDisabled: false,
       success: f.success,
       finish,
       again,
       amountDisplay: amountNum ? fmt(amountNum) : '₲ 0',
       amountColor: amountNum ? (f.tab === 'cobro' ? COLORS.pos : COLORS.neg) : '#b3aa99',
-      amountHint: amountNum ? (f.tab === 'cobro' ? 'Cobro al chofer' : 'Repuestos + mano de obra') : f.tab === 'gasto' ? 'Agregá el detalle del gasto' : 'Usá el teclado para escribir el monto',
+      amountHint: amountNum ? (f.tab === 'cobro' ? 'Cobro al chofer' : f.serviceMode ? 'Costo del service' : 'Repuestos + mano de obra') : f.tab === 'gasto' ? 'Agregá el detalle del gasto' : 'Usá el teclado para escribir el monto',
       keys,
       fecha: f.fecha,
       setFecha: (iso) => setF({ fecha: iso }),
@@ -1441,6 +1505,7 @@ export function useMobileView(
       guardando: f.guardando,
       cobro,
       gasto,
+      service,
     };
   }
 
@@ -1613,7 +1678,7 @@ export function useMobileView(
     reportes: ['Reportes', 'Exportá para tu contador'],
     detalle: ['Detalle del vehículo', ''],
     nuevoVehiculo: [state.carId ? 'Editar vehículo' : 'Nuevo vehículo', ''],
-    registrar: [f?.tab === 'gasto' ? 'Registrar egreso' : 'Registrar ingreso', ''],
+    registrar: [f?.serviceMode ? 'Registrar service' : f?.tab === 'gasto' ? 'Registrar egreso' : 'Registrar ingreso', ''],
     assistant: ['MiFlota IA', ''],
     perfil: ['Perfil', ''],
   };
@@ -1664,6 +1729,10 @@ export function useMobileView(
         update({ registroChoice: false });
         goRegistrarGasto();
       },
+      service: () => {
+        update({ registroChoice: false });
+        goRegistrarService();
+      },
     },
     openAssistant: () => push('assistant'),
     goDetalle: (carId) => push('detalle', { carId }),
@@ -1671,6 +1740,7 @@ export function useMobileView(
       push('nuevoVehiculo', { carId: null, nuevoVehiculo: blankNuevoVehiculo(), nuevoVehiculoConfirm: false, nuevoVehiculoGuardando: false }),
     goRegistrarCobro,
     goRegistrarGasto,
+    goRegistrarService,
     goPerfil: () => push('perfil', { perfil: { actual: '', nueva: '', repetir: '', guardando: false } }),
     hide: false,
 
