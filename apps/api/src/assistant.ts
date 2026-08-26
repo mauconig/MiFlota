@@ -39,10 +39,17 @@ export interface AssistantFilter {
   question: string;
 }
 
+export interface AssistantFollowUp {
+  label: string;
+  question: string;
+}
+
 export interface AssistantReply {
   answer: string;
   cards: AssistantCard[];
   table?: AssistantTable;
+  followUps?: AssistantFollowUp[];
+  /** Compatibilidad temporal con respuestas de servidores anteriores. */
   filters?: AssistantFilter[];
   asOf: string;
   mode: 'local' | 'openrouter' | 'fallback';
@@ -309,11 +316,91 @@ function debtTable(drivers: AssistantDriver[]): AssistantTable {
   };
 }
 
-function debtFilters(): AssistantFilter[] {
+function debtFilters(): AssistantFollowUp[] {
   return [
     { label: 'Solo mayores a ₲1.000.000', question: '¿Quiénes deben más de un millón?' },
     { label: 'Ordenar por antigüedad', question: '¿Quién tiene la deuda más antigua?' },
   ];
+}
+
+function fallbackFollowUps(question: string): AssistantFollowUp[] {
+  const q = normalise(question);
+  if (/deuda|debe|atrasad|moros/.test(q)) {
+    return [
+      { label: 'Deuda más antigua', question: '¿Quién tiene la deuda más antigua?' },
+      { label: 'Ver cobros', question: '¿Cuánto cobré esta semana?' },
+      { label: 'Ver por auto', question: '¿Qué auto tiene más deuda?' },
+    ];
+  }
+  if (/gasto|gaste|egreso|repuesto|service|seguro/.test(q)) {
+    return [
+      { label: 'Gastos por auto', question: '¿Qué auto tuvo más gastos este mes?' },
+      { label: 'Otra categoría', question: '¿En qué categoría gasté más?' },
+      { label: 'Ver ganancia', question: '¿Qué auto rindió más este mes?' },
+    ];
+  }
+  if (/cobr|ingreso|factur|pago/.test(q)) {
+    return [
+      { label: 'Ver gastos', question: '¿En qué gasté más este mes?' },
+      { label: 'Ver facturado', question: '¿Cuánto facturé este mes?' },
+      { label: 'Ver ganancia', question: '¿Qué auto rindió más este mes?' },
+    ];
+  }
+  if (/rind|rentab|ganancia|neto/.test(q)) {
+    return [
+      { label: 'Esta semana', question: '¿Qué auto rindió más esta semana?' },
+      { label: 'Ver gastos', question: '¿En qué gasté más este mes?' },
+      { label: 'Ver cobros', question: '¿Cuánto cobré este mes?' },
+    ];
+  }
+  if (/auto|vehiculo|chofer|conductor|busca|buscar/.test(q)) {
+    return [
+      { label: 'Ver rendimiento', question: '¿Qué auto rinde más este mes?' },
+      { label: 'Ver deudas', question: '¿Quién debe más?' },
+      { label: 'Ver gastos', question: '¿En qué gasté más este mes?' },
+    ];
+  }
+  return [
+    { label: 'Ver cobros', question: '¿Cuánto cobré este mes?' },
+    { label: 'Ver gastos', question: '¿En qué gasté más este mes?' },
+    { label: 'Ver rendimiento', question: '¿Qué auto rinde más este mes?' },
+  ];
+}
+
+function isNoResultAnswer(answer: string): boolean {
+  const text = normalise(answer);
+  return /^(no hay|no hubo|no encontre|no se encontraron|no pude encontrar|no tengo)/.test(text)
+    || /\bno hay (datos|gastos|cobros|vehiculos|choferes|resultados)\b/.test(text);
+}
+
+function cleanText(value: unknown, maxLength: number): string {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, maxLength) : '';
+}
+
+function sanitizeFollowUps(value: unknown, currentQuestion: string): AssistantFollowUp[] {
+  if (!Array.isArray(value)) return [];
+  const current = normalise(currentQuestion);
+  const seen = new Set<string>();
+  const result: AssistantFollowUp[] = [];
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    const item = candidate as { label?: unknown; question?: unknown };
+    const label = cleanText(item.label, 40);
+    const question = cleanText(item.question, 120);
+    const key = normalise(question);
+    if (!label || !question || !key || key === current || seen.has(key)) continue;
+    seen.add(key);
+    result.push({ label, question });
+    if (result.length === 3) break;
+  }
+  return result;
+}
+
+function withLocalFollowUps(reply: AssistantReply, question: string): AssistantReply {
+  if (isNoResultAnswer(reply.answer)) return { ...reply, followUps: undefined, filters: undefined };
+  const candidates = reply.followUps ?? reply.filters ?? fallbackFollowUps(question);
+  const followUps = sanitizeFollowUps(candidates, question);
+  return { ...reply, followUps, filters: undefined };
 }
 
 /** Respuestas exactas para las consultas más frecuentes, incluso sin API key. */
@@ -338,7 +425,7 @@ export function localAssistantReply(question: string, snapshot: AssistantSnapsho
         columns: [{ key: 'plate', label: 'Auto' }, { key: 'model', label: 'Modelo' }, { key: 'status', label: 'Estado' }],
         rows: cars.map((car) => ({ id: car.id, cells: { plate: car.plate, model: car.model, status: car.status }, action: carAction(car) })),
       } : undefined,
-      filters: debtFilters(),
+      followUps: debtFilters(),
       asOf: snapshot.asOf,
       mode: 'local',
     };
@@ -361,7 +448,7 @@ export function localAssistantReply(question: string, snapshot: AssistantSnapsho
         : 'No hay conductores con deuda registrada.',
       cards: debtors.slice(0, 3).map((driver) => ({ kind: 'driver', title: driver.name, value: fmt(driver.debt), subtitle: driver.currentCars.join(' · ') || 'Sin auto asignado', action: driverAction(driver) })),
       table: debtTable(debtors),
-      filters: debtFilters(),
+      followUps: debtFilters(),
       asOf: snapshot.asOf,
       mode: 'local',
     };
@@ -383,7 +470,7 @@ export function localAssistantReply(question: string, snapshot: AssistantSnapsho
         action: driverAction(driver),
       })),
       table: debtTable(debtors),
-      filters: debtFilters(),
+      followUps: debtFilters(),
       asOf: snapshot.asOf,
       mode: 'local',
     };
@@ -427,7 +514,7 @@ export function localAssistantReply(question: string, snapshot: AssistantSnapsho
           action: carAction(car),
         })),
       },
-      filters: [
+      followUps: [
         { label: 'Esta semana', question: '¿Qué auto rindió más esta semana?' },
         { label: 'Todo el historial', question: '¿Qué auto rindió más en todo el historial?' },
       ],
@@ -444,7 +531,7 @@ export function localAssistantReply(question: string, snapshot: AssistantSnapsho
         { kind: 'metric', title: 'Cobrado', value: fmt(period.summary.collected), subtitle: period.label },
         { kind: 'metric', title: 'Neto', value: fmt(period.summary.net), subtitle: 'Cobrado menos gastos' },
       ],
-      filters: [
+      followUps: [
         { label: 'Ver gastos', question: `¿En qué gasté más ${period.label}?` },
         { label: 'Ver facturado', question: `¿Cuánto facturé ${period.label}?` },
       ],
@@ -461,7 +548,7 @@ export function localAssistantReply(question: string, snapshot: AssistantSnapsho
         ? `Gastaste ${fmt(period.summary.expenses)} ${period.label}. La categoría principal fue ${categories[0][0]} con ${fmt(categories[0][1])}.`
         : `No hay gastos registrados ${period.label}.`,
       cards: categories.slice(0, 3).map(([category, amount]) => ({ kind: 'metric', title: category, value: fmt(amount) })),
-      filters: categories.slice(0, 5).map(([category]) => ({ label: category, question: `¿Cuánto gasté en ${category} ${period.label}?` })),
+      followUps: categories.slice(0, 5).map(([category]) => ({ label: category, question: `¿Cuánto gasté en ${category} ${period.label}?` })),
       asOf: snapshot.asOf,
       mode: 'local',
     };
@@ -516,6 +603,33 @@ interface OpenRouterResponse {
   error?: { message?: string };
 }
 
+function plainAnswer(value: string): string {
+  return value
+    .trim()
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/`([^`]+)`/g, '$1');
+}
+
+function parseAssistantContent(content: string, question: string): { answer: string; followUps: AssistantFollowUp[] } {
+  const raw = content.trim();
+  const jsonText = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  try {
+    const parsed = JSON.parse(jsonText) as { answer?: unknown; followUps?: unknown };
+    if (parsed && typeof parsed.answer === 'string') {
+      const answer = plainAnswer(parsed.answer);
+      return {
+        answer,
+        followUps: isNoResultAnswer(answer) ? [] : sanitizeFollowUps(parsed.followUps, question),
+      };
+    }
+  } catch {
+    // La respuesta textual sigue siendo válida aunque el modelo no haya
+    // respetado el formato estructurado.
+  }
+  return { answer: plainAnswer(raw), followUps: [] };
+}
+
 const REPORT_TOOL = {
   type: 'function',
   function: {
@@ -550,7 +664,7 @@ export async function answerAssistant(
 ): Promise<AssistantReply> {
   const wantsFile = /\b(pdf|excel|xlsx|reporte|exporta|exportar|archivo)\b/i.test(question);
   const local = wantsFile ? null : localAssistantReply(question, snapshot);
-  if (local) return local;
+  if (local) return withLocalFollowUps(local, question);
 
   const apiKey = options.apiKey?.trim();
   if (!apiKey) return fallbackReply(snapshot, 'Falta configurar OPENROUTER_API_KEY en el servidor.');
@@ -603,7 +717,7 @@ async function answerAssistantWithTools(
   const baseUrl = (options.baseUrl?.trim() || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
   const model = options.model?.trim() || 'inclusionai/ling-3.0-flash';
   const facts = JSON.stringify(snapshot);
-  const system = `You are MiFlota assistant for a fleet owner in Paraguay. Answer in clear Spanish. Use only the facts in this JSON; money is PYG. Never invent numbers, people, vehicles or dates. Net income means collected money minus expenses. If the user asks for PDF, Excel, XLSX, a report or an export, call generate_fleet_report.\n\nFLEET DATA (cutoff ${snapshot.asOf}):\n${facts}`;
+  const system = `You are MiFlota assistant for a fleet owner in Paraguay. Answer in clear Spanish. Use only the facts in this JSON; money is PYG. Never invent numbers, people, vehicles or dates. Net income means collected money minus expenses. If the user asks for PDF, Excel, XLSX, a report or an export, call generate_fleet_report.\n\nAfter answering, return ONLY valid JSON in this exact shape: {"answer":"respuesta para el usuario","followUps":[{"label":"texto corto","question":"pregunta concreta"}]}. Include 2 or 3 useful follow-up questions based on the current question and recent conversation. If there is no data, no result, an error, or no useful follow-up, use an empty followUps array. Do not use Markdown outside the JSON.\n\nFLEET DATA (cutoff ${snapshot.asOf}):\n${facts}`;
   const messages: OpenRouterMessage[] = [
     { role: 'system', content: system },
     ...history.slice(-6).map((item) => ({ role: item.role, content: item.content.slice(0, 1200) })),
@@ -648,13 +762,16 @@ async function answerAssistantWithTools(
     body = await callModel(messages);
     message = body?.choices?.[0]?.message;
   }
-  const answer = (typeof message?.content === 'string' ? message.content : '')
-    .trim()
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/__(.*?)__/g, '$1')
-    .replace(/`([^`]+)`/g, '$1');
-  if (!answer) throw new Error('OpenRouter returned an empty answer');
-  return { answer, cards: [], asOf: snapshot.asOf, mode: 'openrouter', ...(files.length ? { files } : {}) };
+  const parsed = parseAssistantContent(typeof message?.content === 'string' ? message.content : '', question);
+  if (!parsed.answer) throw new Error('OpenRouter returned an empty answer');
+  return {
+    answer: parsed.answer,
+    cards: [],
+    followUps: parsed.followUps,
+    asOf: snapshot.asOf,
+    mode: 'openrouter',
+    ...(files.length ? { files } : {}),
+  };
 }
 
 export function unavailableAssistantReply(snapshot: AssistantSnapshot, detail?: string): AssistantReply {

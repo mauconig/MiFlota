@@ -262,10 +262,17 @@ export interface AssistantFilter {
   question: string;
 }
 
+export interface AssistantFollowUp {
+  label: string;
+  question: string;
+}
+
 export interface AssistantReply {
   answer: string;
   cards: AssistantCard[];
   table?: AssistantTable;
+  followUps?: AssistantFollowUp[];
+  /** Compatibilidad temporal con respuestas de servidores anteriores. */
   filters?: AssistantFilter[];
   asOf: string;
   mode: 'local' | 'openrouter' | 'fallback';

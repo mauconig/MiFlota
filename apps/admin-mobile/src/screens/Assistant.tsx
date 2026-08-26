@@ -3,7 +3,7 @@ import { ActivityIndicator, Keyboard, Linking, Pressable, ScrollView, StyleSheet
 import { KeyboardChatScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useSharedValue } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
-import { askAssistant, SinSesion, type AssistantAction, type AssistantCard, type AssistantHistoryItem, type AssistantTable } from '../api';
+import { askAssistant, SinSesion, type AssistantAction, type AssistantCard, type AssistantFollowUp, type AssistantHistoryItem, type AssistantTable } from '../api';
 import { API_BASE } from '../config';
 import { Pagination } from '../components/Pagination';
 
@@ -13,6 +13,7 @@ interface ChatMessage {
   text: string;
   cards?: AssistantCard[];
   table?: AssistantTable;
+  followUps?: AssistantFollowUp[];
   filters?: { label: string; question: string }[];
   asOf?: string;
   notice?: string;
@@ -105,6 +106,18 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
   const listRef = useRef<React.ElementRef<typeof KeyboardChatScrollView>>(null);
   const composerHeight = useSharedValue(0);
   const nextId = useRef(1);
+  const previousMessageCount = useRef(messages.length);
+
+  useEffect(() => {
+    const messageCountIncreased = messages.length > previousMessageCount.current;
+    previousMessageCount.current = messages.length;
+    if (!messageCountIncreased) return;
+
+    const frame = requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [messages.length]);
 
   const send = async (raw: string) => {
     const question = raw.trim();
@@ -130,6 +143,7 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
           text: reply.answer,
           cards: reply.cards,
           table: reply.table,
+          followUps: reply.followUps ?? reply.filters,
           filters: reply.filters,
           asOf: reply.asOf,
           notice: reply.notice,
@@ -178,11 +192,12 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
           </View>
         )}
         {!!item.table?.rows.length && <ResultTable table={item.table} onAction={activateAction} />}
-        {!!item.filters?.length && (
-          <View style={styles.filters}>
-            {item.filters.map((filter) => (
-              <Pressable key={`${item.id}-${filter.label}`} onPress={() => void send(filter.question)} disabled={sending} style={styles.filter} accessibilityRole="button">
-                <Text style={styles.filterText}>{filter.label}</Text>
+        {!!(item.followUps ?? item.filters)?.length && !item.error && (
+          <View style={styles.followUps}>
+            <Text style={styles.followUpsLabel}>TAMBIÉN PODÉS PREGUNTAR</Text>
+            {(item.followUps ?? item.filters)?.map((followUp) => (
+              <Pressable key={`${item.id}-${followUp.question}`} onPress={() => void send(followUp.question)} disabled={sending} style={styles.followUp} accessibilityRole="button">
+                <Text style={styles.followUpText}>{followUp.label}</Text>
               </Pressable>
             ))}
           </View>
@@ -207,11 +222,10 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
     <View style={styles.screen}>
       <KeyboardChatScrollView
         ref={listRef}
-        keyboardLiftBehavior="whenAtEnd"
+        keyboardLiftBehavior="never"
         extraContentPadding={composerHeight}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.list}
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
       >
         {messages.map((message) => (
           <View key={message.id}>{renderMessage(message)}</View>
@@ -301,9 +315,10 @@ const styles = StyleSheet.create({
   tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#eee7dc', paddingHorizontal: 10, paddingVertical: 9 },
   tableCell: { minWidth: 104, flex: 1, color: '#3b3831', fontSize: 10, lineHeight: 14, paddingRight: 8 },
   tableHeader: { color: '#7e5a1e', fontWeight: '800', fontSize: 9 },
-  filters: { alignSelf: 'stretch', flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 2 },
-  filter: { borderWidth: 1, borderColor: '#e4d7c3', backgroundColor: '#fff8e9', borderRadius: 16, paddingHorizontal: 11, paddingVertical: 8 },
-  filterText: { color: '#6e4a13', fontSize: 10, fontWeight: '700' },
+  followUps: { alignSelf: 'stretch', flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 2 },
+  followUpsLabel: { width: '100%', color: '#8a5d16', fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
+  followUp: { borderWidth: 1, borderColor: '#e4d7c3', backgroundColor: '#fff8e9', borderRadius: 16, paddingHorizontal: 11, paddingVertical: 8 },
+  followUpText: { color: '#6e4a13', fontSize: 10, fontWeight: '700' },
   notice: { maxWidth: '92%', borderRadius: 12, backgroundColor: '#fdf0dd', paddingHorizontal: 10, paddingVertical: 7 },
   noticeText: { color: '#835c18', fontSize: 10, lineHeight: 14 },
   files: { alignSelf: 'stretch', gap: 7, marginTop: 2 },
