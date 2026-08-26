@@ -26,6 +26,7 @@ export function Detalle({ v }: { v: MobileView }) {
   const [alertPage, setAlertPage] = useState(0);
   const [movPage, setMovPage] = useState(0);
   const [cuotaPage, setCuotaPage] = useState(0);
+  const [activeTable, setActiveTable] = useState<'movs' | 'cuotas'>('movs');
   const alertKey = useMemo(() => dc?.alerts.map((alert) => `${alert.txt}-${alert.sub}`).join('|') ?? '', [dc?.alerts]);
   const movKey = useMemo(() => dc?.movs.map((mov) => String(mov.id)).join('|') ?? '', [dc?.movs]);
   const cuotaKey = useMemo(() => dc?.cuotas.map((cuota) => String(cuota.id)).join('|') ?? '', [dc?.cuotas]);
@@ -35,6 +36,9 @@ export function Detalle({ v }: { v: MobileView }) {
   const visibleAlerts = dc?.alerts.slice(alertPage * ALERT_PAGE_SIZE, (alertPage + 1) * ALERT_PAGE_SIZE) ?? [];
   const visibleMovs = dc?.movs.slice(movPage * MOV_PAGE_SIZE, (movPage + 1) * MOV_PAGE_SIZE) ?? [];
   const visibleCuotas = dc?.cuotas.slice(cuotaPage * CUOTA_PAGE_SIZE, (cuotaPage + 1) * CUOTA_PAGE_SIZE) ?? [];
+  const activeRows = activeTable === 'movs' ? visibleMovs : visibleCuotas;
+  const activeTitle = activeTable === 'movs' ? 'Movimientos' : 'Cuotas';
+  const activeCount = activeTable === 'movs' ? dc?.movCount : dc?.cuotaCount;
 
   useEffect(() => {
     setAlertPage(0);
@@ -59,6 +63,10 @@ export function Detalle({ v }: { v: MobileView }) {
   useEffect(() => {
     setCuotaPage((current) => Math.min(current, cuotaPageCount - 1));
   }, [cuotaPageCount]);
+
+  useEffect(() => {
+    setActiveTable('movs');
+  }, [dc?.car.id]);
 
   if (!dc) return null;
   return (
@@ -165,33 +173,46 @@ export function Detalle({ v }: { v: MobileView }) {
         </View>
       )}
 
-      <View style={{ gap: 8 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 4 }}>
-          <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c' }}>Movimientos</Text>
-          <Text style={{ fontSize: 11, color: '#6b665c' }}>{dc.movCount}</Text>
-        </View>
-        <View style={{ backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 20, paddingHorizontal: 14 }}>
-          {dc.noMovs && <Text style={{ paddingVertical: 18, textAlign: 'center', fontSize: 12, color: '#6b665c' }}>Todavía no hay movimientos en este vehículo</Text>}
-          {visibleMovs.map((m) => (
-            <MovRow key={m.id} m={m} />
-          ))}
-        </View>
-        <Pagination page={movPage} pageSize={MOV_PAGE_SIZE} total={dc.movs.length} itemLabel="movimientos" onPageChange={setMovPage} />
+      <View style={{ backgroundColor: '#f1ede5', borderRadius: 17, padding: 4, flexDirection: 'row', gap: 4 }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: activeTable === 'movs' }}
+          onPress={() => setActiveTable('movs')}
+          style={{ flex: 1, minHeight: 48, borderRadius: 13, backgroundColor: activeTable === 'movs' ? '#16150f' : 'transparent', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 }}
+        >
+          <Text style={{ color: activeTable === 'movs' ? '#fffdf8' : '#6b665c', fontSize: 13, fontWeight: '700' }}>Movimientos</Text>
+          <Text style={{ color: activeTable === 'movs' ? '#d8d1c2' : '#8b8478', fontSize: 11, marginTop: 1 }}>{dc.movCount}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: activeTable === 'cuotas' }}
+          onPress={() => setActiveTable('cuotas')}
+          style={{ flex: 1, minHeight: 48, borderRadius: 13, backgroundColor: activeTable === 'cuotas' ? '#16150f' : 'transparent', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 }}
+        >
+          <Text style={{ color: activeTable === 'cuotas' ? '#fffdf8' : '#6b665c', fontSize: 13, fontWeight: '700' }}>Cuotas</Text>
+          <Text style={{ color: activeTable === 'cuotas' ? '#d8d1c2' : '#8b8478', fontSize: 11, marginTop: 1 }}>{dc.cuotaCount}</Text>
+        </Pressable>
       </View>
 
       <View style={{ gap: 8 }}>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 4 }}>
-          <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c' }}>Cuotas</Text>
-          <Text style={{ fontSize: 11, color: '#6b665c' }}>{dc.cuotaCount}</Text>
+          <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c' }}>{activeTitle}</Text>
+          <Text style={{ fontSize: 11, color: '#6b665c' }}>{activeCount}</Text>
         </View>
         <View style={{ backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 20, paddingHorizontal: 14 }}>
-          {dc.noCuotas && <Text style={{ paddingVertical: 18, textAlign: 'center', fontSize: 12, color: '#6b665c' }}>Todavía no hay cuotas en este vehículo</Text>}
-          {visibleCuotas.map((m) => (
+          {activeTable === 'movs' && dc.noMovs && <Text style={{ paddingVertical: 18, textAlign: 'center', fontSize: 12, color: '#6b665c' }}>Todavía no hay movimientos en este vehículo</Text>}
+          {activeTable === 'cuotas' && dc.noCuotas && <Text style={{ paddingVertical: 18, textAlign: 'center', fontSize: 12, color: '#6b665c' }}>No hay cuotas en este vehiculo</Text>}
+          {activeRows.map((m) => (
             <MovRow key={m.id} m={m} />
           ))}
         </View>
-        <Pagination page={cuotaPage} pageSize={CUOTA_PAGE_SIZE} total={dc.cuotas.length} itemLabel="cuotas" onPageChange={setCuotaPage} />
+        {activeTable === 'movs' ? (
+          <Pagination page={movPage} pageSize={MOV_PAGE_SIZE} total={dc.movs.length} itemLabel="movimientos" onPageChange={setMovPage} />
+        ) : (
+          <Pagination page={cuotaPage} pageSize={CUOTA_PAGE_SIZE} total={dc.cuotas.length} itemLabel="cuotas" onPageChange={setCuotaPage} />
+        )}
       </View>
+
     </View>
   );
 }

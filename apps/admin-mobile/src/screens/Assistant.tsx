@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Keyboard, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Keyboard, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardChatScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
+import { useSharedValue } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 import { askAssistant, SinSesion, type AssistantAction, type AssistantCard, type AssistantHistoryItem, type AssistantTable } from '../api';
 import { API_BASE } from '../config';
@@ -100,7 +102,8 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
   const [messages, setMessages] = useState<ChatMessage[]>([INTRO]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
-  const listRef = useRef<FlatList<ChatMessage>>(null);
+  const listRef = useRef<React.ElementRef<typeof KeyboardChatScrollView>>(null);
+  const composerHeight = useSharedValue(0);
   const nextId = useRef(1);
 
   const send = async (raw: string) => {
@@ -159,7 +162,7 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
     else void send(action.question);
   };
 
-  const renderMessage = ({ item }: { item: ChatMessage }) => {
+  const renderMessage = (item: ChatMessage) => {
     const mine = item.role === 'user';
     return (
       <View style={[styles.messageWrap, mine && styles.messageWrapMine]}>
@@ -202,15 +205,18 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
 
   return (
     <View style={styles.screen}>
-      <FlatList
+      <KeyboardChatScrollView
         ref={listRef}
-        data={messages}
-        renderItem={renderMessage}
-        keyExtractor={(item) => item.id}
+        keyboardLiftBehavior="whenAtEnd"
+        extraContentPadding={composerHeight}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.list}
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
-        ListFooterComponent={
+      >
+        {messages.map((message) => (
+          <View key={message.id}>{renderMessage(message)}</View>
+        ))}
+        <View style={{ gap: 12 }}>
           <View style={{ gap: 12 }}>
             {messages.length === 1 && (
               <View style={styles.suggestions}>
@@ -231,10 +237,15 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
               </View>
             )}
           </View>
-        }
-      />
+        </View>
+      </KeyboardChatScrollView>
 
-      <View style={styles.composer}>
+      <KeyboardStickyView
+        style={styles.composer}
+        onLayout={(event) => {
+          composerHeight.value = event.nativeEvent.layout.height;
+        }}
+      >
         <TextInput
           value={draft}
           onChangeText={setDraft}
@@ -258,14 +269,14 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
             <Path d="M22 2 11 13" />
           </Svg>
         </Pressable>
-      </View>
+      </KeyboardStickyView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  list: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 18, gap: 12 },
+  list: { flexGrow: 1, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 18, gap: 12 },
   suggestions: { gap: 9, marginBottom: 4 },
   suggestionLabel: { paddingLeft: 3, fontSize: 10, fontWeight: '700', letterSpacing: 1, color: '#6b665c' },
   suggestionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

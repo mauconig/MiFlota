@@ -587,7 +587,14 @@ const paidBy = (m: Mov, c: Car) => nombreChofer(m, c);
  *
  * Un ajuste (condonación) baja la deuda pero no es caja, así que no suma acá.
  */
-function stats(movs: Mov[], apls: Aplicacion[], fm: (m: Mov) => boolean, fa: (a: Aplicacion) => boolean) {
+function stats(
+  movs: Mov[],
+  apls: Aplicacion[],
+  fm: (m: Mov) => boolean,
+  fa: (a: Aplicacion) => boolean,
+  pagos?: Pago[],
+  fp?: (p: Pago) => boolean,
+) {
   let fact = 0;
   let egr = 0;
   const byCat: Record<string, number> = {};
@@ -601,9 +608,17 @@ function stats(movs: Mov[], apls: Aplicacion[], fm: (m: Mov) => boolean, fa: (a:
     }
   });
   let ing = 0;
-  apls.forEach((a) => {
-    if (a.tipo === 'pago' && fa(a)) ing += a.monto;
-  });
+  if (pagos && fp) {
+    // Cobrado es caja: un pago válido cuenta aunque todavía no haya una
+    // cuota de ingreso contra la cual imputarlo.
+    pagos.forEach((p) => {
+      if (p.tipo === 'pago' && fp(p)) ing += p.monto;
+    });
+  } else {
+    apls.forEach((a) => {
+      if (a.tipo === 'pago' && fa(a)) ing += a.monto;
+    });
+  }
   // Una cuota impaga no es ganancia: por eso el neto se calcula con lo cobrado.
   return { ing, fact, egr, net: ing - egr, byCat };
 }
@@ -881,9 +896,11 @@ export function useFleetView(
   /** Cuánto de un pago cayó dentro del período mirado. */
   const inRA = (a: Aplicacion) => a.fecha >= r.start && a.fecha <= r.end;
   const inPrevA = (a: Aplicacion) => a.fecha >= prevStart && a.fecha <= prevEnd;
+  const inRP = (p: Pago) => p.fecha >= r.start && p.fecha <= r.end;
+  const inPrevP = (p: Pago) => p.fecha >= prevStart && p.fecha <= prevEnd;
 
-  const tot = stats(movs, aplicaciones, inR, inRA);
-  const prev = stats(movs, aplicaciones, inPrev, inPrevA);
+  const tot = stats(movs, aplicaciones, inR, inRA, pagos, inRP);
+  const prev = stats(movs, aplicaciones, inPrev, inPrevA, pagos, inPrevP);
   const active = cars.filter((c) => c.estado !== 'baja');
   // La pantalla de Cobros lista todos los cobros del período, no solo los que
   // faltan: ver los ya cobrados es lo que da contexto a lo que falta.
@@ -945,7 +962,7 @@ export function useFleetView(
   });
   alertList.sort((a, b) => b.sev - a.sev);
 
-  const perCar = cars.map((c) => ({ c, ...stats(movs, aplicaciones, (m) => m.carId === c.id && inR(m), (a) => a.carId === c.id && inRA(a)) }));
+  const perCar = cars.map((c) => ({ c, ...stats(movs, aplicaciones, (m) => m.carId === c.id && inR(m), (a) => a.carId === c.id && inRA(a), pagos, (p) => p.carId === c.id && inRP(p)) }));
   const maxNet = Math.max(...perCar.map((x) => Math.abs(x.net)), 1);
   const filtered = perCar.filter((x) => (st.filter === 'todos' ? true : x.c.estado === st.filter) && matches(st.carQ, x.c.plate, x.c.model, x.c.driver, x.c.gpsTag));
   const keyF: (x: (typeof perCar)[number]) => string | number =
@@ -1091,7 +1108,7 @@ export function useFleetView(
         borrar: () => {},
       };
     }
-    const cs = stats(movs, aplicaciones, (m) => m.carId === c.id && inR(m), (a) => a.carId === c.id && inRA(a));
+    const cs = stats(movs, aplicaciones, (m) => m.carId === c.id && inR(m), (a) => a.carId === c.id && inRA(a), pagos, (p) => p.carId === c.id && inRP(p));
     const configuredService = svcConfigured(c);
     const dLeft = configuredService ? svcDaysLeft(c) : 0;
     const svcTotalDias = Math.max(1, daysBetween(c.lastServiceDate, svcNextDate(c)));
@@ -1101,7 +1118,7 @@ export function useFleetView(
       const d = new Date(2026, 7 - k, 1);
       const m0 = d.getMonth();
       const enMes = (f: Date) => f.getMonth() === m0 && f.getFullYear() === 2026;
-      const s2 = stats(movs, aplicaciones, (m) => m.carId === c.id && enMes(m.date), (a) => a.carId === c.id && enMes(a.fecha));
+      const s2 = stats(movs, aplicaciones, (m) => m.carId === c.id && enMes(m.date), (a) => a.carId === c.id && enMes(a.fecha), pagos, (p) => p.carId === c.id && enMes(p.fecha));
       months.push({ label: MES[m0], ing: s2.ing, egr: s2.egr, net: s2.net });
     }
     const mMax = Math.max(...months.map((m) => Math.max(m.ing, m.egr)), 1);
@@ -1690,7 +1707,7 @@ export function useFleetView(
         .map(([key, grupo]) => {
           const c = grupo[0];
           const propios = (m: Mov) => claveChofer(m, carDe.get(m.carId)) === key;
-          const dStats = stats(movs, aplicaciones, (m) => propios(m) && inR(m), (a) => a.driver === key && inRA(a));
+          const dStats = stats(movs, aplicaciones, (m) => propios(m) && inR(m), (a) => a.driver === key && inRA(a), pagos, (p) => (p.driverId != null ? String(p.driverId) : p.driver) === key && inRP(p));
           const pend = grupo.reduce((acc, car) => acc + pendMovs.filter((m) => m.carId === car.id && propios(m)).reduce((a, m) => a + deudaDe(m), 0), 0);
           const ok = pend === 0;
           return {

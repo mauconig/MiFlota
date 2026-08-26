@@ -25,7 +25,15 @@ export function Login({ onEntrar, onBiometria }: { onEntrar: (usuario: string, p
   const inputStyle = { borderWidth: 1, borderColor: '#e6ded0', borderRadius: 14, paddingVertical: 13, paddingHorizontal: 14, fontSize: 15, color: '#1a1a18', backgroundColor: '#fffdf8' };
 
   return (
-    <KeyboardAwareScrollView style={{ flex: 1, backgroundColor: '#f4f0e8' }} bottomOffset={24} contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }} keyboardShouldPersistTaps="handled">
+    <KeyboardAwareScrollView
+      style={{ flex: 1, backgroundColor: '#f4f0e8' }}
+      mode="layout"
+      bottomOffset={32}
+      extraKeyboardSpace={24}
+      keyboardDismissMode="on-drag"
+      contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24, paddingBottom: 48 }}
+      keyboardShouldPersistTaps="handled"
+    >
         <View style={{ width: '100%', maxWidth: 340, gap: 20 }}>
         <View style={{ alignItems: 'center', gap: 10, marginBottom: 4 }}>
           <View style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: '#e8a13a', alignItems: 'center', justifyContent: 'center' }}>

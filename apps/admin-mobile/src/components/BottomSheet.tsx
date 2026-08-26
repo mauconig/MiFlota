@@ -35,7 +35,15 @@ export function BottomSheet({ title, onClose, children }: { title: string; onClo
                 </Svg>
               </Pressable>
             </View>
-            <KeyboardAwareScrollView bottomOffset={24} contentContainerStyle={{ gap: 10 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <KeyboardAwareScrollView
+              mode="layout"
+              bottomOffset={32}
+              extraKeyboardSpace={24}
+              keyboardDismissMode="on-drag"
+              contentContainerStyle={{ gap: 10, paddingBottom: 24 }}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
               {children}
             </KeyboardAwareScrollView>
           </Pressable>

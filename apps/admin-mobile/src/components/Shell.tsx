@@ -1,5 +1,5 @@
 import { View } from 'react-native';
-import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import { KeyboardAwareScrollView, useKeyboardState } from 'react-native-keyboard-controller';
 import type { MobileView } from '../useMobileView';
 import { TabHeader, SubHeader } from './Header';
 import { BottomNav } from './BottomNav';
@@ -23,6 +23,9 @@ import { Assistant } from '../screens/Assistant';
 import { Perfil } from '../screens/Perfil';
 
 export function Shell({ v, nombre, usuario, onLogout }: { v: MobileView; nombre: string; usuario: string; onLogout: () => void }) {
+  const keyboardVisible = useKeyboardState((state) => state.isVisible);
+  const showBottomNav = v.screen !== 'registrar' && !(v.isAssistant && keyboardVisible);
+
   return (
     // BottomNav queda AFUERA del KeyboardAvoidingView a propósito: si quedara
     // adentro, cualquier hueco en que se trabe el padding del teclado (pasó
@@ -44,7 +47,15 @@ export function Shell({ v, nombre, usuario, onLogout }: { v: MobileView; nombre:
             <Reportes v={v} />
           </View>
         ) : (
-          <KeyboardAwareScrollView style={{ flex: 1 }} bottomOffset={24} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
+          <KeyboardAwareScrollView
+            style={{ flex: 1 }}
+            mode="layout"
+            bottomOffset={32}
+            extraKeyboardSpace={24}
+            keyboardDismissMode="on-drag"
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }}
+          >
             {v.screen === 'dashboard' && <Dashboard v={v} />}
             {v.screen === 'flota' && <Flota v={v} />}
             {v.screen === 'gastos' && <Gastos v={v} />}
@@ -66,7 +77,7 @@ export function Shell({ v, nombre, usuario, onLogout }: { v: MobileView; nombre:
         {v.choferSheet.open && <ChoferSheet v={v} />}
         {v.registroChoice.open && <RegistroChoiceSheet v={v} />}
         <Toast msg={v.toast} />
-        {v.screen !== 'registrar' && <BottomNav v={v} />}
+        {showBottomNav && <BottomNav v={v} />}
       </View>
     </View>
   );
