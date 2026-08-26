@@ -40,7 +40,7 @@ import {
   quienChofer,
 } from './authChofer.js';
 import { imputar } from './cobranza.js';
-import { answerAssistant, buildAssistantSnapshot, unavailableAssistantReply, type AssistantFile, type AssistantHistoryItem, type AssistantReportRequest } from './assistant.js';
+import { answerAssistant, buildAssistantSnapshot, unavailableAssistantReply, type AssistantFile, type AssistantHistoryItem, type AssistantQueryGroup, type AssistantQueryRequest, type AssistantQueryResult, type AssistantQueryRow, type AssistantReportRequest } from './assistant.js';
 import { sendOwnerPush } from './push.js';
 import * as XLSX from 'xlsx';
 import PDFDocument from 'pdfkit';
@@ -276,6 +276,170 @@ function reportRange(period: AssistantReportRequest['period'], to: string): stri
   if (period === 'week') return isoOffset(to, -6);
   if (period === 'month') return `${to.slice(0, 7)}-01`;
   return null;
+}
+
+function queryNormalise(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+function queryRange(request: AssistantQueryRequest): { from: string | null; to: string } {
+  const today = hoyISO();
+  const to = request.period === 'personalizado' && request.to && FECHA.test(request.to) ? request.to : today;
+  if (to > today) throw new Error('La consulta no puede usar una fecha futura');
+  if (request.period === 'personalizado') {
+    if (!request.from || !FECHA.test(request.from) || request.from > to) throw new Error('El período personalizado no es válido');
+    return { from: request.from, to };
+  }
+  if (request.period === 'semana') return { from: isoOffset(to, -6), to };
+  if (request.period === 'mes') return { from: `${to.slice(0, 7)}-01`, to };
+  if (request.period === '90dias') return { from: isoOffset(to, -89), to };
+  return { from: null, to };
+}
+
+function queryMoney(value: number): string {
+  return reportMoney(value);
+}
+
+/** Ejecuta las consultas que pide el modelo sobre filas ya aisladas por dueño.
+ * No acepta SQL ni nombres de columnas: sólo las dimensiones explícitas del
+ * contrato, así una pregunta libre no puede escapar del owner autenticado. */
+function queryFleetData(ownerId: number, request: AssistantQueryRequest): AssistantQueryResult {
+  const entity = request.entity;
+  const metric = request.metric ?? (entity === 'gastos' ? 'gastos' : entity === 'pagos' ? 'cobrado' : entity === 'deudas' ? 'deuda' : entity === 'vehiculos' ? 'cantidad' : 'facturado');
+  const groupBy = request.groupBy ?? (entity === 'deudas' ? 'chofer' : 'ninguno');
+  const range = queryRange(request);
+  const cars = selCars.all(ownerId) as CarRow[];
+  const movements = selMovs.all(ownerId) as MovRow[];
+  const payments = selPagos.all(ownerId) as PagoRow[];
+  const carById = new Map(cars.map((car) => [car.id, car]));
+  const vehicleTerm = queryNormalise(request.vehicle ?? '');
+  const categoryTerm = queryNormalise(request.category ?? '');
+  const driverTerm = queryNormalise(request.driver ?? '');
+  const allowedCarIds = new Set(cars.filter((car) => !vehicleTerm || queryNormalise(`${car.id} ${car.plate} ${car.model}`).includes(vehicleTerm)).map((car) => car.id));
+  if (vehicleTerm && !allowedCarIds.size) return { entity, metric, groupBy, from: range.from, to: range.to, rows: [] };
+  const carAllowed = (carId: string | null) => !vehicleTerm || (carId !== null && allowedCarIds.has(carId));
+  const dateAllowed = (date: string) => date <= range.to && (!range.from || date >= range.from);
+  const driverOf = (mov: MovRow) => mov.driver || carById.get(mov.car_id)?.driver || 'Sin chofer';
+  const carLabel = (carId: string | null) => {
+    const car = carId ? carById.get(carId) : undefined;
+    return car ? `${car.plate} · ${car.model}` : 'Sin vehículo';
+  };
+  const groupLabel = (group: AssistantQueryGroup, carId: string | null, driver: string, category?: string, date?: string) => {
+    if (group === 'auto') return carLabel(carId);
+    if (group === 'modelo') return carId ? (carById.get(carId)?.model || 'Sin modelo') : 'Sin modelo';
+    if (group === 'chofer') return driver || 'Sin chofer';
+    if (group === 'categoria') return category || 'Sin categoría';
+    if (group === 'fecha') return date || 'Sin fecha';
+    return 'Total';
+  };
+  const rows: AssistantQueryRow[] = [];
+
+  if (entity === 'vehiculos') {
+    const filtered = cars.filter((car) => carAllowed(car.id) && (!driverTerm || queryNormalise(car.driver).includes(driverTerm)));
+    return {
+      entity, metric, groupBy, from: range.from, to: range.to,
+      rows: filtered.slice(0, 50).map((car) => ({
+        label: car.plate,
+        subtitle: car.model,
+        carId: car.id,
+        details: {
+          Modelo: car.model,
+          Año: String(car.year),
+          Chofer: car.driver || 'Sin chofer',
+          Estado: car.estado,
+          'Último service': car.last_service_date || 'Sin datos',
+          'Service cada': car.service_cada ? `${car.service_cada} ${car.service_unidad || 'km'}` : 'Sin datos',
+          Seguro: car.seguro_nombre || 'Sin datos',
+          'Vencimiento seguro': car.seguro_date || 'Sin datos',
+          Kilometraje: car.kilometraje == null ? 'Sin datos' : String(car.kilometraje),
+          'Kilometraje actualizado': car.kilometraje_actualizado || 'Sin datos',
+        },
+      })),
+    };
+  }
+
+  if (entity === 'deudas') {
+    const charges = movements.filter((mov) => mov.type === 'ingreso' && mov.date <= range.to && carAllowed(mov.car_id));
+    const availablePayments = payments.filter((payment) => payment.fecha <= range.to && carAllowed(payment.car_id));
+    const { cobrado } = imputar(charges, availablePayments, driverOf);
+    const grouped = new Map<string, { value: number; count: number; subtitle: string }>();
+    for (const charge of charges) {
+      const driver = driverOf(charge);
+      if (driverTerm && !queryNormalise(driver).includes(driverTerm)) continue;
+      const current = grouped.get(driver) ?? { value: 0, count: 0, subtitle: '' };
+      current.value += Math.max(0, charge.amount - (cobrado.get(charge.id) ?? 0));
+      current.count += 1;
+      current.subtitle = carById.get(charge.car_id)?.plate ?? '';
+      grouped.set(driver, current);
+    }
+    for (const [label, item] of grouped) rows.push({ label, value: item.value, displayValue: queryMoney(item.value), subtitle: `${item.count} cuotas · ${item.subtitle || 'sin auto'}` });
+  } else {
+    const grouped = new Map<string, { value: number; count: number; subtitle: string; carId?: string; details?: Record<string, string> }>();
+    const add = (label: string, value: number, subtitle: string, carId?: string, details?: Record<string, string>) => {
+      const current = grouped.get(label) ?? { value: 0, count: 0, subtitle, carId, details };
+      current.value += value;
+      current.count += 1;
+      if (carId) current.carId = carId;
+      grouped.set(label, current);
+    };
+    const isGrouped = groupBy !== 'ninguno' || entity === 'finanzas';
+    const wantsBilled = metric === 'facturado';
+    const wantsCollected = metric === 'cobrado';
+    const wantsExpenses = metric === 'gastos';
+    const wantsNet = metric === 'ganancia';
+    if (entity === 'finanzas' || entity === 'movimientos') {
+      for (const mov of movements) {
+        if (!dateAllowed(mov.date) || !carAllowed(mov.car_id)) continue;
+        const driver = driverOf(mov);
+        const category = mov.cat ?? 'Sin categoría';
+        if (driverTerm && !queryNormalise(driver).includes(driverTerm)) continue;
+        if (categoryTerm && !queryNormalise(category).includes(categoryTerm)) continue;
+        const isIncome = mov.type === 'ingreso';
+        if (entity === 'movimientos' || wantsBilled || wantsExpenses || wantsNet) {
+          if (entity === 'finanzas' && ((wantsBilled && !isIncome) || (wantsExpenses && isIncome))) continue;
+          if (entity === 'finanzas' && wantsNet) {
+            const value = isIncome ? 0 : -mov.amount;
+            const label = groupLabel(groupBy, mov.car_id, driver, category, mov.date);
+            if (isGrouped) add(label, value, `${mov.date} · ${category}`, mov.car_id, { Fecha: mov.date, Vehículo: carLabel(mov.car_id), Categoría: category });
+          } else {
+            const value = entity === 'movimientos' ? 1 : mov.amount;
+            const label = groupLabel(groupBy, mov.car_id, driver, category, mov.date);
+            if (isGrouped) add(label, value, `${mov.date} · ${category}`, mov.car_id, { Fecha: mov.date, Vehículo: carLabel(mov.car_id), Categoría: category });
+            else rows.push({ label: mov.descripcion || category, value, displayValue: queryMoney(value), subtitle: `${mov.date} · ${carLabel(mov.car_id)}`, carId: mov.car_id, details: { Fecha: mov.date, Vehículo: carLabel(mov.car_id), Categoría: category, Tipo: isIncome ? 'Facturado' : 'Gasto' } });
+          }
+        }
+      }
+    }
+    if (entity === 'finanzas' || entity === 'pagos') {
+      for (const payment of payments) {
+        if (payment.tipo !== 'pago' || !dateAllowed(payment.fecha) || !carAllowed(payment.car_id)) continue;
+        if (driverTerm && !queryNormalise(payment.driver).includes(driverTerm)) continue;
+        if (!(entity === 'pagos' || wantsCollected || wantsNet)) continue;
+        const label = groupLabel(groupBy, payment.car_id, payment.driver, undefined, payment.fecha);
+        if (isGrouped) add(label, payment.monto, `${payment.fecha} · ${payment.driver}`, payment.car_id ?? undefined, { Fecha: payment.fecha, Vehículo: carLabel(payment.car_id), Chofer: payment.driver });
+        else rows.push({ label: payment.nota || 'Pago', value: payment.monto, displayValue: queryMoney(payment.monto), subtitle: `${payment.fecha} · ${payment.driver}`, carId: payment.car_id ?? undefined, details: { Fecha: payment.fecha, Vehículo: carLabel(payment.car_id), Chofer: payment.driver, Medio: payment.medio || 'Sin medio' } });
+      }
+    }
+    if (entity === 'gastos') {
+      for (const mov of movements) {
+        if (mov.type !== 'egreso' || !dateAllowed(mov.date) || !carAllowed(mov.car_id)) continue;
+        const category = mov.cat ?? 'Sin categoría';
+        if (categoryTerm && !queryNormalise(category).includes(categoryTerm)) continue;
+        const label = groupLabel(groupBy, mov.car_id, driverOf(mov), category, mov.date);
+        const items = selItems.all(mov.id) as GastoItemRow[];
+        const parts = items.map((item) => `${item.cantidad} x ${item.nombre} (${queryMoney(item.costo_unitario)})`).join('; ');
+        if (groupBy === 'ninguno') rows.push({ label: mov.descripcion || category, value: mov.amount, displayValue: queryMoney(mov.amount), subtitle: `${mov.date} · ${carLabel(mov.car_id)}`, carId: mov.car_id, details: { Fecha: mov.date, Vehículo: carLabel(mov.car_id), Categoría: category, Repuestos: parts || 'Sin detalle', 'Mano de obra': queryMoney(mov.mano_obra ?? 0) } });
+        else add(label, mov.amount, `${mov.date} · ${category}`, mov.car_id, { Fecha: mov.date, Vehículo: carLabel(mov.car_id), Categoría: category });
+      }
+    }
+    for (const [label, item] of grouped) rows.push({ label, value: item.value, displayValue: metric === 'cantidad' ? String(item.count) : queryMoney(item.value), subtitle: `${item.count} registro${item.count === 1 ? '' : 's'} · ${item.subtitle}`, carId: item.carId, details: item.details });
+  }
+
+  const sorted = rows.slice().sort((a, b) => (b.value ?? 0) - (a.value ?? 0) || a.label.localeCompare(b.label));
+  const limit = Math.min(50, Math.max(1, request.limit ?? 20));
+  const resultRows = sorted.slice(0, limit);
+  const total = rows.reduce((sum, row) => sum + (row.value ?? 0), 0);
+  return { entity, metric, groupBy, from: range.from, to: range.to, total, rows: resultRows };
 }
 
 function reportMoney(value: number): string {
@@ -781,6 +945,7 @@ app.post<{ Body: AssistantQueryBody }>('/api/assistant/query', async (req, reply
       model: process.env.OPENROUTER_MODEL,
       signal: controller.signal,
       generateReport: (request) => createAssistantReport(u.id, request),
+      queryFleet: (request) => Promise.resolve(queryFleetData(u.id, request)),
     });
   } catch (error) {
     req.log.warn({ error }, 'falló la consulta a OpenRouter');

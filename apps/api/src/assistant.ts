@@ -85,6 +85,44 @@ export interface AssistantReportRequest {
   category?: string;
 }
 
+export type AssistantQueryEntity = 'finanzas' | 'vehiculos' | 'pagos' | 'gastos' | 'deudas' | 'movimientos';
+export type AssistantQueryMetric = 'facturado' | 'cobrado' | 'gastos' | 'ganancia' | 'deuda' | 'cantidad';
+export type AssistantQueryGroup = 'auto' | 'modelo' | 'chofer' | 'categoria' | 'fecha' | 'ninguno';
+
+/** Consulta estructurada que el modelo puede pedirle al servidor. Nunca se
+ * convierte en SQL: la API la ejecuta sobre filas ya aisladas por owner_id. */
+export interface AssistantQueryRequest {
+  entity: AssistantQueryEntity;
+  metric?: AssistantQueryMetric;
+  groupBy?: AssistantQueryGroup;
+  period?: 'semana' | 'mes' | '90dias' | 'total' | 'personalizado';
+  from?: string;
+  to?: string;
+  vehicle?: string;
+  category?: string;
+  driver?: string;
+  limit?: number;
+}
+
+export interface AssistantQueryRow {
+  label: string;
+  value?: number;
+  displayValue?: string;
+  subtitle?: string;
+  details?: Record<string, string>;
+  carId?: string;
+}
+
+export interface AssistantQueryResult {
+  entity: AssistantQueryEntity;
+  metric: AssistantQueryMetric;
+  groupBy: AssistantQueryGroup;
+  from: string | null;
+  to: string;
+  total?: number;
+  rows: AssistantQueryRow[];
+}
+
 interface MoneySummary {
   from: string | null;
   to: string;
@@ -626,9 +664,38 @@ function plainAnswer(value: string): string {
     .replace(/`([^`]+)`/g, '$1');
 }
 
+function extractAnswerField(value: string): string | undefined {
+  const marker = /\{\s*"answer"\s*:\s*"/g;
+  let match: RegExpExecArray | null = null;
+  let lastMatch: RegExpExecArray | null = null;
+  while ((match = marker.exec(value))) lastMatch = match;
+  if (!lastMatch || lastMatch.index === undefined) return undefined;
+
+  const start = lastMatch.index + lastMatch[0].length;
+  let escaped = false;
+  let encoded = '';
+  for (let index = start; index < value.length; index += 1) {
+    const character = value[index];
+    if (character === '"' && !escaped) {
+      try {
+        return JSON.parse(`"${encoded}"`) as string;
+      } catch {
+        return encoded.replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+      }
+    }
+    encoded += character;
+    if (character === '\\' && !escaped) escaped = true;
+    else escaped = false;
+  }
+  return undefined;
+}
+
 function parseAssistantContent(content: string, question: string): { answer: string; followUps: AssistantFollowUp[] } {
   const raw = content.trim();
-  const jsonText = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  const fencedText = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  const firstBrace = fencedText.indexOf('{');
+  const lastBrace = fencedText.lastIndexOf('}');
+  const jsonText = firstBrace >= 0 && lastBrace > firstBrace ? fencedText.slice(firstBrace, lastBrace + 1) : fencedText;
   try {
     const parsed = JSON.parse(jsonText) as { answer?: unknown; followUps?: unknown };
     if (parsed && typeof parsed.answer === 'string') {
@@ -642,6 +709,8 @@ function parseAssistantContent(content: string, question: string): { answer: str
     // La respuesta textual sigue siendo válida aunque el modelo no haya
     // respetado el formato estructurado.
   }
+  const embeddedAnswer = extractAnswerField(raw);
+  if (embeddedAnswer) return { answer: plainAnswer(embeddedAnswer), followUps: [] };
   return { answer: plainAnswer(raw), followUps: [] };
 }
 
@@ -665,6 +734,31 @@ const REPORT_TOOL = {
   },
 } as const;
 
+const QUERY_TOOL = {
+  type: 'function',
+  function: {
+    name: 'query_fleet_data',
+    description: 'Consulta los datos reales de la flota. Debes usarla para cualquier pregunta sobre montos, vehículos, modelos, choferes, gastos, cobros, cuotas, deudas, movimientos o comparaciones. No respondas cifras desde la memoria ni sólo desde el resumen.',
+    parameters: {
+      type: 'object',
+      properties: {
+        entity: { type: 'string', enum: ['finanzas', 'vehiculos', 'pagos', 'gastos', 'deudas', 'movimientos'], description: 'Qué conjunto de datos consultar.' },
+        metric: { type: 'string', enum: ['facturado', 'cobrado', 'gastos', 'ganancia', 'deuda', 'cantidad'], description: 'Qué medir. Facturado son cuotas; cobrado son pagos reales tipo pago.' },
+        groupBy: { type: 'string', enum: ['auto', 'modelo', 'chofer', 'categoria', 'fecha', 'ninguno'], description: 'Cómo agrupar o comparar los resultados.' },
+        period: { type: 'string', enum: ['semana', 'mes', '90dias', 'total', 'personalizado'], description: 'Período de la consulta. Para rankings sin período explícito, usar total.' },
+        from: { type: 'string', description: 'Fecha inicial YYYY-MM-DD, sólo para período personalizado.' },
+        to: { type: 'string', description: 'Fecha final YYYY-MM-DD, sólo para período personalizado.' },
+        vehicle: { type: 'string', description: 'Chapa, modelo o id del vehículo si se indicó uno.' },
+        category: { type: 'string', description: 'Categoría de gasto si se indicó una.' },
+        driver: { type: 'string', description: 'Nombre del chofer si se indicó uno.' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Máximo de resultados a devolver.' },
+      },
+      required: ['entity'],
+      additionalProperties: false,
+    },
+  },
+} as const;
+
 export async function answerAssistant(
   question: string,
   history: AssistantHistoryItem[],
@@ -675,14 +769,16 @@ export async function answerAssistant(
     model?: string;
     signal?: AbortSignal;
     generateReport?: (request: AssistantReportRequest) => Promise<AssistantFile>;
+    queryFleet?: (request: AssistantQueryRequest) => Promise<AssistantQueryResult>;
   } = {},
 ): Promise<AssistantReply> {
   const wantsFile = /\b(pdf|excel|xlsx|reporte|exporta|exportar|archivo)\b/i.test(question);
-  const local = wantsFile ? null : localAssistantReply(question, snapshot);
-  if (local) return withLocalFollowUps(local, question, snapshot);
-
   const apiKey = options.apiKey?.trim();
-  if (!apiKey) return fallbackReply(snapshot, 'Falta configurar OPENROUTER_API_KEY en el servidor.');
+  if (!apiKey) {
+    const local = wantsFile ? null : localAssistantReply(question, snapshot);
+    if (local) return withLocalFollowUps(local, question, snapshot);
+    return fallbackReply(snapshot, 'Falta configurar OPENROUTER_API_KEY en el servidor.');
+  }
 
   return answerAssistantWithTools(question, history, snapshot, options);
 
@@ -726,13 +822,13 @@ async function answerAssistantWithTools(
   question: string,
   history: AssistantHistoryItem[],
   snapshot: AssistantSnapshot,
-  options: { apiKey?: string; baseUrl?: string; model?: string; signal?: AbortSignal; generateReport?: (request: AssistantReportRequest) => Promise<AssistantFile> },
+  options: { apiKey?: string; baseUrl?: string; model?: string; signal?: AbortSignal; generateReport?: (request: AssistantReportRequest) => Promise<AssistantFile>; queryFleet?: (request: AssistantQueryRequest) => Promise<AssistantQueryResult> },
 ): Promise<AssistantReply> {
   const apiKey = options.apiKey!.trim();
   const baseUrl = (options.baseUrl?.trim() || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
   const model = options.model?.trim() || 'inclusionai/ling-3.0-flash';
   const facts = JSON.stringify(snapshot);
-  const system = `You are MiFlota assistant for a fleet owner in Paraguay. Answer in clear Spanish. Use only the facts in this JSON; money is PYG. Never invent numbers, people, vehicles or dates. Net income means collected money minus expenses. If the user asks for PDF, Excel, XLSX, a report or an export, call generate_fleet_report. The server calculates all cards, charts and tables; do not create visual data, tables or long lists in the answer.\n\nAfter answering, return ONLY valid JSON in this exact shape: {"answer":"respuesta breve para el usuario","followUps":[{"label":"texto corto","question":"pregunta concreta"}]}. Include 2 or 3 useful follow-up questions based on the current question and recent conversation. If there is no data, no result, an error, or no useful follow-up, use an empty followUps array. Do not use Markdown outside the JSON.\n\nFLEET DATA (cutoff ${snapshot.asOf}):\n${facts}`;
+  const system = `You are MiFlota assistant for a fleet owner in Paraguay. Answer in clear Spanish. Use only the facts returned by the server; money is PYG. Never invent numbers, people, vehicles or dates. Net income means collected money minus expenses.\n\nIMPORTANT DATA RULE: For every question about fleet data, amounts, records, models, vehicles, drivers, expenses, payments, quotas, debts, rankings, comparisons or periods, you MUST call query_fleet_data before answering. The snapshot is only context; it is not a substitute for the query. Infer the entity, metric, grouping and period from the user's wording. For example, “qué modelos facturan más” means entity finanzas, metric facturado, groupBy modelo; “qué modelos cobraron más” means metric cobrado. “Facturado” is quota amount; “cobrado” is every real payment with tipo pago, whether or not it matches a quota. If the question is ambiguous, query the broadest useful data and explain the interpretation briefly. You can query more than once if needed. If the user asks for PDF, Excel, XLSX, a report or an export, call generate_fleet_report. The server calculates all cards, charts and tables; do not create visual data, tables or long lists in the answer.\n\nAfter answering, return ONLY valid JSON in this exact shape: {"answer":"respuesta breve para el usuario","followUps":[{"label":"texto corto","question":"pregunta concreta"}]}. Include 2 or 3 useful follow-up questions based on the current question and recent conversation. If there is no data, no result, an error, or no useful follow-up, use an empty followUps array. Do not use Markdown outside the JSON.\n\nFLEET DATA (cutoff ${snapshot.asOf}):\n${facts}`;
   const messages: OpenRouterMessage[] = [
     { role: 'system', content: system },
     ...history.slice(-6).map((item) => ({ role: item.role, content: item.content.slice(0, 1200) })),
@@ -743,7 +839,7 @@ async function answerAssistantWithTools(
       method: 'POST',
       signal: options.signal,
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://miflota.147-93-180-120.sslip.io', 'X-Title': 'MiFlota IA' },
-      body: JSON.stringify({ model, max_tokens: 700, temperature: 0.2, messages: current, tools: [REPORT_TOOL], tool_choice: 'auto' }),
+      body: JSON.stringify({ model, max_tokens: 700, temperature: 0.2, messages: current, tools: [REPORT_TOOL, QUERY_TOOL], tool_choice: 'auto' }),
     });
     const body = (await response.json().catch(() => null)) as OpenRouterResponse | null;
     if (!response.ok) throw new Error(body?.error?.message || `OpenRouter error ${response.status}`);
@@ -753,33 +849,59 @@ async function answerAssistantWithTools(
   let body = await callModel(messages);
   let message = body?.choices?.[0]?.message;
   const files: AssistantFile[] = [];
-  if (message?.tool_calls?.length) {
+  const queryResults: AssistantQueryResult[] = [];
+  for (let round = 0; round < 3 && message?.tool_calls?.length; round += 1) {
     messages.push(message);
     for (const call of message.tool_calls) {
-      let result: { ok: boolean; file?: AssistantFile; error?: string };
+      let result: { ok: boolean; file?: AssistantFile; query?: AssistantQueryResult; error?: string };
       try {
-        if (call.function.name !== 'generate_fleet_report' || !options.generateReport) throw new Error('Report tool is not configured');
-        const raw = JSON.parse(call.function.arguments) as Partial<AssistantReportRequest>;
-        const file = await options.generateReport({
-          format: raw.format === 'xlsx' ? 'xlsx' : 'pdf',
-          report: raw.report === 'resumen' ? 'resumen' : 'gastos',
-          period: raw.period === 'week' ? 'week' : raw.period === 'total' ? 'total' : 'month',
-          vehicle: typeof raw.vehicle === 'string' ? raw.vehicle.slice(0, 20) : undefined,
-          category: typeof raw.category === 'string' ? raw.category.slice(0, 40) : undefined,
-        });
-        files.push(file);
-        result = { ok: true, file };
+        if (call.function.name === 'generate_fleet_report') {
+          if (!options.generateReport) throw new Error('Report tool is not configured');
+          const raw = JSON.parse(call.function.arguments) as Partial<AssistantReportRequest>;
+          const file = await options.generateReport({
+            format: raw.format === 'xlsx' ? 'xlsx' : 'pdf',
+            report: raw.report === 'resumen' ? 'resumen' : 'gastos',
+            period: raw.period === 'week' ? 'week' : raw.period === 'total' ? 'total' : 'month',
+            vehicle: typeof raw.vehicle === 'string' ? raw.vehicle.slice(0, 20) : undefined,
+            category: typeof raw.category === 'string' ? raw.category.slice(0, 40) : undefined,
+          });
+          files.push(file);
+          result = { ok: true, file };
+        } else if (call.function.name === 'query_fleet_data') {
+          if (!options.queryFleet) throw new Error('Data query tool is not configured');
+          const raw = JSON.parse(call.function.arguments) as AssistantQueryRequest;
+          const query = await options.queryFleet({
+            entity: raw.entity,
+            metric: raw.metric,
+            groupBy: raw.groupBy,
+            period: raw.period,
+            from: typeof raw.from === 'string' ? raw.from.slice(0, 10) : undefined,
+            to: typeof raw.to === 'string' ? raw.to.slice(0, 10) : undefined,
+            vehicle: typeof raw.vehicle === 'string' ? raw.vehicle.slice(0, 80) : undefined,
+            category: typeof raw.category === 'string' ? raw.category.slice(0, 80) : undefined,
+            driver: typeof raw.driver === 'string' ? raw.driver.slice(0, 80) : undefined,
+            limit: typeof raw.limit === 'number' ? Math.min(50, Math.max(1, Math.trunc(raw.limit))) : undefined,
+          });
+          queryResults.push(query);
+          result = { ok: true, query };
+        } else {
+          throw new Error('Unknown tool');
+        }
       } catch (error) {
         result = { ok: false, error: error instanceof Error ? error.message : 'Could not generate the file' };
       }
       messages.push({ role: 'tool', tool_call_id: call.id, name: call.function.name, content: JSON.stringify(result) });
     }
-    body = await callModel(messages);
-    message = body?.choices?.[0]?.message;
+    if (round < 2) {
+      body = await callModel(messages);
+      message = body?.choices?.[0]?.message;
+    }
   }
   const parsed = parseAssistantContent(typeof message?.content === 'string' ? message.content : '', question);
   if (!parsed.answer) throw new Error('OpenRouter returned an empty answer');
-  const visuals = isNoResultAnswer(parsed.answer) ? {} : deterministicVisuals(question, snapshot);
+  const visuals = isNoResultAnswer(parsed.answer)
+    ? {}
+    : queryResults.length ? visualsFromQuery(queryResults[queryResults.length - 1]) : deterministicVisuals(question, snapshot);
   return {
     answer: parsed.answer,
     cards: [],
@@ -794,6 +916,42 @@ async function answerAssistantWithTools(
 function bars(title: string, items: AssistantChartItem[]): AssistantChart | undefined {
   const visible = items.filter((item) => Number.isFinite(item.value)).slice(0, 5);
   return visible.length ? { kind: 'bars', title, items: visible } : undefined;
+}
+
+function visualsFromQuery(result: AssistantQueryResult): Partial<Pick<AssistantReply, 'cards' | 'chart' | 'table'>> {
+  const rows = result.rows.filter((row) => row.label.trim());
+  const numericRows = rows.filter((row): row is AssistantQueryRow & { value: number } => typeof row.value === 'number' && Number.isFinite(row.value));
+  const cards = numericRows.slice(0, 3).map((row) => ({
+    kind: 'metric' as const,
+    title: row.label,
+    value: row.displayValue ?? fmt(row.value),
+    subtitle: row.subtitle,
+  }));
+  const chart = result.groupBy !== 'ninguno' && numericRows.length > 1
+    ? bars(`${result.metric} por ${result.groupBy}`, numericRows.map((row) => ({
+      label: row.label,
+      value: row.value,
+      displayValue: row.displayValue ?? fmt(row.value),
+      subtitle: row.subtitle,
+    })))
+    : undefined;
+  const columns = rows.some((row) => row.details && Object.keys(row.details).length)
+    ? [{ key: 'label', label: 'Resultado' }, ...Object.keys(rows.find((row) => row.details)?.details ?? {}).map((key) => ({ key, label: key })), ...(numericRows.length ? [{ key: 'value', label: 'Valor' }] : [])]
+    : [{ key: 'label', label: 'Resultado' }, ...(numericRows.length ? [{ key: 'value', label: 'Valor' }] : [])];
+  const tableRows = rows.map((row, index) => ({
+    id: `${result.entity}-${index}-${row.label}`,
+    cells: {
+      label: row.label,
+      ...(row.details ?? {}),
+      ...(row.value !== undefined ? { value: row.displayValue ?? fmt(row.value) } : {}),
+    },
+    ...(row.carId ? { action: { kind: 'car' as const, carId: row.carId, label: 'Ver vehículo' } } : {}),
+  }));
+  return {
+    cards,
+    ...(chart ? { chart } : {}),
+    ...(tableRows.length ? { table: { columns, rows: tableRows } } : {}),
+  };
 }
 
 function deterministicVisuals(question: string, snapshot: AssistantSnapshot): Partial<Pick<AssistantReply, 'cards' | 'chart' | 'table'>> {

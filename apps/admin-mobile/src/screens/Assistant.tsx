@@ -36,6 +36,33 @@ function dateLabel(iso: string): string {
   return `${day}/${month}/${year}`;
 }
 
+function cleanAssistantAnswer(value: string): string {
+  const raw = value.trim();
+  const marker = /\{\s*"answer"\s*:\s*"/g;
+  let match: RegExpExecArray | null = null;
+  let lastMatch: RegExpExecArray | null = null;
+  while ((match = marker.exec(raw))) lastMatch = match;
+  if (!lastMatch || lastMatch.index === undefined) return value;
+
+  const start = lastMatch.index + lastMatch[0].length;
+  let escaped = false;
+  let encoded = '';
+  for (let index = start; index < raw.length; index += 1) {
+    const character = raw[index];
+    if (character === '"' && !escaped) {
+      try {
+        return JSON.parse(`"${encoded}"`) as string;
+      } catch {
+        return encoded.replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+      }
+    }
+    encoded += character;
+    if (character === '\\' && !escaped) escaped = true;
+    else escaped = false;
+  }
+  return value;
+}
+
 function ResultCard({ card, onAction }: { card: AssistantCard; onAction: (action: AssistantAction) => void }) {
   const content = (
     <View style={styles.resultCard}>
@@ -198,7 +225,7 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
         {
           id: `m${nextId.current++}`,
           role: 'assistant',
-          text: reply.answer,
+          text: cleanAssistantAnswer(reply.answer),
           cards: reply.cards,
           chart: reply.chart,
           table: reply.table,
