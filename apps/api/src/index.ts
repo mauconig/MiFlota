@@ -551,6 +551,7 @@ interface FleetReportExportBody {
   include?: FleetReportInclude;
   carIds?: FleetReportSelection;
   categories?: FleetReportCategorySelection;
+  search?: string;
   format?: 'pdf' | 'xlsx';
 }
 
@@ -570,7 +571,6 @@ interface FleetReportIncomeRow {
   vehiculo: string;
   chofer: string;
   monto: number;
-  medio: string;
   nota: string;
 }
 
@@ -632,18 +632,19 @@ async function pdfFromFleetReport(data: {
       doc.y += subtitle ? 27 : 22;
     };
 
-    const drawTable = (headers: string[], rows: string[][], columnWidths: number[]) => {
+    const drawTable = (headers: string[], rows: string[][], columnWidths: number[], alignments: ('left' | 'right')[] = []) => {
       const rowHeight = 23;
       const drawHeader = () => {
         const headerY = doc.y;
         doc.roundedRect(margin, headerY, width, rowHeight, 5).fill(REPORT_COLORS.orange);
         let x = margin;
         headers.forEach((header, index) => {
-          doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(8).text(header, x + 7, headerY + 7, { width: columnWidths[index] - 14, lineBreak: false });
+          doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(8).text(header, x + 7, headerY + 7, { width: columnWidths[index] - 14, align: alignments[index] ?? 'left', lineBreak: false });
           x += columnWidths[index];
         });
         doc.y = headerY + rowHeight;
       };
+      ensureSpace(rowHeight + 5);
       drawHeader();
       rows.forEach((row, rowIndex) => {
         if (doc.y + rowHeight > doc.page.height - margin) {
@@ -655,52 +656,13 @@ async function pdfFromFleetReport(data: {
         if (rowIndex % 2 === 0) doc.rect(margin, rowY, width, rowHeight).fill(REPORT_COLORS.orangeLight);
         let x = margin;
         row.forEach((cell, index) => {
-          doc.fillColor(REPORT_COLORS.ink).font('Helvetica').fontSize(8).text(pdfCell(cell, 34), x + 7, rowY + 7, { width: columnWidths[index] - 14, lineBreak: false });
+          doc.fillColor(REPORT_COLORS.ink).font('Helvetica').fontSize(8).text(pdfCell(cell, 34), x + 7, rowY + 7, { width: columnWidths[index] - 14, align: alignments[index] ?? 'left', lineBreak: false });
           x += columnWidths[index];
         });
         doc.moveTo(margin, rowY + rowHeight).lineTo(margin + width, rowY + rowHeight).lineWidth(0.5).strokeColor(REPORT_COLORS.line).stroke();
         doc.y = rowY + rowHeight;
       });
       doc.y += 12;
-    };
-
-    const drawExpenseCard = (row: FleetReportExpenseRow) => {
-      const itemRows = row.items.length
-        ? row.items.map((item) => [item.nombre, String(item.cantidad), reportMoney(item.costo_unitario), reportMoney(item.subtotal)])
-        : [['Sin detalle de repuesto', '', '', '']];
-      const cardHeight = 79 + 20 + itemRows.length * 21 + (row.manoObra ? 25 : 8);
-      ensureSpace(cardHeight + 10);
-      const x = margin;
-      const y = doc.y;
-      doc.roundedRect(x, y, width, cardHeight, 10).fill(REPORT_COLORS.paper).stroke(REPORT_COLORS.line);
-      doc.roundedRect(x, y, width, 29, 10).fill(REPORT_COLORS.orangeLight);
-      doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(9).text(`${pdfCell(row.fecha, 12)}  ·  ${pdfCell(row.vehiculo, 20)}`, x + 13, y + 9, { width: width - 190, lineBreak: false });
-      doc.fillColor(REPORT_COLORS.muted).font('Helvetica-Bold').fontSize(9).text(pdfCell(row.categoria, 24), x + width - 170, y + 9, { width: 157, align: 'right', lineBreak: false });
-      doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(10).text(pdfCell(row.detalle, 52), x + 13, y + 42, { width: width - 165, lineBreak: false });
-      doc.fillColor(REPORT_COLORS.red).font('Helvetica-Bold').fontSize(12).text(`Total ${reportMoney(row.total)}`, x + width - 155, y + 40, { width: 142, align: 'right', lineBreak: false });
-
-      const tableX = x + 13;
-      const tableWidth = width - 26;
-      let tableY = y + 65;
-      const itemWidths = [tableWidth - 270, 55, 105, 110];
-      doc.roundedRect(tableX, tableY, tableWidth, 20, 4).fill(REPORT_COLORS.ink);
-      ['Repuesto', 'Cantidad', 'Unitario', 'Subtotal'].forEach((header, index) => {
-        const cellX = tableX + itemWidths.slice(0, index).reduce((sum, value) => sum + value, 0);
-        doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7.5).text(header, cellX + 6, tableY + 6, { width: itemWidths[index] - 12, lineBreak: false });
-      });
-      tableY += 20;
-      itemRows.forEach((item, index) => {
-        if (index % 2 === 0) doc.rect(tableX, tableY, tableWidth, 21).fill('#faf5ec');
-        item.forEach((value, valueIndex) => {
-          const cellX = tableX + itemWidths.slice(0, valueIndex).reduce((sum, itemWidth) => sum + itemWidth, 0);
-          doc.fillColor(REPORT_COLORS.ink).font('Helvetica').fontSize(7.5).text(pdfCell(value, 35), cellX + 6, tableY + 6, { width: itemWidths[valueIndex] - 12, lineBreak: false });
-        });
-        tableY += 21;
-      });
-      if (row.manoObra) {
-        doc.fillColor(REPORT_COLORS.muted).font('Helvetica-Bold').fontSize(8).text(`Mano de obra: ${reportMoney(row.manoObra)}`, tableX, tableY + 6, { width: tableWidth, align: 'right' });
-      }
-      doc.y = y + cardHeight + 10;
     };
 
     pageHeader();
@@ -725,14 +687,20 @@ async function pdfFromFleetReport(data: {
     if (data.incomeRows.length) {
       sectionTitle('Ingresos cobrados', `${data.incomeRows.length} cobro(s)`);
       drawTable(
-        ['Fecha', 'Vehículo', 'Chofer', 'Monto', 'Medio', 'Nota'],
-        data.incomeRows.map((row) => [row.fecha, row.vehiculo, row.chofer, reportMoney(row.monto), row.medio, row.nota]),
-        [59, 82, 118, 80, 82, width - 421],
+        ['Fecha', 'Vehículo', 'Chofer', 'Monto', 'Nota'],
+        data.incomeRows.map((row) => [row.fecha, row.vehiculo, row.chofer, reportMoney(row.monto), row.nota]),
+        [59, 92, 118, 82, width - 351],
+        ['left', 'left', 'left', 'right', 'left'],
       );
     }
     if (data.expenseRows.length) {
       sectionTitle('Gastos', `${data.expenseRows.length} gasto(s) · repuestos y mano de obra`);
-      data.expenseRows.forEach(drawExpenseCard);
+      drawTable(
+        ['Fecha', 'Vehículo', 'Categoría', 'Descripción', 'Repuestos', 'Mano de obra', 'Total'],
+        data.expenseRows.map((row) => [row.fecha, row.vehiculo, row.categoria, row.detalle, reportMoney(row.repuestos), reportMoney(row.manoObra), reportMoney(row.total)]),
+        [58, 82, 72, 128, 68, 70, width - 478],
+        ['left', 'left', 'left', 'left', 'right', 'right', 'right'],
+      );
     }
     if (!data.incomeRows.length && !data.expenseRows.length) {
       doc.roundedRect(margin, doc.y, width, 60, 10).fill(REPORT_COLORS.orangeLight);
@@ -782,13 +750,20 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
   const selectedCategories = body.categories === 'todas' ? 'todos' : reportSelection(body.categories);
   const carAllowed = (carId: string | null) => selectedCars === 'todos' || (carId !== null && selectedCars.has(carId));
   const categoryAllowed = (category: string) => selectedCategories === 'todos' || selectedCategories.has(category);
+  const search = String(body.search ?? '').trim().toLocaleLowerCase();
+  const matchesSearch = (...fields: unknown[]) => !search || fields.some((field) => String(field ?? '').toLocaleLowerCase().includes(search));
 
   const incomeRows: FleetReportIncomeRow[] = include === 'gastos' ? [] : (selPagos.all(ownerId) as PagoRow[])
     .filter((pago) => pago.tipo === 'pago' && pago.fecha >= range.from && pago.fecha <= range.to && carAllowed(pago.car_id))
-    .map((pago) => ({ fecha: pago.fecha, vehiculo: carById.get(pago.car_id ?? '')?.plate ?? 'Sin vehículo', chofer: pago.driver || 'Sin chofer', monto: pago.monto, medio: pago.medio || 'Sin especificar', nota: pago.nota || '' }));
+    .filter((pago) => matchesSearch('Pago recibido', 'Pago', carById.get(pago.car_id ?? '')?.plate, carById.get(pago.car_id ?? '')?.model, pago.driver, pago.nota, pago.medio))
+    .map((pago) => ({ fecha: pago.fecha, vehiculo: carById.get(pago.car_id ?? '')?.plate ?? 'Sin vehículo', chofer: pago.driver || 'Sin chofer', monto: pago.monto, nota: pago.nota || '' }));
 
   const expenseRows: FleetReportExpenseRow[] = include === 'ingresos' ? [] : (selMovs.all(ownerId) as MovRow[])
     .filter((mov) => mov.type === 'egreso' && mov.date >= range.from && mov.date <= range.to && carAllowed(mov.car_id) && categoryAllowed(mov.cat || 'Otros'))
+    .filter((mov) => {
+      const car = carById.get(mov.car_id);
+      return matchesSearch(mov.descripcion, mov.cat || 'Otros', car?.plate, car?.model, car?.driver);
+    })
     .map((mov) => {
       const items = selItems.all(mov.id) as GastoItemRow[];
       const repuestos = items.reduce((sum, item) => sum + item.subtotal, 0);
@@ -822,16 +797,13 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
     XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(summary), 'Resumen');
     if (incomeRows.length) {
       XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([
-        ['Fecha', 'Vehículo', 'Chofer', 'Monto', 'Medio', 'Nota'],
-        ...incomeRows.map((row) => [row.fecha, row.vehiculo, row.chofer, row.monto, row.medio, row.nota]),
+        ['Fecha', 'Vehículo', 'Chofer', 'Monto', 'Nota'],
+        ...incomeRows.map((row) => [row.fecha, row.vehiculo, row.chofer, row.monto, row.nota]),
       ]), 'Ingresos');
     }
     if (expenseRows.length) {
-      const detailRows: (string | number)[][] = [['Fecha', 'Vehículo', 'Categoría', 'Detalle', 'Repuesto', 'Cantidad', 'Costo unitario', 'Subtotal repuesto', 'Mano de obra', 'Total gasto']];
-      expenseRows.forEach((row) => {
-        if (!row.items.length) detailRows.push([row.fecha, row.vehiculo, row.categoria, row.detalle, '', '', '', '', row.manoObra, row.total]);
-        else row.items.forEach((item) => detailRows.push([row.fecha, row.vehiculo, row.categoria, row.detalle, item.nombre, item.cantidad, item.costo_unitario, item.subtotal, row.manoObra, row.total]));
-      });
+      const detailRows: (string | number)[][] = [['Fecha', 'Vehículo', 'Categoría', 'Descripción', 'Repuestos', 'Mano de obra', 'Total gasto']];
+      expenseRows.forEach((row) => detailRows.push([row.fecha, row.vehiculo, row.categoria, row.detalle, row.repuestos, row.manoObra, row.total]));
       XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(detailRows), 'Gastos');
     }
     data = XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer;

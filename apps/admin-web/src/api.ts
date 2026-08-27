@@ -130,6 +130,7 @@ export interface ReportExportPayload {
   include: 'gastos' | 'ingresos' | 'ambos';
   carIds: 'todos' | string[];
   categories: 'todas' | string[];
+  search?: string;
   format: 'pdf' | 'xlsx';
 }
 

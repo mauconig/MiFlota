@@ -2216,7 +2216,7 @@ export function useFleetView(
       if (!reportMovements.length) return toast('No hay movimientos para exportar con estos filtros');
       const periodPayload = { type: st.period, ...(st.period === 'custom' ? { from: st.cFrom, to: st.cTo } : { to: isoLocal(TODAY) }) } as ReportExportPayload['period'];
       try {
-        const result = await persist.exportReport({ period: periodPayload, include: reportInclude, carIds: 'todos', categories: reportCategories, format: 'xlsx' });
+        const result = await persist.exportReport({ period: periodPayload, include: reportInclude, carIds: 'todos', categories: reportCategories, search: st.movQ.trim() || undefined, format: 'xlsx' });
         const a = document.createElement('a'); a.href = result.file.url; a.download = result.file.name; a.click();
         toast('Excel descargado · ' + result.counts.total + ' movimientos');
       } catch (e) { toast('No se pudo exportar: ' + (e as Error).message); }
@@ -2226,7 +2226,7 @@ export function useFleetView(
       if (!reportMovements.length) return toast('No hay movimientos para exportar con estos filtros');
       const periodPayload = { type: st.period, ...(st.period === 'custom' ? { from: st.cFrom, to: st.cTo } : { to: isoLocal(TODAY) }) } as ReportExportPayload['period'];
       try {
-        const result = await persist.exportReport({ period: periodPayload, include: reportInclude, carIds: 'todos', categories: reportCategories, format: 'pdf' });
+        const result = await persist.exportReport({ period: periodPayload, include: reportInclude, carIds: 'todos', categories: reportCategories, search: st.movQ.trim() || undefined, format: 'pdf' });
         const a = document.createElement('a'); a.href = result.file.url; a.download = result.file.name; a.click();
         toast('PDF descargado · ' + result.counts.total + ' movimientos');
       } catch (e) { toast('No se pudo exportar: ' + (e as Error).message); }
