@@ -15,7 +15,6 @@ export function Reportes({ v }: { v: View }) {
             <div style={sectionTitle}>Movimientos</div>
             <div style={{ fontSize: 12, color: '#6b665c', marginTop: 2 }}>{v.movsSub}</div>
           </div>
-          <Btn onClick={v.exportar} style={{ border: 'none', background: '#16150f', color: '#fffdf8', borderRadius: 12, minHeight: 38, padding: '0 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', flex: 'none' }} hoverStyle={{ background: '#2a2820' }}>Exportar Excel</Btn>
         </div>
         <div style={{ padding: '12px 20px', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 7, borderBottom: '1px solid #f0ebe0', flexWrap: 'wrap', flex: 'none' }}>
           <SearchBar value={v.movQ} onChange={v.setMovQ} placeholder="Buscar movimiento…" />

@@ -676,6 +676,10 @@ const KTAG: Record<string, [string, string]> = {
   Kilometraje: ['#fdf3e2', '#a8730f'],
 };
 
+function gpsTagLabel(car: Car): string {
+  return car.gpsTag.trim() || 'Sin GPS';
+}
+
 const PTAG: Record<string, [string, string]> = {
   Cobrado: ['#eef4f0', '#2e7d5b'],
   Parcial: ['#eef1f6', '#4a6d99'],
@@ -1156,8 +1160,8 @@ export function useFleetView(
       net: fmtShort(x.net, st.hide),
       netColor: statusColor(x.net, UMBRAL_VERDE),
       netPct: Math.round((Math.abs(x.net) / maxNet) * 100) + '%',
-       gpsTag: x.c.gpsTag || (locationByCar.has(x.c.id) ? 'Ubicación activa' : 'Sin GPS'),
-       gpsFg: x.c.gpsTag || locationByCar.has(x.c.id) ? '#6b665c' : '#a09a8d',
+      gpsTag: gpsTagLabel(x.c),
+      gpsFg: x.c.gpsTag.trim() ? '#6b665c' : '#a09a8d',
       tag: t[0],
       tagBg: t[1],
       tagFg: t[2],
@@ -1307,7 +1311,7 @@ export function useFleetView(
           date: p.fecha,
           type: 'ingreso' as const,
           carId: p.carId,
-          vehicle: c ? c.plate + ' · ' + c.model : 'Sin vehículo asociado',
+          vehicle: c ? c.plate + ' · ' + c.model + ' · ' + gpsTagLabel(c) : 'Sin vehículo asociado',
           driver: p.driver || 'Sin chofer',
           desc: 'Pago recibido',
           category: 'Pago',
@@ -1330,7 +1334,7 @@ export function useFleetView(
           date: m.date,
           type: 'egreso' as const,
           carId: m.carId,
-          vehicle: c ? c.plate + ' · ' + c.model : 'Vehículo eliminado',
+          vehicle: c ? c.plate + ' · ' + c.model + ' · ' + gpsTagLabel(c) : 'Vehículo eliminado',
           driver: c?.driver || 'Sin chofer',
           desc: m.desc,
           category: m.cat || 'Otros',
@@ -1412,7 +1416,7 @@ export function useFleetView(
           id: a.movId,
           dateLbl: quota ? dLbl(quota.date) : 'Cuota',
           description: quota?.desc || 'Cuota',
-          vehicle: quotaCar?.plate || 'Vehículo eliminado',
+          vehicle: quotaCar ? quotaCar.plate + ' · ' + quotaCar.model + ' · ' + gpsTagLabel(quotaCar) : 'Vehículo eliminado',
           amount: fmt(a.monto, st.hide),
         };
       });
@@ -1474,7 +1478,7 @@ export function useFleetView(
       description: m.desc,
       dateLbl: dLblFull(m.date),
       driver: nombreChofer(m, c),
-      vehicle: c ? c.plate + ' · ' + c.model : 'Vehículo eliminado',
+      vehicle: c ? c.plate + ' · ' + c.model + ' · ' + gpsTagLabel(c) : 'Vehículo eliminado',
       billed: fmt(m.amount, st.hide),
       collected: fmt(collected, st.hide),
       due: fmt(due, st.hide),
@@ -1610,8 +1614,8 @@ export function useFleetView(
       net: fmt(cs.net, st.hide),
       netFg: statusColor(cs.net, UMBRAL_VERDE),
       cuotaFmt: c.cuota ? fmt(c.cuota, st.hide) : '—',
-      gpsTag: c.gpsTag ? 'Identificador GPS: ' + c.gpsTag : 'Identificador GPS: no configurado',
-      gpsFg: c.gpsTag ? '#3d3a34' : '#a09a8d',
+      gpsTag: 'Identificador GPS: ' + gpsTagLabel(c),
+      gpsFg: c.gpsTag.trim() ? '#3d3a34' : '#a09a8d',
       location: locationView(locationByCar.get(c.id)),
       cobradas: cuotasCobradas + ' cuotas cobradas',
       pendientes: cuotasPend.length ? cuotasPend.length + ' sin cobrar · debe ' + fmtShort(cuotasPend.reduce((a, m) => a + (m.amount - cobradoDe(m)), 0), st.hide) : 'Todo cobrado',
@@ -1965,7 +1969,7 @@ export function useFleetView(
       .map((a) => ({
         plate: a.car.plate,
         model: a.car.model + ' · ' + a.car.year,
-        gpsTag: a.car.gpsTag || 'Sin GPS',
+        gpsTag: gpsTagLabel(a.car),
         text: a.text,
         kind: a.kind,
         dot: a.sev === 2 ? COLORS.neg : COLORS.warn,
@@ -1998,7 +2002,7 @@ export function useFleetView(
         return {
           initials: initials(drv),
           driver: drv,
-          plate: c.plate + ' · ' + c.model + ' · ' + (c.gpsTag || 'Sin GPS'),
+          plate: c.plate + ' · ' + c.model + ' · ' + gpsTagLabel(c),
           desc: m.desc,
           dateLbl: dLbl(m.date),
           tag,
@@ -2141,7 +2145,7 @@ export function useFleetView(
           return {
             name: c.driver,
             initials: initials(c.driver),
-            carLbl: grupo.length === 1 ? c.plate + ' · ' + c.model + ' · ' + (c.gpsTag || 'Sin GPS') : grupo.length + ' vehículos',
+            carLbl: grupo.length === 1 ? c.plate + ' · ' + c.model + ' · ' + gpsTagLabel(c) : grupo.length + ' vehículos',
             cuota: fmtShort(c.cuota, st.hide),
             cobrado: fmtShort(dStats.ing, st.hide),
             pend: pend ? fmtShort(pend, st.hide) : '—',
