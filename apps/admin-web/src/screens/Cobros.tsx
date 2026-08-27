@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { View } from '../useFleetView';
 import { Btn } from '../components/Btn';
 import { ChipRow } from '../components/ChipRow';
@@ -46,8 +47,40 @@ const tag: React.CSSProperties = {
   borderRadius: 11,
 };
 
+type SortState = { key: string; direction: 1 | -1 };
+
+function compareRows(a: { sort: Record<string, string | number> }, b: { sort: Record<string, string | number> }, state: SortState) {
+  const av = a.sort[state.key] ?? '';
+  const bv = b.sort[state.key] ?? '';
+  if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * state.direction;
+  return String(av).localeCompare(String(bv), 'es', { numeric: true, sensitivity: 'base' }) * state.direction;
+}
+
+function SortHeader({ label, sortKey, state, onSort, width, grow = false, align = 'left' }: { label: string; sortKey: string; state: SortState; onSort: (key: string) => void; width?: number; grow?: boolean; align?: 'left' | 'right' }) {
+  const active = state.key === sortKey;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(sortKey)}
+      aria-label={'Ordenar por ' + label}
+      aria-sort={active ? (state.direction === 1 ? 'ascending' : 'descending') : 'none'}
+      style={{ width, flex: grow ? 1 : 'none', minWidth: grow ? 0 : undefined, display: 'flex', alignItems: 'center', justifyContent: align === 'right' ? 'flex-end' : 'flex-start', gap: 5, padding: 0, border: 'none', background: 'none', color: active ? '#8a641c' : '#6b665c', font: 'inherit', fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer', textAlign: align }}
+    >
+      <span>{label}</span>
+      <span aria-hidden="true" style={{ width: 9, height: 13, display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between', flex: 'none' }}>
+        <span style={{ width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderBottom: `5px solid ${active && state.direction === 1 ? '#e8a13a' : '#bdb6a4'}` }} />
+        <span style={{ width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: `5px solid ${active && state.direction === -1 ? '#e8a13a' : '#bdb6a4'}` }} />
+      </span>
+    </button>
+  );
+}
+
 export function Cobros({ v }: { v: View }) {
   const enPagos = v.cobrosTab === 'pagos';
+  const [sort, setSort] = useState<SortState>({ key: 'date', direction: -1 });
+  const onSort = (key: string) => setSort((current) => current.key === key ? { key, direction: current.direction === 1 ? -1 : 1 } : { key, direction: 1 });
+  const pagos = [...v.pagosFull].sort((a, b) => compareRows(a, b, sort));
+  const cobros = [...v.cobrosFull].sort((a, b) => compareRows(a, b, sort));
 
   return (
     <Screen label="Cobros" style={{ ...card, overflow: 'hidden' }}>
@@ -73,19 +106,19 @@ export function Cobros({ v }: { v: View }) {
         <>
           <div style={th}>
             <span style={{ width: 36, flex: 'none' }} />
-            <span style={{ width: 190, flex: 'none' }}>Chofer</span>
-            <span style={{ flex: 1, minWidth: 0 }}>Vehículo</span>
-            <span style={{ width: 180, flex: 'none' }}>Nota</span>
-            <span style={{ width: 74, flex: 'none' }}>Fecha</span>
-            <span style={{ width: 84, flex: 'none' }}>Tipo</span>
-            <span style={{ width: 96, flex: 'none', textAlign: 'right' }}>Monto</span>
+            <SortHeader label="Chofer" sortKey="driver" state={sort} onSort={onSort} width={190} />
+            <SortHeader label="Vehículo" sortKey="vehicle" state={sort} onSort={onSort} grow />
+            <SortHeader label="Nota" sortKey="note" state={sort} onSort={onSort} width={180} />
+            <SortHeader label="Fecha" sortKey="date" state={sort} onSort={onSort} width={74} />
+            <SortHeader label="Tipo" sortKey="type" state={sort} onSort={onSort} width={84} />
+            <SortHeader label="Monto" sortKey="amount" state={sort} onSort={onSort} width={96} align="right" />
             <span style={{ width: 28, flex: 'none' }} />
           </div>
           {!v.pagosFull.length && (
-            <Vacio titulo="Sin pagos en el período" detalle="Acá queda el libro de lo que fue entrando, con la fecha real de cada pago. Registrá uno con el botón de arriba." />
+            <Vacio titulo="Sin movimientos en el período" detalle="Acá queda el libro de lo que fue entrando, con la fecha real de cada movimiento. Registrá uno con el botón de arriba." />
           )}
           <ScrollArea style={{ padding: '4px 20px' }}>
-            {v.pagosFull.map((p) => (
+            {pagos.map((p) => (
               <div key={p.id} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 13, padding: '11px 0', borderBottom: '1px solid #f4efe4' }}>
                 <span style={avatar}>{p.initials}</span>
                 <span style={{ width: 190, flex: 'none', fontSize: 14, fontWeight: 700 }}>{p.driver}</span>
@@ -114,12 +147,12 @@ export function Cobros({ v }: { v: View }) {
         <>
           <div style={th}>
             <span style={{ width: 36, flex: 'none' }} />
-            <span style={{ width: 190, flex: 'none' }}>Chofer</span>
-            <span style={{ flex: 1, minWidth: 0 }}>Concepto</span>
-            <span style={{ width: 74, flex: 'none' }}>Fecha</span>
-            <span style={{ width: 84, flex: 'none' }}>Estado</span>
-            <span style={{ width: 122, flex: 'none', textAlign: 'right' }}>Cobrado</span>
-            <span style={{ width: 84, flex: 'none', textAlign: 'right' }}>Debe</span>
+            <SortHeader label="Chofer" sortKey="driver" state={sort} onSort={onSort} width={190} />
+            <SortHeader label="Concepto" sortKey="description" state={sort} onSort={onSort} grow />
+            <SortHeader label="Fecha" sortKey="date" state={sort} onSort={onSort} width={74} />
+            <SortHeader label="Estado" sortKey="status" state={sort} onSort={onSort} width={84} />
+            <SortHeader label="Cobrado" sortKey="amount" state={sort} onSort={onSort} width={122} align="right" />
+            <SortHeader label="Debe" sortKey="due" state={sort} onSort={onSort} width={84} align="right" />
           </div>
           {!v.cobrosFull.length &&
             (v.pendQ || v.pendKind !== 'todas' ? (
@@ -128,7 +161,7 @@ export function Cobros({ v }: { v: View }) {
               <Vacio titulo="No hay cobros en el período" detalle="Acá aparecen las cuotas del período: las cobradas, las pagadas a medias y las que todavía no entraron." />
             ))}
           <ScrollArea style={{ padding: '4px 20px' }}>
-            {v.cobrosFull.map((p, i) => (
+            {cobros.map((p, i) => (
               <Btn
                 key={i}
                 onClick={p.open}

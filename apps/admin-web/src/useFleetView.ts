@@ -129,6 +129,7 @@ export interface PendFull {
   /** Lo que falta cobrar. Vacío si no debe nada. */
   debe: string;
   debeFg: string;
+  sort: Record<string, string | number>;
   open: () => void;
 }
 
@@ -146,6 +147,7 @@ export interface PagoFull {
   tagBg: string;
   tagFg: string;
   nota: string;
+  sort: Record<string, string | number>;
   borrar: () => void;
 }
 
@@ -754,7 +756,7 @@ export function useFleetView(
     toastTimer.current = setTimeout(() => update({ toast: '' }), 2400);
   };
 
-  const go = (nav: UIState['nav'], extra?: Partial<UIState>) => update({ nav, ...(extra || {}) });
+  const go = (nav: UIState['nav'], extra?: Partial<UIState>) => update({ nav, ...(nav === 'cobros' ? { cobrosTab: 'pagos' as const } : {}), ...(extra || {}) });
 
   const patchCar = persist.patchCar;
   // La API entrega las posiciones de cada auto de la más nueva a la más vieja.
@@ -1340,7 +1342,7 @@ export function useFleetView(
     alertas: ['Alertas', 'Mantenimiento'],
     movimientos: ['Movimientos', 'Libro de caja'],
     reportes: ['Reportes', 'Resumen financiero'],
-    cobros: ['Cobros', 'Ingresos'],
+    cobros: st.cobrosTab === 'pagos' ? ['Movimientos', 'Libro de ingresos'] : ['Cobros', 'Ingresos'],
   };
   const SUBS: Record<string, string> = {
     resumen: active.length + ' vehículos activos · ' + (cars.length - active.length) + ' fuera de servicio · datos al ' + dLbl(TODAY),
@@ -1349,7 +1351,9 @@ export function useFleetView(
     alertas: alertList.length + ' avisos de mantenimiento y documentos',
     movimientos: realMovements.length + ' movimientos reales registrados',
     reportes: 'Ingresos reales, gastos y resultado de ' + r.short,
-    cobros: 'Cobrado ' + fmt(tot.ing, st.hide) + ' de ' + fmt(tot.fact, st.hide) + ' facturado en ' + r.short + (pendTotal ? ' · deben ' + fmt(pendTotal, st.hide) : ''),
+    cobros: st.cobrosTab === 'pagos'
+      ? pagosVista.length + (pagosVista.length === 1 ? ' movimiento registrado' : ' movimientos registrados') + ' en ' + r.short
+      : 'Cobrado ' + fmt(tot.ing, st.hide) + ' de ' + fmt(tot.fact, st.hide) + ' facturado en ' + r.short + (pendTotal ? ' · deben ' + fmt(pendTotal, st.hide) : ''),
   };
 
   const openEditCar = () => {
@@ -1688,7 +1692,7 @@ export function useFleetView(
     sFlota: nav === 'flota',
     sChoferes: nav === 'choferes',
     sAlertas: nav === 'alertas',
-    sMovimientos: nav === 'movimientos',
+    sMovimientos: false,
     sReportes: nav === 'reportes',
     sCobros: nav === 'cobros',
     navItems: (
@@ -1698,7 +1702,6 @@ export function useFleetView(
         ['choferes', 'Choferes', 'M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8M4 21c0-4 3.6-6 8-6s8 2 8 6', String(active.filter((c) => c.driver !== 'Sin chofer').length)],
         ['alertas', 'Alertas', 'M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01', String(alertList.length)],
         ['cobros', 'Cobros', 'M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4', String(pendMovs.length)],
-        ['movimientos', 'Movimientos', 'M4 6h16M4 12h16M4 18h10', String(realMovements.length)],
         ['reportes', 'Reportes', 'M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7ZM14 2v4a2 2 0 0 0 2 2h4M16 13H8M16 17H8', ''],
       ] as [UIState['nav'], string, string, string][]
     ).map(([k, label, icon, badge]) => ({
@@ -1740,7 +1743,7 @@ export function useFleetView(
     goAlertas: () => go('alertas'),
     goMovimientos: (carId) => {
       const latest = carId ? realMovements.find((m) => m.carId === carId) : undefined;
-      update({ nav: 'movimientos', movVehicle: carId || 'todos', movMonth: latest ? monthKey(latest.date) : monthKey(TODAY), movPage: 1, movExpanded: null });
+      update({ nav: 'cobros', cobrosTab: 'pagos', movVehicle: carId || 'todos', movMonth: latest ? monthKey(latest.date) : monthKey(TODAY), movPage: 1, movExpanded: null });
     },
     goReportes: () => go('reportes'),
     goCobros: () => go('cobros'),
@@ -1854,6 +1857,7 @@ export function useFleetView(
           amt: tag === 'Cobrado' ? fmtShort(m.amount, st.hide) : tag === 'Parcial' ? fmtShort(cob, st.hide) + ' de ' + fmtShort(m.amount, st.hide) : '—',
           debe: debe ? fmtShort(debe, st.hide) : '',
           debeFg: debe ? COLORS.neg : '#6b665c',
+          sort: { driver: drv, vehicle: c.plate + ' ' + c.model, description: m.desc, date: m.date.getTime(), status: tag, amount: cob, due: debe },
           // La ficha es del chofer actual del auto: si el auto cambió de manos
           // y esta fila es de un cobro viejo, abre la ficha de quien lo maneja
           // hoy, no la de `drv`, porque no existe una ficha por ex-chofer.
@@ -1870,8 +1874,8 @@ export function useFleetView(
     setPendQ: (e) => update({ pendQ: e.target.value }),
 
     cobrosTab: st.cobrosTab,
-    cobrosTabChips: (['cuotas', 'pagos'] as const).map((k) => ({
-      label: k === 'cuotas' ? 'Cuotas' : 'Pagos',
+    cobrosTabChips: (['pagos', 'cuotas'] as const).map((k) => ({
+      label: k === 'cuotas' ? 'Cuotas' : 'Movimientos',
       ...CH(st.cobrosTab === k),
       pick: () => update({ cobrosTab: k }),
     })),
@@ -1889,6 +1893,7 @@ export function useFleetView(
         tagBg: ajuste ? '#f4f0e8' : '#eef4f0',
         tagFg: ajuste ? '#6b665c' : '#2e7d5b',
         nota: p.nota ?? '',
+        sort: { driver: p.driver, vehicle: c ? c.plate + ' ' + c.model : 'Sin vehículo asociado', note: p.nota ?? '', date: p.fecha.getTime(), type: ajuste ? 'Ajuste' : 'Pago', amount: p.monto },
         borrar: () => {
           persist
             .deletePago(p.id)
@@ -1900,8 +1905,8 @@ export function useFleetView(
     pagosSub: (() => {
       const n = pagosVista.length;
       const caja = pagosVista.filter((p) => p.tipo === 'pago').reduce((a, p) => a + p.monto, 0);
-      if (!n) return 'Sin pagos en el período';
-      return n + (n === 1 ? ' pago · ' : ' pagos · ') + fmt(caja, st.hide) + ' de caja';
+      if (!n) return 'Sin movimientos en el período';
+      return n + (n === 1 ? ' movimiento · ' : ' movimientos · ') + fmt(caja, st.hide) + ' de caja';
     })(),
     abrirPago: () => update({ npago: { driver: '', fecha: isoLocal(TODAY), monto: '', tipo: 'pago', nota: '', guardando: false } }),
     pagoForm: (() => {

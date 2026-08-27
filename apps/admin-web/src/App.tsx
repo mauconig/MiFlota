@@ -11,7 +11,6 @@ import { Flota } from './screens/Flota';
 import { Choferes } from './screens/Choferes';
 import { Alertas } from './screens/Alertas';
 import { Reportes } from './screens/Reportes';
-import { Movimientos } from './screens/Movimientos';
 import { Cobros } from './screens/Cobros';
 import { DetailDrawer } from './components/DetailDrawer';
 import { DriverDetail } from './components/DriverDetail';
@@ -122,7 +121,6 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
         {v.sFlota && <Flota v={v} />}
         {v.sChoferes && <Choferes v={v} />}
         {v.sAlertas && <Alertas v={v} />}
-        {v.sMovimientos && <Movimientos v={v} />}
         {v.sReportes && <Reportes v={v} />}
         {v.sCobros && <Cobros v={v} />}
       </main>

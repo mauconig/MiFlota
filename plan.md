@@ -57,12 +57,12 @@
 - Revisar el contenedor, el espaciado y la duracion para que cada aviso sea legible y no se dibuje encima del anterior.
 - Validar varias notificaciones consecutivas en telefonos nuevos y antiguos.
 
-## 6. Unificar Cobros y Movimientos
+## 6. Unificar Cobros y Movimientos — realizado
 
 - Eliminar la pagina o seccion independiente `Movimientos` de la web.
 - Mantener una unica pagina de `Cobros` para consultar cobros y movimientos reales.
-- En la pagina de Cobros, el tab principal y seleccionado por defecto sera siempre `Cobros`.
-- Si es posible, renombrar visualmente la pagina o tab `Cobros` a `Movimientos`, sin volver a crear dos destinos separados.
+- Al entrar a `Cobros`, el tab principal y seleccionado por defecto será `Movimientos`.
+- La jerarquía visible queda `Cobros` → `Cuotas` y `Cobros` → `Movimientos`, sin crear otro destino.
 - Mantener una distincion clara dentro de la pagina entre cuotas/cobros y movimientos reales.
 - Ajustar enlaces, menu, navegacion y botones que actualmente apuntan a `Movimientos` para que dirijan al destino unico.
 
@@ -72,3 +72,4 @@
 - No se instaló ningún APK en el teléfono.
 - La web/API siguen funcionando con la versión actualmente desplegada.
 - El flujo de datos adicionales en admin-web funciona, pero necesita la UI propia indicada arriba.
+- La página independiente `Movimientos` fue eliminada; `Cobros` queda como único destino.
