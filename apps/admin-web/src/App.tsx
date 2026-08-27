@@ -23,6 +23,8 @@ import { PagoModal } from './components/PagoModal';
 import { Toast } from './components/Toast';
 import { EditCarModal } from './components/EditCarModal';
 import { ServiceModal } from './components/ServiceModal';
+import { MovementDetailModal } from './components/MovementDetailModal';
+import { QuotaDetailModal } from './components/QuotaDetailModal';
 import { TODAY, isoLocal } from './format';
 
 const currentMonthStart = isoLocal(new Date(TODAY.getFullYear(), TODAY.getMonth(), 1, 12));
@@ -60,6 +62,8 @@ const initialState: UIState = {
   svcEdit: null,
   taller: null,
   cobrosTab: 'cuotas',
+  movementDetailId: null,
+  quotaDetailId: null,
   npago: null,
   detailCarId: null,
   confirm: null,
@@ -135,6 +139,8 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
       <ServiceModal v={v} />
       <DriverModal v={v} />
       <PagoModal v={v} />
+      <MovementDetailModal v={v} />
+      <QuotaDetailModal v={v} />
       <Toast v={v} />
     </div>
   );

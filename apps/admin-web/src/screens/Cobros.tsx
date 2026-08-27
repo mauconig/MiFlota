@@ -112,14 +112,13 @@ export function Cobros({ v }: { v: View }) {
             <SortHeader label="Fecha" sortKey="date" state={sort} onSort={onSort} width={74} />
             <SortHeader label="Tipo" sortKey="type" state={sort} onSort={onSort} width={84} />
             <SortHeader label="Monto" sortKey="amount" state={sort} onSort={onSort} width={96} align="right" />
-            <span style={{ width: 28, flex: 'none' }} />
           </div>
           {!v.pagosFull.length && (
             <Vacio titulo="Sin movimientos en el período" detalle="Acá queda el libro de lo que fue entrando, con la fecha real de cada movimiento. Registrá uno con el botón de arriba." />
           )}
           <ScrollArea style={{ padding: '4px 20px' }}>
             {pagos.map((p) => (
-              <div key={p.id} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 13, padding: '11px 0', borderBottom: '1px solid #f4efe4' }}>
+              <div key={p.id} role="button" tabIndex={0} onClick={p.open} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); p.open(); } }} aria-label={'Ver detalle del movimiento de ' + p.driver} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 13, padding: '11px 0', borderBottom: '1px solid #f4efe4', cursor: 'pointer' }}>
                 <span style={avatar}>{p.initials}</span>
                 <span style={{ width: 190, flex: 'none', fontSize: 14, fontWeight: 700 }}>{p.driver}</span>
                 <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: '#6b665c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.carLbl}</span>
@@ -129,16 +128,6 @@ export function Cobros({ v }: { v: View }) {
                   <span style={{ ...tag, background: p.tagBg, color: p.tagFg }}>{p.tag}</span>
                 </span>
                 <span style={{ width: 96, flex: 'none', textAlign: 'right', fontSize: 14, fontWeight: 700, color: '#2e7d5b' }}>{p.monto}</span>
-                {/* Un pago no se edita: cambiarle el monto reescribiría en
-                    silencio a qué cuotas quedó imputado. Se borra y se rehace. */}
-                <Btn
-                  onClick={p.borrar}
-                  ariaLabel={'Eliminar pago de ' + p.driver}
-                  style={{ width: 28, height: 28, flex: 'none', border: 'none', background: 'none', borderRadius: 8, color: '#a09a8d', cursor: 'pointer', fontSize: 15, lineHeight: 1 }}
-                  hoverStyle={{ background: '#fdeeea', color: '#a8412f' }}
-                >
-                  ×
-                </Btn>
               </div>
             ))}
           </ScrollArea>

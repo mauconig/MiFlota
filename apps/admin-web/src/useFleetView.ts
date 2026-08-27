@@ -133,6 +133,55 @@ export interface PendFull {
   open: () => void;
 }
 
+export interface AppliedPaymentView {
+  id: number;
+  dateLbl: string;
+  amount: string;
+  type: string;
+  typeBg: string;
+  typeFg: string;
+  medio: string;
+  note: string;
+}
+
+export interface MovementDetailView {
+  id: string;
+  type: string;
+  typeBg: string;
+  typeFg: string;
+  amount: string;
+  amountFg: string;
+  dateLbl: string;
+  driver: string;
+  vehicle: string;
+  medio: string;
+  category: string;
+  note: string;
+  comprobante: { url: string; name: string; type: string } | null;
+  appliedQuotas: { id: number; dateLbl: string; description: string; vehicle: string; amount: string }[];
+  items: { nombre: string; cantidad: number; costoUnitario: string; subtotal: string }[];
+  manoObra: string;
+  saldoAFavor: string;
+  canDelete: boolean;
+  close: () => void;
+  delete: () => Promise<void>;
+}
+
+export interface QuotaDetailView {
+  description: string;
+  dateLbl: string;
+  driver: string;
+  vehicle: string;
+  billed: string;
+  collected: string;
+  due: string;
+  status: string;
+  statusBg: string;
+  statusFg: string;
+  appliedPayments: AppliedPaymentView[];
+  close: () => void;
+}
+
 /** Una fila del libro de pagos. */
 export interface PagoFull {
   id: number;
@@ -148,7 +197,7 @@ export interface PagoFull {
   tagFg: string;
   nota: string;
   sort: Record<string, string | number>;
-  borrar: () => void;
+  open: () => void;
 }
 
 export interface PagoFormView {
@@ -288,6 +337,7 @@ export interface DetailMonth {
 }
 
 export interface DetailMov {
+  id?: string;
   dateLbl: string;
   desc: string;
   sub: string;
@@ -298,6 +348,7 @@ export interface DetailMov {
   iconBg: string;
   iconFg: string;
   sign: string;
+  open?: () => void;
 }
 
 export interface DetailView {
@@ -463,6 +514,9 @@ export interface View {
   movementPrevPage: () => void;
   movementNextPage: () => void;
   movementOpenRow: (id: string) => void;
+
+  movementDetail: MovementDetailView | null;
+  quotaDetail: QuotaDetailView | null;
 
   hasDetail: boolean;
   detail: DetailView;
@@ -1147,6 +1201,8 @@ export function useFleetView(
     medio: string;
     amount: number;
     comprobante: string;
+    comprobanteName: string;
+    comprobanteType: string;
     items: { nombre: string; cantidad: number; costoUnitario: number; subtotal: number }[];
     manoObra: number;
   };
@@ -1280,7 +1336,9 @@ export function useFleetView(
           note: p.nota || '',
           medio: p.medio || 'Sin especificar',
           amount: p.monto,
-           comprobante: p.comprobante ? '/api/comprobantes/' + p.comprobante.id : '',
+          comprobante: p.comprobante ? '/api/comprobantes/' + p.comprobante.id : '',
+          comprobanteName: p.comprobante?.nombre || '',
+          comprobanteType: p.comprobante?.tipo || '',
           items: [],
           manoObra: 0,
         };
@@ -1302,6 +1360,8 @@ export function useFleetView(
           medio: '',
           amount: m.amount,
           comprobante: m.comprobante ? '/api/comprobantes/' + m.comprobante.id : '',
+          comprobanteName: m.comprobante?.nombre || '',
+          comprobanteType: m.comprobante?.tipo || '',
           items: m.items || [],
           manoObra: m.manoObra || 0,
         };
@@ -1333,6 +1393,94 @@ export function useFleetView(
   const movementPageCount = Math.max(1, Math.ceil(filteredRealMovements.length / 20));
   const movementPage = Math.min(Math.max(1, st.movPage), movementPageCount);
   const movementPageRows = filteredRealMovements.slice((movementPage - 1) * 20, movementPage * 20);
+
+  const movementDetail: MovementDetailView | null = (() => {
+    const selected = st.movementDetailId == null ? undefined : realMovements.find((x) => x.id === st.movementDetailId);
+    if (!selected) return null;
+    const p = selected.id.startsWith('pago-') ? pagos.find((x) => x.id === Number(selected.id.slice(6))) : undefined;
+    const ajuste = p?.tipo === 'ajuste';
+    const appliedQuotas = aplicaciones
+      .filter((a) => p && a.pagoId === p.id)
+      .map((a) => {
+        const quota = cuotas.find((m) => m.id === a.movId);
+        const quotaCar = quota ? carDe.get(quota.carId) : undefined;
+        return {
+          id: a.movId,
+          dateLbl: quota ? dLbl(quota.date) : 'Cuota',
+          description: quota?.desc || 'Cuota',
+          vehicle: quotaCar?.plate || 'Vehículo eliminado',
+          amount: fmt(a.monto, st.hide),
+        };
+      });
+    const driverKey = p ? (p.driverId != null ? String(p.driverId) : p.driver) : '';
+    const favor = p ? saldoAFavor.get(driverKey) ?? 0 : 0;
+    return {
+      id: selected.id,
+      type: selected.type === 'egreso' ? 'Gasto' : ajuste ? 'Ajuste' : 'Pago',
+      typeBg: selected.type === 'egreso' ? '#fdeeea' : ajuste ? '#f4f0e8' : '#eef4f0',
+      typeFg: selected.type === 'egreso' ? '#a8412f' : ajuste ? '#6b665c' : '#2e7d5b',
+      amount: fmt(selected.amount, st.hide),
+      amountFg: selected.type === 'egreso' ? '#a8412f' : ajuste ? '#6b665c' : '#2e7d5b',
+      dateLbl: dLblFull(selected.date),
+      driver: selected.driver || 'Sin chofer',
+      vehicle: selected.vehicle,
+      medio: selected.medio || 'Sin especificar',
+      category: selected.category,
+      note: selected.note || '',
+      comprobante: selected.comprobante ? { url: selected.comprobante, name: selected.comprobanteName || 'Comprobante', type: selected.comprobanteType } : null,
+      appliedQuotas,
+      items: selected.items.map((item) => ({ nombre: item.nombre, cantidad: item.cantidad, costoUnitario: fmt(item.costoUnitario, st.hide), subtotal: fmt(item.subtotal, st.hide) })),
+      manoObra: selected.manoObra ? fmt(selected.manoObra, st.hide) : '',
+      saldoAFavor: favor ? fmt(favor, st.hide) : '',
+      canDelete: !!p,
+      close: () => update({ movementDetailId: null }),
+      delete: async () => {
+        if (!p) return;
+        await persist.deletePago(p.id);
+        update({ movementDetailId: null });
+        toast((ajuste ? 'Ajuste eliminado · ' : 'Movimiento eliminado · ') + (p.driver || 'Sin chofer') + ' · ' + fmt(p.monto));
+      },
+    };
+  })();
+
+  const quotaDetail: QuotaDetailView | null = (() => {
+    const m = st.quotaDetailId == null ? undefined : cuotas.find((x) => x.id === st.quotaDetailId);
+    if (!m) return null;
+    const c = carDe.get(m.carId);
+    const collected = cobradoDe(m);
+    const due = Math.max(0, m.amount - collected);
+    const status = due === 0 ? 'Cobrado' : collected > 0 ? 'Parcial' : 'Pendiente';
+    const appliedPayments = aplicaciones
+      .filter((a) => a.movId === m.id)
+      .map((a) => {
+        const p = pagos.find((x) => x.id === a.pagoId);
+        const ajuste = a.tipo === 'ajuste';
+        return {
+          id: a.pagoId,
+          dateLbl: dLblFull(a.fecha),
+          amount: fmt(a.monto, st.hide),
+          type: ajuste ? 'Ajuste' : 'Pago',
+          typeBg: ajuste ? '#f4f0e8' : '#eef4f0',
+          typeFg: ajuste ? '#6b665c' : '#2e7d5b',
+          medio: p?.medio || 'Sin especificar',
+          note: p?.nota || '',
+        };
+      });
+    return {
+      description: m.desc,
+      dateLbl: dLblFull(m.date),
+      driver: nombreChofer(m, c),
+      vehicle: c ? c.plate + ' · ' + c.model : 'Vehículo eliminado',
+      billed: fmt(m.amount, st.hide),
+      collected: fmt(collected, st.hide),
+      due: fmt(due, st.hide),
+      status,
+      statusBg: PTAG[status][0],
+      statusFg: PTAG[status][1],
+      appliedPayments,
+      close: () => update({ quotaDetailId: null }),
+    };
+  })();
 
   const nav = st.nav;
   const TITLES: Record<string, [string, string]> = {
@@ -1543,8 +1691,9 @@ export function useFleetView(
       })),
       movs: realMovements
         .filter((m) => m.carId === c.id)
-        .slice(0, 8)
+        .slice(0, 4)
         .map((m) => ({
+          id: m.id,
           dateLbl: dLbl(m.date),
           desc: m.desc,
           sub: m.type === 'ingreso' ? m.driver + (m.medio ? ' · ' + m.medio : '') : m.category,
@@ -1554,10 +1703,11 @@ export function useFleetView(
           iconBg: m.type === 'ingreso' ? '#eef4f0' : '#fdeeea',
           iconFg: m.type === 'ingreso' ? '#2e7d5b' : '#a8412f',
           sign: m.type === 'ingreso' ? '↓' : '↑',
+          open: () => update({ detailId: null, nav: 'cobros', cobrosTab: 'pagos', pendQ: c.plate, movementDetailId: m.id, quotaDetailId: null, movPage: 1, movExpanded: null }),
         })),
       verHistorial: () => {
         const latest = realMovements.find((m) => m.carId === c.id);
-        update({ detailId: null, nav: 'movimientos', movVehicle: c.id, movMonth: latest ? monthKey(latest.date) : monthKey(TODAY), movPage: 1, movExpanded: null });
+        update({ detailId: null, nav: 'cobros', cobrosTab: 'pagos', pendQ: c.plate, movVehicle: c.id, movMonth: latest ? monthKey(latest.date) : monthKey(TODAY), movPage: 1, movExpanded: null, movementDetailId: null, quotaDetailId: null });
       },
       markService: () => {
         return update({ service: { carId: c.id, step: 0, fecha: isoLocal(TODAY), descripcion: '', kilometraje: '', costo: '', comprobante: null, guardando: false } });
@@ -1861,7 +2011,7 @@ export function useFleetView(
           // La ficha es del chofer actual del auto: si el auto cambió de manos
           // y esta fila es de un cobro viejo, abre la ficha de quien lo maneja
           // hoy, no la de `drv`, porque no existe una ficha por ex-chofer.
-          open: () => update({ detailCarId: c.id }),
+          open: () => update({ quotaDetailId: m.id, movementDetailId: null }),
         };
       }),
     pendKindChips: (['todas', ...Object.keys(PTAG)] as string[]).map((k) => ({
@@ -1894,12 +2044,7 @@ export function useFleetView(
         tagFg: ajuste ? '#6b665c' : '#2e7d5b',
         nota: p.nota ?? '',
         sort: { driver: p.driver, vehicle: c ? c.plate + ' ' + c.model : 'Sin vehículo asociado', note: p.nota ?? '', date: p.fecha.getTime(), type: ajuste ? 'Ajuste' : 'Pago', amount: p.monto },
-        borrar: () => {
-          persist
-            .deletePago(p.id)
-            .then(() => toast('Pago eliminado · ' + p.driver + ' · ' + fmt(p.monto)))
-            .catch((e: Error) => toast('No se pudo eliminar: ' + e.message));
-        },
+        open: () => update({ movementDetailId: 'pago-' + p.id, quotaDetailId: null }),
       };
     }),
     pagosSub: (() => {
@@ -2171,6 +2316,8 @@ export function useFleetView(
     movementPrevPage: () => update({ movPage: Math.max(1, movementPage - 1), movExpanded: null }),
     movementNextPage: () => update({ movPage: Math.min(movementPageCount, movementPage + 1), movExpanded: null }),
     movementOpenRow: (id) => update((s) => ({ movExpanded: s.movExpanded === id ? null : id })),
+    movementDetail,
+    quotaDetail,
 
     hasDetail: !!st.detailId,
     detail,

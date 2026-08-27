@@ -178,6 +178,8 @@ export interface UIState {
   taller: { carId: string; razon: string; monto: string; archivo: File | null; guardando: boolean } | null;
   /** Qué mira la pantalla de Cobros: las cuotas emitidas o el libro de pagos. */
   cobrosTab: 'cuotas' | 'pagos';
+  movementDetailId: string | null;
+  quotaDetailId: number | null;
   /** Pago a medio cargar. Null = el modal está cerrado. */
   npago: { driver: string | number; fecha: string; monto: string; tipo: PagoTipo; nota: string; guardando: boolean } | null;
   /** Acción destructiva esperando confirmación. */
