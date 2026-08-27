@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { RefreshControl, ScrollView, Text, View } from 'react-native';
+import { Image, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useAuth } from '../../auth';
 import * as api from '../../api';
@@ -11,6 +11,8 @@ import { SkeletonPayments } from '../../components/Skeleton';
 import { fmtD, fmtG, plural } from '../../format';
 import { COLORS } from '../../theme';
 import type { Pago } from '../../types';
+import { API_BASE } from '../../config';
+import { ComprobanteViewer, type ComprobanteSource } from '../../components/ComprobanteViewer';
 
 const FILTROS: { dias: number; label: string }[] = [
   { dias: 7, label: '7 días' },
@@ -25,6 +27,7 @@ export default function Pagos() {
   const [pagos, setPagos] = useState<Pago[] | null>(null);
   const [cargando, setCargando] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [comprobanteAbierto, setComprobanteAbierto] = useState<ComprobanteSource | null>(null);
 
   const cargar = useCallback(async () => {
     if (!token) return;
@@ -99,9 +102,21 @@ export default function Pagos() {
           ) : (
             (pagos ?? []).map((p, i) => {
               const diasAprox = cuota > 0 ? Math.max(1, Math.round(p.monto / cuota)) : null;
+              const comprobante = p.comprobante
+                ? {
+                    uri: `${API_BASE}/api/comprobantes/${encodeURIComponent(p.comprobante.id)}`,
+                    name: p.comprobante.nombre,
+                    type: p.comprobante.tipo,
+                    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+                  }
+                : null;
               return (
-                <View
+                <Pressable
                   key={p.id}
+                  onPress={() => comprobante && setComprobanteAbierto(comprobante)}
+                  disabled={!comprobante}
+                  accessibilityRole={comprobante ? 'button' : undefined}
+                  accessibilityLabel={comprobante ? `Ver comprobante del pago del ${fmtD(p.fecha)}` : undefined}
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
@@ -122,12 +137,22 @@ export default function Pagos() {
                     </Text>
                   </View>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.text }}>{fmtG(p.monto)}</Text>
-                </View>
+                  {comprobante && (
+                    <View style={{ width: 40, height: 40, borderRadius: 9, overflow: 'hidden', marginLeft: 2, backgroundColor: '#f2eadb', borderWidth: 1, borderColor: COLORS.cardBorder, alignItems: 'center', justifyContent: 'center' }}>
+                      {comprobante.type.startsWith('image/') ? (
+                        <Image source={{ uri: comprobante.uri, headers: comprobante.headers }} resizeMode="cover" style={{ width: '100%', height: '100%' }} />
+                      ) : (
+                        <Text style={{ color: '#b14f3d', fontSize: 9, fontWeight: '800' }}>PDF</Text>
+                      )}
+                    </View>
+                  )}
+                </Pressable>
               );
             })
           )}
         </Card>
       </ScrollView>
+      <ComprobanteViewer source={comprobanteAbierto} visible={!!comprobanteAbierto} onClose={() => setComprobanteAbierto(null)} />
     </View>
   );
 }

@@ -12,3 +12,12 @@ pagos y reportes) pertenece a esta cuenta de dueño, no a `admin`.
 La contraseña anterior se perdió al provisionar; el 2026-08-20 se reseteó con
 `crear-usuario.js test --reset` para la prueba de interoperabilidad.
 Cuenta de demostración únicamente; no reutilizar en otros entornos.
+
+## Cuenta demo de chofer
+
+| Campo | Valor |
+|---|---|
+| Usuario | `carlos.benitez` |
+| Contraseña | `Ls6y3bi4a` |
+| Uso | App Driver / Expo Development Client |
+| Chofer | Carlos Benítez |

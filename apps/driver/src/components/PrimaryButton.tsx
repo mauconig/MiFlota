@@ -7,14 +7,16 @@ interface Props {
   onPress: () => void;
   variant?: 'amber' | 'dark' | 'ghost';
   icon?: ReactNode;
+  disabled?: boolean;
 }
 
-export function PrimaryButton({ label, onPress, variant = 'amber', icon }: Props) {
+export function PrimaryButton({ label, onPress, variant = 'amber', icon, disabled = false }: Props) {
   const bg = variant === 'amber' ? COLORS.amber : variant === 'dark' ? COLORS.bgDark : COLORS.card;
   const fg = variant === 'amber' ? COLORS.bgDark : variant === 'dark' ? COLORS.onDark : COLORS.textSoft;
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled}
       style={{
         minHeight: variant === 'ghost' ? 50 : 54,
         borderRadius: 20,
@@ -25,6 +27,7 @@ export function PrimaryButton({ label, onPress, variant = 'amber', icon }: Props
         justifyContent: 'center',
         flexDirection: 'row',
         gap: 8,
+        opacity: disabled ? 0.55 : 1,
       }}
     >
       {icon}

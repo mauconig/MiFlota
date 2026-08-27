@@ -39,6 +39,7 @@ export default function Inicio() {
   const [kmInput, setKmInput] = useState('');
   const [guardandoKm, setGuardandoKm] = useState(false);
   const [kmError, setKmError] = useState('');
+  const [kmGuardado, setKmGuardado] = useState(false);
 
   const cargar = useCallback(async () => {
     if (!token) return;
@@ -68,10 +69,12 @@ export default function Inicio() {
       return;
     }
     setKmError('');
+    setKmGuardado(false);
     setGuardandoKm(true);
     try {
       await api.postKilometraje(token, km);
       await cargar();
+      setKmGuardado(true);
     } catch (e) {
       if (e instanceof SinSesion) sesionVencida();
       else setKmError(e instanceof Error ? e.message : 'No se pudo guardar');
@@ -169,11 +172,22 @@ export default function Inicio() {
             <Text style={{ fontSize: 11, color: resumen.kilometrajeVencido ? COLORS.redText2 : COLORS.textMuted }}>{resumen.kilometrajeVencido ? 'Pendiente esta semana' : 'Actualizado'}</Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <TextInput value={kmInput} onChangeText={setKmInput} keyboardType="number-pad" style={{ flex: 1, borderWidth: 1, borderColor: '#e0d6c4', borderRadius: 14, minHeight: 48, paddingHorizontal: 13, fontSize: 16, color: COLORS.text }} />
+            <TextInput
+              value={kmInput}
+              onChangeText={(value) => {
+                setKmInput(value.replace(/\D/g, ''));
+                setKmError('');
+                setKmGuardado(false);
+              }}
+              keyboardType="number-pad"
+              editable={!guardandoKm}
+              style={{ flex: 1, borderWidth: 1, borderColor: kmError ? COLORS.redText2 : '#e0d6c4', borderRadius: 14, minHeight: 48, paddingHorizontal: 13, fontSize: 16, color: COLORS.text }}
+            />
             <Text style={{ fontSize: 12, color: COLORS.textMuted }}>km</Text>
-            <PrimaryButton label={guardandoKm ? 'Guardando…' : 'Actualizar'} variant="ghost" onPress={guardarKilometraje} />
+            <PrimaryButton label={guardandoKm ? 'Guardando…' : 'Actualizar'} variant="ghost" onPress={guardarKilometraje} disabled={guardandoKm} />
           </View>
           {!!kmError && <Text style={{ fontSize: 12, color: COLORS.redText2 }}>{kmError}</Text>}
+          {kmGuardado && !kmError && <Text style={{ fontSize: 12, color: COLORS.green }}>✓ Kilometraje actualizado hoy.</Text>}
         </Card>
 
         <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 15 }}>
