@@ -143,7 +143,7 @@ Driver auth: `POST /api/chofer/login` → bearer token (random opaque, stored ha
   linux-x64 rolldown binding).
 - **docker-compose.yml**: publishes `127.0.0.1:8791:3000` (loopback only; Caddy fronts
   it with TLS), named volume `miflota-data`, admin credentials from `.env`.
-- **`.env.example`**: only the 3 first-user vars (apply once; then scrypt-hashed in DB).
+- **`.env.example`**: first-user vars, server-side assistant vars, and Cloudinary credentials for comprobantes.
 - **`docs/`** (untracked): `android-emulator-setup.md` — CLI-only Android SDK + emulator
   + Expo Go setup notes for this dev machine.
 - **`server/`** and **`dist/`** (root): stale build artifacts from an earlier layout —
