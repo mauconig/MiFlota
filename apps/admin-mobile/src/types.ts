@@ -213,6 +213,7 @@ export interface MobileState {
   cTo: string;
   periodSheet: boolean;
   movementDetailId: string | null;
+  quotaDetailId: number | null;
   estadoSheet: boolean;
   tallerForm: TallerForm | null;
   choferSheet: boolean;

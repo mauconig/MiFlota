@@ -7,6 +7,7 @@ import { AlertCard } from '../components/AlertCard';
 import { MovRow } from '../components/MovRow';
 import { Pagination } from '../components/Pagination';
 import { MovementDetailSheet } from '../components/MovementDetailSheet';
+import { QuotaDetailSheet } from '../components/QuotaDetailSheet';
 
 const ALERT_PAGE_SIZE = 4;
 const MOV_PAGE_SIZE = 5;
@@ -68,6 +69,13 @@ export function Detalle({ v }: { v: MobileView }) {
   useEffect(() => {
     setActiveTable('movs');
   }, [dc?.car.id]);
+
+  useEffect(() => {
+    if (!v.movementDetail) return;
+    setActiveTable('movs');
+    const index = dc?.movs.findIndex((mov) => String(mov.id) === v.movementDetail?.id) ?? -1;
+    if (index >= 0) setMovPage(Math.floor(index / MOV_PAGE_SIZE));
+  }, [dc?.movs, v.movementDetail?.id]);
 
   if (!dc) return null;
   return (
@@ -216,6 +224,7 @@ export function Detalle({ v }: { v: MobileView }) {
       </View>
 
     </View>
+    <QuotaDetailSheet quota={v.quotaDetail} />
     <MovementDetailSheet movement={v.movementDetail} />
     </>
   );

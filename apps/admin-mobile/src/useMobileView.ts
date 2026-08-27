@@ -208,6 +208,7 @@ export function initialMobileState(): MobileState {
     cTo: isoLocal(TODAY),
     periodSheet: false,
     movementDetailId: null,
+    quotaDetailId: null,
     estadoSheet: false,
     tallerForm: null,
     choferSheet: false,
@@ -278,6 +279,7 @@ interface MovRowView {
 }
 
 export interface MovementDetailView {
+  id: string;
   title: string;
   type: string;
   typeBg: string;
@@ -294,6 +296,31 @@ export interface MovementDetailView {
   comprobante: { uri: string; name: string; type: string; headers?: Record<string, string> } | null;
   items: { nombre: string; cantidad: number; costoUnitario: string; subtotal: string }[];
   manoObra: string;
+  close: () => void;
+}
+
+export interface QuotaPaymentView {
+  id: number;
+  title: string;
+  date: string;
+  applied: string;
+  total: string;
+  medio: string;
+  note: string;
+  onPress: () => void;
+}
+
+export interface QuotaDetailView {
+  title: string;
+  date: string;
+  driver: string;
+  amount: string;
+  paid: string;
+  remaining: string;
+  status: string;
+  statusBg: string;
+  statusFg: string;
+  payments: QuotaPaymentView[];
   close: () => void;
 }
 
@@ -503,6 +530,7 @@ export interface MobileView {
 
   detalle: DetalleView | null;
   movementDetail: MovementDetailView | null;
+  quotaDetail: QuotaDetailView | null;
 
   nuevoVehiculo: {
     editando: boolean;
@@ -1123,6 +1151,7 @@ export function useMobileView(
   // ---- detalle -------------------------------------------------------
   let detalle: DetalleView | null = null;
   let movementDetail: MovementDetailView | null = null;
+  let quotaDetail: QuotaDetailView | null = null;
   if (car) {
     const cs = stats(movs, aplicaciones, (m) => m.carId === car.id && inR(m), (a) => a.carId === car.id && inRA(a), pagos, (p) => p.carId === car.id && inRP(p));
     const carAlerts = alertsByCar.get(car.id) ?? [];
@@ -1146,6 +1175,7 @@ export function useMobileView(
         tag,
         tagBg: tagColors[0],
         tagFg: tagColors[1],
+        onPress: () => update({ quotaDetailId: m.id }),
       };
     });
     const movementRowsWithDate: { fecha: Date; row: MovRowView }[] = [
@@ -1195,6 +1225,7 @@ export function useMobileView(
       if (selectedPago) {
         const ajuste = selectedPago.tipo === 'ajuste';
         return {
+          id: 'pago-' + selectedPago.id,
           title: ajuste ? 'Ajuste registrado' : 'Pago recibido',
           type: ajuste ? 'Ajuste' : 'Ingreso',
           typeBg: '#e7f2ec',
@@ -1216,6 +1247,7 @@ export function useMobileView(
       }
       if (!selectedGasto) return null;
       return {
+        id: 'gasto-' + selectedGasto.id,
         title: selectedGasto.desc,
         type: 'Gasto',
         typeBg: '#fdeeea',
@@ -1233,6 +1265,58 @@ export function useMobileView(
         items: (selectedGasto.items || []).map((item) => ({ nombre: item.nombre, cantidad: item.cantidad, costoUnitario: fmt(item.costoUnitario), subtotal: fmt(item.subtotal) })),
         manoObra: selectedGasto.manoObra ? fmt(selectedGasto.manoObra) : '',
         close: () => update({ movementDetailId: null }),
+      };
+    })();
+    quotaDetail = (() => {
+      const cuotaId = state.quotaDetailId;
+      if (cuotaId == null) return null;
+      const cuota = carMovs.find((m) => m.type === 'ingreso' && m.id === cuotaId);
+      if (!cuota) return null;
+
+      const paid = cobradoDe(cuota);
+      const remaining = Math.max(0, cuota.amount - paid);
+      const status = remaining <= 0 ? 'Pagada' : paid > 0 ? 'Parcial' : 'Pendiente';
+      const statusColors = status === 'Pagada' ? ['#e7f2ec', '#256b4d'] : status === 'Parcial' ? ['#fdf0dd', '#9a6a12'] : ['#fdeeea', '#a8412f'];
+      const paymentById = new Map(pagos.map((p) => [p.id, p]));
+      const payments = new Map<number, QuotaPaymentView & { appliedAmount: number }>();
+
+      aplicaciones
+        .filter((a) => a.movId === cuota.id)
+        .sort((a, b) => +a.fecha - +b.fecha)
+        .forEach((a) => {
+          const pago = paymentById.get(a.pagoId);
+          if (!pago) return;
+          const existing = payments.get(pago.id);
+          if (existing) {
+            existing.appliedAmount += a.monto;
+            existing.applied = fmtShort(existing.appliedAmount);
+            return;
+          }
+          payments.set(pago.id, {
+            id: pago.id,
+            title: pago.tipo === 'ajuste' ? 'Ajuste aplicado' : 'Pago aplicado',
+            date: dLblFull(pago.fecha),
+            applied: fmtShort(a.monto),
+            total: fmtShort(pago.monto),
+            medio: pago.medio || 'Sin especificar',
+            note: pago.nota || '',
+            appliedAmount: a.monto,
+            onPress: () => update({ quotaDetailId: null, movementDetailId: 'pago-' + pago.id }),
+          });
+        });
+
+      return {
+        title: cuota.desc,
+        date: dLblFull(cuota.date),
+        driver: paidBy(cuota, car),
+        amount: fmtShort(cuota.amount),
+        paid: fmtShort(paid),
+        remaining: fmtShort(remaining),
+        status,
+        statusBg: statusColors[0],
+        statusFg: statusColors[1],
+        payments: [...payments.values()],
+        close: () => update({ quotaDetailId: null }),
       };
     })();
     detalle = {
@@ -1883,6 +1967,7 @@ export function useMobileView(
 
     detalle,
     movementDetail: car ? movementDetail : null,
+    quotaDetail: car ? quotaDetail : null,
 
     nuevoVehiculo: {
       editando: state.carId !== null,
