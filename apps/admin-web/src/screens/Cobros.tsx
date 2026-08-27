@@ -79,7 +79,7 @@ export function Cobros({ v }: { v: View }) {
   const enPagos = v.cobrosTab === 'pagos';
   const [sort, setSort] = useState<SortState>({ key: 'date', direction: -1 });
   const onSort = (key: string) => setSort((current) => current.key === key ? { key, direction: current.direction === 1 ? -1 : 1 } : { key, direction: 1 });
-  const pagos = [...v.pagosFull].sort((a, b) => compareRows(a, b, sort));
+  const movimientos = [...v.movimientosFull].sort((a, b) => compareRows(a, b, sort));
   const cobros = [...v.cobrosFull].sort((a, b) => compareRows(a, b, sort));
 
   return (
@@ -90,7 +90,7 @@ export function Cobros({ v }: { v: View }) {
         <SearchBar value={v.pendQ} onChange={v.setPendQ} placeholder="Buscar chofer o chapa…" />
         {!enPagos && <ChipRow chips={v.pendKindChips} />}
         <span style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 12, color: '#6b665c' }}>{enPagos ? v.pagosSub : v.cobrosSub}</span>
+          <span style={{ fontSize: 12, color: '#6b665c' }}>{enPagos ? v.movimientosSub : v.cobrosSub}</span>
           <Btn
             onClick={v.abrirPago}
             style={{ border: 'none', background: '#16150f', color: '#fffdf8', borderRadius: 12, minHeight: 34, padding: '0 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 7, flex: 'none' }}
@@ -108,26 +108,26 @@ export function Cobros({ v }: { v: View }) {
             <span style={{ width: 36, flex: 'none' }} />
             <SortHeader label="Chofer" sortKey="driver" state={sort} onSort={onSort} width={190} />
             <SortHeader label="Vehículo" sortKey="vehicle" state={sort} onSort={onSort} grow />
-            <SortHeader label="Nota" sortKey="note" state={sort} onSort={onSort} width={180} />
+            <SortHeader label="Detalle" sortKey="note" state={sort} onSort={onSort} width={220} />
             <SortHeader label="Fecha" sortKey="date" state={sort} onSort={onSort} width={74} />
             <SortHeader label="Tipo" sortKey="type" state={sort} onSort={onSort} width={84} />
             <SortHeader label="Monto" sortKey="amount" state={sort} onSort={onSort} width={96} align="right" />
           </div>
-          {!v.pagosFull.length && (
-            <Vacio titulo="Sin movimientos en el período" detalle="Acá queda el libro de lo que fue entrando, con la fecha real de cada movimiento. Registrá uno con el botón de arriba." />
+          {!v.movimientosFull.length && (
+            <Vacio titulo="Sin movimientos en el período" detalle="Acá queda el libro de lo que entró y salió, con la fecha real de cada movimiento." />
           )}
           <ScrollArea style={{ padding: '4px 20px' }}>
-            {pagos.map((p) => (
-              <div key={p.id} role="button" tabIndex={0} onClick={p.open} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); p.open(); } }} aria-label={'Ver detalle del movimiento de ' + p.driver} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 13, padding: '11px 0', borderBottom: '1px solid #f4efe4', cursor: 'pointer' }}>
-                <span style={avatar}>{p.initials}</span>
-                <span style={{ width: 190, flex: 'none', fontSize: 14, fontWeight: 700 }}>{p.driver}</span>
-                <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: '#6b665c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.carLbl}</span>
-                <span style={{ width: 180, flex: 'none', fontSize: 12, color: '#6b665c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.nota || '—'}</span>
-                <span style={{ width: 74, flex: 'none', fontSize: 12, color: '#6b665c' }}>{p.dateLbl}</span>
+            {movimientos.map((m) => (
+              <div key={m.id} role="button" tabIndex={0} onClick={m.open} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); m.open(); } }} aria-label={'Ver detalle del movimiento de ' + m.driver} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 13, padding: '11px 0', borderBottom: '1px solid #f4efe4', cursor: 'pointer' }}>
+                <span style={avatar}>{m.initials}</span>
+                <span style={{ width: 190, flex: 'none', fontSize: 14, fontWeight: 700 }}>{m.driver}</span>
+                <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: '#6b665c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.carLbl}</span>
+                <span style={{ width: 220, flex: 'none', fontSize: 12, color: '#6b665c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.detalle}</span>
+                <span style={{ width: 74, flex: 'none', fontSize: 12, color: '#6b665c' }}>{m.dateLbl}</span>
                 <span style={{ width: 84, flex: 'none' }}>
-                  <span style={{ ...tag, background: p.tagBg, color: p.tagFg }}>{p.tag}</span>
+                  <span style={{ ...tag, background: m.tagBg, color: m.tagFg }}>{m.tag}</span>
                 </span>
-                <span style={{ width: 96, flex: 'none', textAlign: 'right', fontSize: 14, fontWeight: 700, color: '#2e7d5b' }}>{p.monto}</span>
+                <span style={{ width: 96, flex: 'none', textAlign: 'right', fontSize: 14, fontWeight: 700, color: m.tagFg }}>{m.monto}</span>
               </div>
             ))}
           </ScrollArea>

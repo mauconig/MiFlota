@@ -635,13 +635,14 @@ async function pdfFromFleetReport(data: {
     const drawTable = (headers: string[], rows: string[][], columnWidths: number[]) => {
       const rowHeight = 23;
       const drawHeader = () => {
-        doc.roundedRect(margin, doc.y, width, rowHeight, 5).fill(REPORT_COLORS.orange);
+        const headerY = doc.y;
+        doc.roundedRect(margin, headerY, width, rowHeight, 5).fill(REPORT_COLORS.orange);
         let x = margin;
         headers.forEach((header, index) => {
-          doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(8).text(header, x + 7, doc.y + 7, { width: columnWidths[index] - 14, lineBreak: false });
+          doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(8).text(header, x + 7, headerY + 7, { width: columnWidths[index] - 14, lineBreak: false });
           x += columnWidths[index];
         });
-        doc.y += rowHeight;
+        doc.y = headerY + rowHeight;
       };
       drawHeader();
       rows.forEach((row, rowIndex) => {
@@ -650,14 +651,15 @@ async function pdfFromFleetReport(data: {
           pageHeader();
           drawHeader();
         }
-        if (rowIndex % 2 === 0) doc.rect(margin, doc.y, width, rowHeight).fill(REPORT_COLORS.orangeLight);
+        const rowY = doc.y;
+        if (rowIndex % 2 === 0) doc.rect(margin, rowY, width, rowHeight).fill(REPORT_COLORS.orangeLight);
         let x = margin;
         row.forEach((cell, index) => {
-          doc.fillColor(REPORT_COLORS.ink).font('Helvetica').fontSize(8).text(pdfCell(cell, 34), x + 7, doc.y + 7, { width: columnWidths[index] - 14, lineBreak: false });
+          doc.fillColor(REPORT_COLORS.ink).font('Helvetica').fontSize(8).text(pdfCell(cell, 34), x + 7, rowY + 7, { width: columnWidths[index] - 14, lineBreak: false });
           x += columnWidths[index];
         });
-        doc.moveTo(margin, doc.y + rowHeight).lineTo(margin + width, doc.y + rowHeight).lineWidth(0.5).strokeColor(REPORT_COLORS.line).stroke();
-        doc.y += rowHeight;
+        doc.moveTo(margin, rowY + rowHeight).lineTo(margin + width, rowY + rowHeight).lineWidth(0.5).strokeColor(REPORT_COLORS.line).stroke();
+        doc.y = rowY + rowHeight;
       });
       doc.y += 12;
     };

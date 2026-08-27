@@ -182,20 +182,20 @@ export interface QuotaDetailView {
   close: () => void;
 }
 
-/** Una fila del libro de pagos. */
-export interface PagoFull {
-  id: number;
+/** Una fila del libro de movimientos reales: ingresos recibidos o egresos. */
+export interface MovimientoFull {
+  id: string;
   initials: string;
   driver: string;
-  /** Auto en el que andaba, o "—" si el pago no quedó atado a ninguno. */
+  /** Auto asociado, o "Sin vehículo asociado" para pagos sin auto. */
   carLbl: string;
+  detalle: string;
   dateLbl: string;
   monto: string;
-  /** "Pago" o "Ajuste": un ajuste cancela deuda pero no es plata que entró. */
+  tipo: 'ingreso' | 'egreso';
   tag: string;
   tagBg: string;
   tagFg: string;
-  nota: string;
   sort: Record<string, string | number>;
   open: () => void;
 }
@@ -471,8 +471,8 @@ export interface View {
 
   cobrosTab: 'cuotas' | 'pagos';
   cobrosTabChips: Chip[];
-  pagosFull: PagoFull[];
-  pagosSub: string;
+  movimientosFull: MovimientoFull[];
+  movimientosSub: string;
   abrirPago: () => void;
   /** Null mientras el modal de pago está cerrado. */
   pagoForm: PagoFormView | null;
@@ -1014,7 +1014,7 @@ export function useFleetView(
 
   const st = state;
   const r = range(st);
-  const inR = (m: Mov) => m.date >= r.start && m.date <= r.end;
+  const inR = (m: { date: Date }) => m.date >= r.start && m.date <= r.end;
   // Días de calendario que abarca el rango: se mide de medianoche a medianoche
   // para que el `finDia` del extremo no sume un día de más.
   const days = Math.max(1, Math.round((+iniDia(r.end) - +iniDia(r.start)) / 864e5) + 1);
@@ -1022,7 +1022,7 @@ export function useFleetView(
   // su último día por la misma razón que `finDia`.
   const prevEnd = finDia(addD(r.start, -1));
   const prevStart = iniDia(addD(prevEnd, -(days - 1)));
-  const inPrev = (m: Mov) => m.date >= prevStart && m.date <= prevEnd;
+  const inPrev = (m: { date: Date }) => m.date >= prevStart && m.date <= prevEnd;
 
   // Imputación de todos los pagos sobre todas las cuotas, sin recortar por
   // período: un pago de agosto puede estar cancelando una cuota de junio, así
@@ -1073,11 +1073,6 @@ export function useFleetView(
     if (d === 'Sin chofer') return;
     deudaPorChofer.set(d, (deudaPorChofer.get(d) ?? 0) + falta);
   });
-
-  const pagosVista = pagos
-    .filter((p) => p.fecha >= r.start && p.fecha <= r.end)
-    .filter((p) => matches(st.pendQ, p.driver, carDe.get(p.carId ?? '')?.plate, carDe.get(p.carId ?? '')?.model, carDe.get(p.carId ?? '')?.gpsTag))
-    .sort((a, b) => +b.fecha - +a.fecha || b.id - a.id);
 
   const alertList: { car: Car; kind: string; sev: number; text: string }[] = [];
   active.forEach((c) => {
@@ -1170,23 +1165,6 @@ export function useFleetView(
       open: () => update({ detailId: x.c.id }),
     };
   };
-
-  const movsSorted = movs.filter(inR).sort((a, b) => +b.date - +a.date);
-  const movsFiltered = movsSorted.filter((m) => {
-    const c = cars.find((c2) => c2.id === m.carId);
-    return (
-      (st.movType === 'todos' || m.type === st.movType) &&
-      (st.movCat === 'todas' || (m.type === 'egreso' && m.cat === st.movCat)) &&
-      matches(st.movQ, m.desc, m.cat, c && paidBy(m, c), c?.model, c?.plate, c?.gpsTag)
-    );
-  });
-  // Acá los ingresos son lo cobrado de las cuotas listadas, no la caja del
-  // período: el panel resume la lista que se está viendo, y esa lista son
-  // movimientos, no pagos.
-  const idsFiltrados = new Set(movsFiltered.map((m) => m.id));
-  const movTot = stats(movsFiltered, aplicaciones, () => true, (a) => idsFiltrados.has(a.movId));
-  const movCatTotal = Object.values(movTot.byCat).reduce((a, b) => a + b, 0) || 1;
-  const movCatMax = Math.max(...CATS.map((c) => movTot.byCat[c] || 0), 1);
 
   type RealMovement = {
     id: string;
@@ -1368,6 +1346,32 @@ export function useFleetView(
       }),
   ].sort((a, b) => +b.date - +a.date || b.id.localeCompare(a.id));
 
+  // Reportes trabaja con caja real: pagos efectivos y egresos. Las cuotas
+  // emitidas, los pendientes y los ajustes no forman parte de esta lista.
+  const reportMovements = realMovements.filter((m) => {
+    const typeOk = st.movType === 'todos' || m.type === st.movType;
+    const categoryOk = st.movCat === 'todas' || (m.type === 'egreso' && m.category === st.movCat);
+    return m.date >= r.start && m.date <= r.end && typeOk && categoryOk && matches(
+      st.movQ,
+      m.desc,
+      m.category,
+      m.vehicle,
+      m.driver,
+      m.note,
+      m.medio,
+    );
+  });
+  const reportIng = reportMovements.filter((m) => m.type === 'ingreso').reduce((sum, m) => sum + m.amount, 0);
+  const reportEgr = reportMovements.filter((m) => m.type === 'egreso').reduce((sum, m) => sum + m.amount, 0);
+  const reportByCat = reportMovements.reduce<Record<string, number>>((byCat, m) => {
+    if (m.type === 'egreso') byCat[m.category] = (byCat[m.category] || 0) + m.amount;
+    return byCat;
+  }, {});
+  const reportCatTotal = Object.values(reportByCat).reduce((sum, amount) => sum + amount, 0) || 1;
+  const reportCatMax = Math.max(...CATS.map((category) => reportByCat[category] || 0), 1);
+  const reportInclude: ReportExportPayload['include'] = st.movType === 'ingreso' ? 'ingresos' : st.movType === 'egreso' ? 'gastos' : 'ambos';
+  const reportCategories: ReportExportPayload['categories'] = st.movCat === 'todas' ? 'todas' : [st.movCat];
+
   const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   const monthDate = (key: string) => new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1, 12);
   const monthLabel = (key: string) => {
@@ -1490,7 +1494,7 @@ export function useFleetView(
     alertas: ['Alertas', 'Mantenimiento'],
     movimientos: ['Movimientos', 'Libro de caja'],
     reportes: ['Reportes', 'Resumen financiero'],
-    cobros: st.cobrosTab === 'pagos' ? ['Movimientos', 'Libro de ingresos'] : ['Cobros', 'Ingresos'],
+    cobros: st.cobrosTab === 'pagos' ? ['Movimientos', 'Libro de caja'] : ['Cobros', 'Ingresos'],
   };
   const SUBS: Record<string, string> = {
     resumen: active.length + ' vehículos activos · ' + (cars.length - active.length) + ' fuera de servicio · datos al ' + dLbl(TODAY),
@@ -1500,7 +1504,7 @@ export function useFleetView(
     movimientos: realMovements.length + ' movimientos reales registrados',
     reportes: 'Ingresos reales, gastos y resultado de ' + r.short,
     cobros: st.cobrosTab === 'pagos'
-      ? pagosVista.length + (pagosVista.length === 1 ? ' movimiento registrado' : ' movimientos registrados') + ' en ' + r.short
+      ? realMovements.filter(inR).length + (realMovements.filter(inR).length === 1 ? ' movimiento registrado' : ' movimientos registrados') + ' en ' + r.short
       : 'Cobrado ' + fmt(tot.ing, st.hide) + ' de ' + fmt(tot.fact, st.hide) + ' facturado en ' + r.short + (pendTotal ? ' · deben ' + fmt(pendTotal, st.hide) : ''),
   };
 
@@ -2029,29 +2033,30 @@ export function useFleetView(
       ...CH(st.cobrosTab === k),
       pick: () => update({ cobrosTab: k }),
     })),
-    pagosFull: pagosVista.map((p) => {
-      const c = p.carId ? carDe.get(p.carId) : undefined;
-      const ajuste = p.tipo === 'ajuste';
+    movimientosFull: realMovements.filter(inR).filter((m) => matches(st.pendQ, m.driver, m.vehicle, m.desc, m.category, m.note, m.medio)).map((m) => {
+      const inc = m.type === 'ingreso';
       return {
-        id: p.id,
-        initials: initials(p.driver),
-        driver: p.driver,
-        carLbl: c ? c.plate + ' · ' + c.model + ' · ' + (c.gpsTag || 'Sin GPS') : '—',
-        dateLbl: dLbl(p.fecha),
-        monto: fmtShort(p.monto, st.hide),
-        tag: ajuste ? 'Ajuste' : 'Pago',
-        tagBg: ajuste ? '#f4f0e8' : '#eef4f0',
-        tagFg: ajuste ? '#6b665c' : '#2e7d5b',
-        nota: p.nota ?? '',
-        sort: { driver: p.driver, vehicle: c ? c.plate + ' ' + c.model : 'Sin vehículo asociado', note: p.nota ?? '', date: p.fecha.getTime(), type: ajuste ? 'Ajuste' : 'Pago', amount: p.monto },
-        open: () => update({ movementDetailId: 'pago-' + p.id, quotaDetailId: null }),
+        id: m.id,
+        initials: initials(m.driver),
+        driver: m.driver,
+        carLbl: m.vehicle,
+        detalle: inc ? (m.note || 'Pago recibido') : m.category + ' · ' + m.desc,
+        dateLbl: dLbl(m.date),
+        monto: (inc ? '+' : '−') + fmtShort(m.amount, st.hide),
+        tipo: m.type,
+        tag: inc ? 'Ingreso' : 'Egreso',
+        tagBg: inc ? '#eef4f0' : '#fdeeea',
+        tagFg: inc ? '#2e7d5b' : '#a8412f',
+        sort: { driver: m.driver, vehicle: m.vehicle, note: inc ? m.note : m.category + ' ' + m.desc, date: m.date.getTime(), type: inc ? 'Ingreso' : 'Egreso', amount: m.amount },
+        open: () => update({ movementDetailId: m.id, quotaDetailId: null }),
       };
     }),
-    pagosSub: (() => {
-      const n = pagosVista.length;
-      const caja = pagosVista.filter((p) => p.tipo === 'pago').reduce((a, p) => a + p.monto, 0);
-      if (!n) return 'Sin movimientos en el período';
-      return n + (n === 1 ? ' movimiento · ' : ' movimientos · ') + fmt(caja, st.hide) + ' de caja';
+    movimientosSub: (() => {
+      const visibles = realMovements.filter(inR).filter((m) => matches(st.pendQ, m.driver, m.vehicle, m.desc, m.category, m.note, m.medio));
+      const ingresos = visibles.filter((m) => m.type === 'ingreso').reduce((sum, m) => sum + m.amount, 0);
+      const gastos = visibles.filter((m) => m.type === 'egreso').reduce((sum, m) => sum + m.amount, 0);
+      if (!visibles.length) return 'Sin movimientos en el período';
+      return visibles.length + (visibles.length === 1 ? ' movimiento · ' : ' movimientos · ') + fmt(ingresos - gastos, st.hide) + ' neto';
     })(),
     abrirPago: () => update({ npago: { driver: '', fecha: isoLocal(TODAY), monto: '', tipo: 'pago', nota: '', guardando: false } }),
     pagoForm: (() => {
@@ -2169,7 +2174,7 @@ export function useFleetView(
     setChQ: (e) => update({ chQ: e.target.value }),
     openDrvModal: () => update({ modal: 'drv', ndrv: blankDrv(), driverCredentials: null, driverCredentialsLoading: false }),
 
-    movsSub: movsFiltered.length + ' movimientos en ' + r.short + (st.movType !== 'todos' || st.movCat !== 'todas' ? ' con los filtros aplicados' : ''),
+    movsSub: reportMovements.length + ' movimientos en ' + r.short + (st.movType !== 'todos' || st.movCat !== 'todas' || st.movQ ? ' con los filtros aplicados' : ''),
     movTypeChips: (
       [
         ['todos', 'Todos'],
@@ -2182,8 +2187,7 @@ export function useFleetView(
       ...CH(st.movCat === k),
       pick: () => update({ movCat: k, movType: k === 'todas' ? st.movType : 'egreso' }),
     })),
-    movRows: movsFiltered.map((m, i) => {
-      const c = cars.find((c2) => c2.id === m.carId)!;
+    movRows: reportMovements.map((m, i) => {
       const inc = m.type === 'ingreso';
       return {
         pos: i + 1,
@@ -2192,81 +2196,37 @@ export function useFleetView(
         iconBg: inc ? '#eef4f0' : '#fdeeea',
         iconFg: inc ? '#2e7d5b' : '#a8412f',
         desc: m.desc,
-        // Una cuota a medias arrastra su deuda al subtítulo, así el listado
-        // general no queda mostrando plata que en realidad no entró.
-        sub: c.plate + ' · ' + (c.gpsTag || 'Sin GPS') + ' · ' + (inc ? paidBy(m, c) + (m.amount - cobradoDe(m) > 0 ? ' · debe ' + fmtShort(m.amount - cobradoDe(m), st.hide) : '') : m.cat),
-        amt: (inc ? '+' : '−') + fmtShort(inc ? cobradoDe(m) : m.amount, st.hide),
+        sub: inc ? m.vehicle + ' · ' + m.driver : m.vehicle + ' · ' + m.category,
+        amt: (inc ? '+' : '−') + fmtShort(m.amount, st.hide),
         amtFg: inc ? '#2e7d5b' : '#c0553f',
-        items: m.items,
-        manoObra: m.manoObra,
+        items: m.items.length ? m.items : undefined,
+        manoObra: m.manoObra || undefined,
       };
     }),
     movQ: st.movQ,
     setMovQ: (e) => update({ movQ: e.target.value }),
     movCats: CATS.map((label) => {
-      const v = movTot.byCat[label] || 0;
-      return { label, amt: fmtShort(v, st.hide), color: CATCOLORS[label], pct: Math.round((v / movCatMax) * 100) + '%', share: Math.round((v / movCatTotal) * 100) + '%' };
+      const amount = reportByCat[label] || 0;
+      return { label, amt: fmtShort(amount, st.hide), color: CATCOLORS[label], pct: Math.round((amount / reportCatMax) * 100) + '%', share: Math.round((amount / reportCatTotal) * 100) + '%' };
     }),
-    movEgrTotal: fmt(movTot.egr, st.hide),
-    movIngTotal: fmt(movTot.ing, st.hide),
-    movNetTotal: fmt(movTot.net, st.hide),
+    movEgrTotal: fmt(reportEgr, st.hide),
+    movIngTotal: fmt(reportIng, st.hide),
+    movNetTotal: fmt(reportIng - reportEgr, st.hide),
     exportar: async () => {
+      if (!reportMovements.length) return toast('No hay movimientos para exportar con estos filtros');
       const periodPayload = { type: st.period, ...(st.period === 'custom' ? { from: st.cFrom, to: st.cTo } : { to: isoLocal(TODAY) }) } as ReportExportPayload['period'];
       try {
-        const result = await persist.exportReport({ period: periodPayload, include: 'ambos', carIds: 'todos', categories: 'todas', format: 'xlsx' });
+        const result = await persist.exportReport({ period: periodPayload, include: reportInclude, carIds: 'todos', categories: reportCategories, format: 'xlsx' });
         const a = document.createElement('a'); a.href = result.file.url; a.download = result.file.name; a.click();
         toast('Excel descargado · ' + result.counts.total + ' movimientos');
       } catch (e) { toast('No se pudo exportar: ' + (e as Error).message); }
       return;
     },
-      // Legacy client-side export retained below as historical context.
-    /*
-      if (!movsFiltered.length) return toast('No hay movimientos para exportar con estos filtros');
-      try {
-        await downloadXlsx(
-          'movimientos-' + isoLocal(TODAY) + '.xlsx',
-          'Movimientos',
-          ['Fecha', 'Tipo', 'Vehículo', 'Modelo', 'Año', 'Chofer', 'Descripción', 'Categoría', 'Estado', 'Comprobante', 'Facturado', 'Monto', 'Debe'],
-          movsFiltered.map((m) => {
-            const c = cars.find((c2) => c2.id === m.carId);
-            const inc = m.type === 'ingreso';
-            const cob = cobradoDe(m);
-            return [
-              isoLocal(m.date),
-              inc ? 'Ingreso' : 'Egreso',
-              c?.plate ?? '',
-              c?.model ?? '',
-              c?.year ?? '',
-              // El chofer va en toda fila, no solo en los ingresos: un gasto del
-              // vehículo igual es del chofer que lo tiene asignado.
-              c?.driver ?? '',
-              m.desc,
-              // Un ingreso no tiene categoría de gasto y un egreso no tiene
-              // estado de cobro. El guion marca "no aplica"; si toda la
-              // exportación quedó así, `downloadXlsx` saca la columna entera.
-              inc ? '—' : (m.cat ?? '—'),
-              inc ? (m.amount - cob === 0 ? 'Cobrado' : cob > 0 ? 'Pago parcial' : 'Pendiente') : '—',
-              m.comprobante ? m.comprobante.nombre : '—',
-              // "Monto" es la plata que se movió de verdad, en las dos
-              // direcciones. Facturado y Debe son propios del cobro, así que en
-              // un gasto no aplican (y si la exportación es toda de gastos,
-              // `downloadXlsx` borra esas dos columnas enteras).
-              inc ? m.amount : '—',
-              inc ? cob : m.amount,
-              inc ? m.amount - cob : '—',
-            ];
-          }),
-        );
-        toast(movsFiltered.length + (movsFiltered.length === 1 ? ' movimiento exportado' : ' movimientos exportados'));
-      } catch {
-        toast('No se pudo generar el Excel — probá de nuevo');
-      }
-    },
-    */
     exportarPdf: async () => {
+      if (!reportMovements.length) return toast('No hay movimientos para exportar con estos filtros');
       const periodPayload = { type: st.period, ...(st.period === 'custom' ? { from: st.cFrom, to: st.cTo } : { to: isoLocal(TODAY) }) } as ReportExportPayload['period'];
       try {
-        const result = await persist.exportReport({ period: periodPayload, include: 'ambos', carIds: 'todos', categories: 'todas', format: 'pdf' });
+        const result = await persist.exportReport({ period: periodPayload, include: reportInclude, carIds: 'todos', categories: reportCategories, format: 'pdf' });
         const a = document.createElement('a'); a.href = result.file.url; a.download = result.file.name; a.click();
         toast('PDF descargado · ' + result.counts.total + ' movimientos');
       } catch (e) { toast('No se pudo exportar: ' + (e as Error).message); }
