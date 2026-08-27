@@ -49,7 +49,9 @@ export function imputar(cargos: MovRow[], pagos: PagoRow[], choferDe: (m: MovRow
     if (!c) cuentas.set(d, (c = { cargos: [], pagos: [] }));
     return c;
   };
-  for (const m of cargos) cuenta(choferDe(m)).cargos.push(m);
+  // SQLite entrega el driver_id de los cargos como número, mientras que los
+  // pagos pueden llegar serializados como texto. Map distingue 2 de "2".
+  for (const m of cargos) cuenta(String(choferDe(m))).cargos.push(m);
   // Los pagos se agrupan por la misma identidad estable que los cargos: el
   // `driver_id` si lo traen, o el nombre como fallback en datos previos a ese
   // campo. Así un pago de un chofer que cambió de auto sí cancela las cuotas

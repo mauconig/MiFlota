@@ -124,6 +124,7 @@ app.addHook('preHandler', async (req, reply) => {
   // eso permite abrirlos desde el navegador del teléfono sin copiar la sesión.
   if (req.url.startsWith('/api/assistant/files/')) return;
   if (req.url.startsWith('/api/reports/files/')) return;
+  if (req.url.startsWith('/api/comprobantes/')) return;
   if (ABIERTAS.has(req.url.split('?')[0])) return;
   if (!usuarioDeSesion(db, tokenDueno(req))) return reply.code(401).send({ error: 'Sesión requerida' });
 });
@@ -1581,11 +1582,23 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/service', async (req, reply)
 /** Descarga del comprobante. Se resuelve por el movimiento y no por el nombre
  *  del archivo, así que el id solo sirve si el movimiento es del que pregunta. */
 app.get<{ Params: { id: string } }>('/api/comprobantes/:id', async (req, reply) => {
-  const u = quien(req);
   type Fila = { comprobante: string; comprobante_nombre: string | null; comprobante_tipo: string | null };
-  const fila =
-    (db.prepare('SELECT comprobante, comprobante_nombre, comprobante_tipo FROM movs WHERE comprobante = ? AND owner_id = ?').get(req.params.id, u.id) as Fila | undefined) ??
-    (db.prepare('SELECT comprobante, comprobante_nombre, comprobante_tipo FROM pagos WHERE comprobante = ? AND owner_id = ?').get(req.params.id, u.id) as Fila | undefined);
+  const owner = usuarioDeSesion(db, tokenDueno(req));
+  let fila: Fila | undefined;
+  if (owner) {
+    fila =
+      (db.prepare('SELECT comprobante, comprobante_nombre, comprobante_tipo FROM movs WHERE comprobante = ? AND owner_id = ?').get(req.params.id, owner.id) as Fila | undefined) ??
+      (db.prepare('SELECT comprobante, comprobante_nombre, comprobante_tipo FROM pagos WHERE comprobante = ? AND owner_id = ?').get(req.params.id, owner.id) as Fila | undefined);
+  } else {
+    const chofer = quienChofer(db, req);
+    if (!chofer) return reply.code(401).send({ error: 'SesiÃ³n requerida' });
+    fila = db
+      .prepare(`SELECT comprobante, comprobante_nombre, comprobante_tipo
+                  FROM pagos
+                 WHERE comprobante = ? AND owner_id = ?
+                   AND (driver_id = ? OR (driver_id IS NULL AND driver = ?))`)
+      .get(req.params.id, chofer.ownerId, chofer.driverId, chofer.driver) as Fila | undefined;
+  }
   if (!fila) return reply.code(404).send({ error: 'Comprobante inexistente' });
 
   // El tipo sale de la tabla blanca, no de lo que se guardó: si alguna vez
@@ -1821,20 +1834,21 @@ app.get('/api/chofer/resumen', async (req, reply) => {
   const s = quienChofer(db, req);
   if (!s) return reply.code(401).send({ error: 'Sesión requerida' });
 
+  const hoy = hoyISO();
   const flota = db.prepare('SELECT id, driver, cuota FROM cars WHERE owner_id = ?').all(s.ownerId) as { id: string; driver: string; cuota: number }[];
   const driverDeCar = new Map(flota.map((c) => [c.id, c.driver]));
   // Todo lo que sigue es de un solo chofer; la clave de imputación es su id.
   const choferDe = () => s.driverId;
   const esEste = (m: MovRow) => (m.driver_id != null ? m.driver_id === s.driverId : (m.driver ?? driverDeCar.get(m.car_id)) === s.driver);
 
-  const cargos = (db.prepare("SELECT * FROM movs WHERE owner_id = ? AND type = 'ingreso'").all(s.ownerId) as MovRow[]).filter(esEste);
+  const cargos = (db.prepare("SELECT * FROM movs WHERE owner_id = ? AND type = 'ingreso'").all(s.ownerId) as MovRow[]).filter((m) => m.date <= hoy && esEste(m));
   const pagos = (db.prepare('SELECT * FROM pagos WHERE owner_id = ?').all(s.ownerId) as PagoRow[]).filter((p) =>
-    p.driver_id != null ? p.driver_id === s.driverId : p.driver === s.driver,
+    p.fecha <= hoy && (p.driver_id != null ? p.driver_id === s.driverId : p.driver === s.driver),
   );
   const { cobrado, saldoAFavor } = imputar(cargos, pagos, choferDe);
 
   const deuda = cargos.reduce((a, m) => a + (m.amount - (cobrado.get(m.id) ?? 0)), 0);
-  const aFavor = saldoAFavor.get(s.driverId) ?? 0;
+  const aFavor = saldoAFavor.get(String(s.driverId)) ?? 0;
   const estado = deuda > 0 ? 'atrasado' : aFavor > 0 ? 'adelantado' : 'al_dia';
 
   const pendientes = cargos
@@ -1845,7 +1859,6 @@ app.get('/api/chofer/resumen', async (req, reply) => {
   // cuota más vieja sin pagar.
   const atrasadoDesde = estado === 'atrasado' ? (pendientes[0]?.date ?? null) : null;
 
-  const hoy = hoyISO();
   const carActual = db.prepare('SELECT cuota, kilometraje, kilometraje_actualizado FROM cars WHERE id = ? AND owner_id = ?').get(s.carId, s.ownerId) as { cuota: number; kilometraje: number; kilometraje_actualizado: string | null } | undefined;
   const cuota = carActual?.cuota ?? 0;
   const cobradoDelMes = cargos.filter((m) => m.date.slice(0, 7) === hoy.slice(0, 7)).reduce((a, m) => a + (cobrado.get(m.id) ?? 0), 0);
