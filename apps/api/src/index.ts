@@ -8,7 +8,8 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { CarRow, GastoItemRow, LocationRow, MovRow, PagoRow, ReporteRow } from './db.js';
-import { COMPROBANTES_DIR, DB_PATH, carToJson, ensureDriver, locationToJson, movToJson, openDb, pagoToJson, reporteToJson } from './db.js';
+import { DB_PATH, carToJson, ensureDriver, locationToJson, movToJson, openDb, pagoToJson, reporteToJson } from './db.js';
+import { borrarComprobante, COMPROBANTES_STORAGE, guardarComprobante, leerComprobante, type ComprobanteInput } from './comprobantes.js';
 import {
   COOKIE,
   bloqueado,
@@ -71,6 +72,8 @@ const assistantReportFiles = new Map<string, AssistantReportFileRecord>();
 
 const db = openDb();
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
+
+app.log.info({ storage: COMPROBANTES_STORAGE }, 'almacenamiento de comprobantes inicializado');
 
 migrarAuth(db);
 migrarAuthChofer(db);
@@ -1217,7 +1220,7 @@ app.delete<{ Params: { id: string } }>('/api/cars/:id', async (req, reply) => {
   for (const a of adjuntos) {
     // Que falle un borrado de archivo no puede tumbar la respuesta: la fila ya
     // no está, y un huérfano es preferible a un error después del hecho.
-    await rm(join(COMPROBANTES_DIR, a.comprobante), { force: true }).catch((e) => req.log.warn({ e, id: a.comprobante }, 'no se pudo borrar el comprobante'));
+    await borrarComprobante(a.comprobante).catch((e) => req.log.warn({ e, id: a.comprobante }, 'no se pudo borrar el comprobante'));
   }
   req.log.info({ car: car.plate, movs: n }, 'vehículo eliminado');
   return { ok: true, plate: car.plate, movs: n };
@@ -1306,6 +1309,15 @@ const TIPOS_COMPROBANTE: Record<string, string> = {
   'application/pdf': 'pdf',
 };
 
+type ComprobantePendiente = ComprobanteInput;
+
+const prepararComprobante = (data: Buffer, filename: string | undefined, mimetype: string, extension: string): ComprobantePendiente => ({
+  data,
+  nombre: String(filename || 'comprobante').slice(0, 120),
+  tipo: mimetype,
+  extension,
+});
+
 app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) => {
   const u = quien(req);
   const car = selCar.get(req.params.id, u.id) as CarRow | undefined;
@@ -1313,7 +1325,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
 
   let razon = '';
   let monto = 0;
-  let archivo: { id: string; nombre: string; tipo: string } | null = null;
+  let archivoPendiente: ComprobantePendiente | null = null;
 
   try {
     for await (const parte of req.parts()) {
@@ -1335,9 +1347,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
       if (!buf.length) continue;
       // El nombre del archivo lo inventa el servidor: usar el que manda el
       // cliente permitiría escribir fuera del directorio con un `../`.
-      const id = randomUUID() + '.' + ext;
-      await writeFile(join(COMPROBANTES_DIR, id), buf);
-      archivo = { id, nombre: String(parte.filename || 'comprobante').slice(0, 120), tipo: parte.mimetype };
+      archivoPendiente = prepararComprobante(buf, parte.filename, parte.mimetype, ext);
     }
   } catch (e) {
     const err = e as { code?: string };
@@ -1348,15 +1358,22 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
   if (!razon) return reply.code(400).send({ error: 'Indicá el motivo de la entrada a taller' });
   if (monto <= 0) return reply.code(400).send({ error: 'Indicá cuánto se gasta en el taller' });
 
+  const archivo = archivoPendiente ? await guardarComprobante(archivoPendiente) : null;
   const hoy = hoyISO();
-  const info = db
-    .prepare(
-      `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
-       VALUES (?, ?, 'egreso', ?, ?, ?, 'Taller', NULL, ?, ?, ?)`,
-    )
-    .run(u.id, car.id, monto, hoy, razon, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
+  let info;
+  try {
+    info = db
+      .prepare(
+        `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
+         VALUES (?, ?, 'egreso', ?, ?, ?, 'Taller', NULL, ?, ?, ?)`,
+      )
+      .run(u.id, car.id, monto, hoy, razon, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
 
-  db.prepare("UPDATE cars SET estado = 'taller' WHERE id = ? AND owner_id = ?").run(car.id, u.id);
+    db.prepare("UPDATE cars SET estado = 'taller' WHERE id = ? AND owner_id = ?").run(car.id, u.id);
+  } catch (error) {
+    if (archivo) await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
+    throw error;
+  }
   req.log.info({ car: car.plate, monto, comprobante: !!archivo }, 'vehículo a taller');
 
   const mov = db.prepare('SELECT * FROM movs WHERE id = ?').get(info.lastInsertRowid) as MovRow;
@@ -1406,7 +1423,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
   let cat = '';
   let itemsRaw = '[]';
   let manoObra = 0;
-  let archivo: { id: string; nombre: string; tipo: string } | null = null;
+  let archivoPendiente: ComprobantePendiente | null = null;
 
   try {
     for await (const parte of req.parts()) {
@@ -1429,9 +1446,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
       }
       const buf = await parte.toBuffer();
       if (!buf.length) continue;
-      const id = randomUUID() + '.' + ext;
-      await writeFile(join(COMPROBANTES_DIR, id), buf);
-      archivo = { id, nombre: String(parte.filename || 'comprobante').slice(0, 120), tipo: parte.mimetype };
+      archivoPendiente = prepararComprobante(buf, parte.filename, parte.mimetype, ext);
     }
   } catch (e) {
     const err = e as { code?: string };
@@ -1452,8 +1467,11 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
   const total = items.length || manoObra > 0 ? detalleTotal : monto;
   if (monto > 0 && (items.length || manoObra > 0) && monto !== detalleTotal) return reply.code(400).send({ error: 'El total no coincide con los ítems y la mano de obra' });
   if (total <= 0 || total > 1_000_000_000) return reply.code(400).send({ error: 'Indicá cuánto se gastó' });
+  const archivo = archivoPendiente ? await guardarComprobante(archivoPendiente) : null;
   const hoy = hoyISO();
-  const info = db.transaction(() => {
+  let info;
+  try {
+    info = db.transaction(() => {
     const created = db
       .prepare(
         `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, mano_obra, comprobante, comprobante_nombre, comprobante_tipo)
@@ -1463,7 +1481,11 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
     const insertItem = db.prepare('INSERT INTO gasto_items (mov_id, nombre, cantidad, costo_unitario, subtotal) VALUES (?, ?, ?, ?, ?)');
     for (const item of items) insertItem.run(created.lastInsertRowid, item.nombre, item.cantidad, item.costoUnitario, item.subtotal);
     return created;
-  })();
+    })();
+  } catch (error) {
+    if (archivo) await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
+    throw error;
+  }
 
   req.log.info({ car: car.plate, cat, monto: total, items: items.length, comprobante: !!archivo }, 'gasto registrado');
 
@@ -1484,7 +1506,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/service', async (req, reply)
   let descripcion = '';
   let kilometraje: number | undefined;
   let costo: number | undefined;
-  let archivoPendiente: { buf: Buffer; nombre: string; tipo: string; id: string } | null = null;
+  let archivoPendiente: ComprobantePendiente | null = null;
 
   try {
     for await (const parte of req.parts()) {
@@ -1511,7 +1533,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/service', async (req, reply)
         return reply.code(415).send({ error: 'El comprobante tiene que ser una foto o un PDF' });
       }
       const buf = await parte.toBuffer();
-      if (buf.length) archivoPendiente = { buf, nombre: String(parte.filename || 'comprobante').slice(0, 120), tipo: parte.mimetype, id: randomUUID() + '.' + ext };
+      if (buf.length) archivoPendiente = prepararComprobante(buf, parte.filename, parte.mimetype, ext);
     }
   } catch (e) {
     const err = e as { code?: string };
@@ -1527,10 +1549,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/service', async (req, reply)
   }
   if (costo !== undefined && (!Number.isInteger(costo) || costo < 0 || costo > 1_000_000_000)) return reply.code(400).send({ error: 'El costo del service no es válido' });
 
-  const archivo = archivoPendiente
-    ? { id: archivoPendiente.id, nombre: archivoPendiente.nombre, tipo: archivoPendiente.tipo }
-    : null;
-  if (archivoPendiente) await writeFile(join(COMPROBANTES_DIR, archivoPendiente.id), archivoPendiente.buf);
+  const archivo = archivoPendiente ? await guardarComprobante(archivoPendiente) : null;
 
   try {
     const info = db.transaction(() => {
@@ -1555,7 +1574,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/service', async (req, reply)
     req.log.info({ car: car.plate, costo: costo ?? 0, comprobante: !!archivo }, 'service registrado');
     return reply.code(201).send({ car: carToJson(actualizado), ...(mov ? { mov: movToJson(mov, []) } : {}) });
   } catch (error) {
-    if (archivo) await rm(join(COMPROBANTES_DIR, archivo.id), { force: true });
+    if (archivo) await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
     throw error;
   }
 });
@@ -1574,6 +1593,14 @@ app.get<{ Params: { id: string } }>('/api/comprobantes/:id', async (req, reply) 
   // entrara un valor raro a la base, igual no se sirve como algo ejecutable.
   const tipo = fila.comprobante_tipo && TIPOS_COMPROBANTE[fila.comprobante_tipo] ? fila.comprobante_tipo : 'application/octet-stream';
   const nombre = (fila.comprobante_nombre ?? 'comprobante').replace(/[^\w.\- ]/g, '_');
+  let data: Buffer | null;
+  try {
+    data = await leerComprobante(fila.comprobante);
+  } catch (error) {
+    req.log.error({ err: error, id: fila.comprobante }, 'no se pudo leer el comprobante');
+    return reply.code(502).send({ error: 'No se pudo recuperar el comprobante' });
+  }
+  if (!data) return reply.code(404).send({ error: 'El archivo ya no está disponible' });
 
   return reply
     .type(tipo)
@@ -1581,7 +1608,7 @@ app.get<{ Params: { id: string } }>('/api/comprobantes/:id', async (req, reply) 
     .header('X-Content-Type-Options', 'nosniff')
     .header('Content-Security-Policy', "default-src 'none'; sandbox")
     .header('Cache-Control', 'private, max-age=3600')
-    .send(createReadStream(join(COMPROBANTES_DIR, fila.comprobante)));
+    .send(data);
 });
 
 /* ---------------------------- cobranza ---------------------------- */
@@ -1875,7 +1902,7 @@ app.post<{ Params: never }>('/api/chofer/pagos', async (req, reply) => {
 
   let monto = 0;
   let medio = '';
-  let archivo: { id: string; nombre: string; tipo: string } | null = null;
+  let archivoPendiente: ComprobantePendiente | null = null;
 
   try {
     for await (const parte of req.parts()) {
@@ -1895,9 +1922,7 @@ app.post<{ Params: never }>('/api/chofer/pagos', async (req, reply) => {
       }
       const buf = await parte.toBuffer();
       if (!buf.length) continue;
-      const id = randomUUID() + '.' + ext;
-      await writeFile(join(COMPROBANTES_DIR, id), buf);
-      archivo = { id, nombre: String(parte.filename || 'comprobante').slice(0, 120), tipo: parte.mimetype };
+      archivoPendiente = prepararComprobante(buf, parte.filename, parte.mimetype, ext);
     }
   } catch (e) {
     const err = e as { code?: string };
@@ -1906,13 +1931,20 @@ app.post<{ Params: never }>('/api/chofer/pagos', async (req, reply) => {
   }
 
   if (medio !== 'Transferencia') return reply.code(400).send({ error: 'Los pagos de chofer solo aceptan transferencia' });
-  if (!archivo) return reply.code(400).send({ error: 'Adjuntá el comprobante de la transferencia' });
+  if (!archivoPendiente) return reply.code(400).send({ error: 'Adjuntá el comprobante de la transferencia' });
   if (monto <= 0 || monto > 1_000_000_000) return reply.code(400).send({ error: 'El monto tiene que ser un número mayor a cero' });
 
+  const archivo = await guardarComprobante(archivoPendiente);
   const hoy = hoyISO();
-  const info = db
-    .prepare('INSERT INTO pagos (owner_id, car_id, driver, driver_id, fecha, monto, tipo, medio, comprobante, comprobante_nombre, comprobante_tipo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(s.ownerId, s.carId, s.driver, s.driverId, hoy, monto, 'pago', medio || null, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
+  let info;
+  try {
+    info = db
+      .prepare('INSERT INTO pagos (owner_id, car_id, driver, driver_id, fecha, monto, tipo, medio, comprobante, comprobante_nombre, comprobante_tipo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(s.ownerId, s.carId, s.driver, s.driverId, hoy, monto, 'pago', medio || null, archivo.id, archivo.nombre, archivo.tipo);
+  } catch (error) {
+    await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
+    throw error;
+  }
 
   req.log.info({ driver: s.driver, monto, medio, comprobante: !!archivo }, 'pago de chofer registrado');
   void sendOwnerPush(db, s.ownerId, {
