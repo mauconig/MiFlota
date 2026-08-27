@@ -106,6 +106,7 @@ export interface CarLocation {
 // admin-web, así que este estado no se parece al `UIState` de ahí.
 
 export type Screen = 'dashboard' | 'flota' | 'gastos' | 'mas' | 'alertas' | 'choferes' | 'detalle' | 'nuevoVehiculo' | 'registrar' | 'reportes' | 'ranking' | 'assistant' | 'perfil';
+export type AdminNotificationRoute = { kind: 'alerts' } | { kind: 'payment'; carId: string; paymentId: number };
 export type Period = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
 export type RegistrarTab = 'cobro' | 'gasto';
 export type RegistrarStep = number;

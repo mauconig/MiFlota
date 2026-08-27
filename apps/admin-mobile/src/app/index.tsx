@@ -8,8 +8,8 @@ import { useAuth, useFleetStore, type FleetStore } from '../api';
 import { Login } from '../screens/Login';
 import { Shell } from '../components/Shell';
 import { useMobileView, initialMobileState } from '../useMobileView';
-import type { MobileState } from '../types';
-import { registerAdminPushNotifications } from '../notifications';
+import type { AdminNotificationRoute, MobileState } from '../types';
+import { registerAdminPushNotifications, subscribeAdminNotificationResponses } from '../notifications';
 
 const Spinner = () => (
   <SafeAreaView style={{ flex: 1, backgroundColor: '#f4f0e8', alignItems: 'center', justifyContent: 'center' }}>
@@ -20,10 +20,12 @@ const Spinner = () => (
 export default function App() {
   const auth = useAuth();
   const [state, setState] = useState<MobileState>(initialMobileState);
+  const [pendingNotification, setPendingNotification] = useState<AdminNotificationRoute | null>(null);
   const update = useCallback((patch: Partial<MobileState> | ((s: MobileState) => Partial<MobileState>)) => {
     setState((s) => ({ ...s, ...(typeof patch === 'function' ? patch(s) : patch) }));
   }, []);
   const onError = useCallback((msg: string) => update({ toast: msg }), [update]);
+  useEffect(() => subscribeAdminNotificationResponses(setPendingNotification), []);
   useEffect(() => {
     if (!auth.sesion) return;
     void registerAdminPushNotifications().catch(() => {});
@@ -50,7 +52,7 @@ export default function App() {
     );
   }
 
-return <AuthedApp sesion={auth.sesion} onLogout={auth.salir} cambiarPassword={auth.cambiarPassword} state={state} update={update} store={store} />;
+return <AuthedApp sesion={auth.sesion} onLogout={auth.salir} cambiarPassword={auth.cambiarPassword} state={state} update={update} store={store} pendingNotification={pendingNotification} onNotificationHandled={() => setPendingNotification(null)} />;
 }
 
 function AuthedApp({
@@ -60,6 +62,8 @@ function AuthedApp({
   state,
   update,
   store,
+  pendingNotification,
+  onNotificationHandled,
 }: {
   sesion: { usuario: string; nombre: string };
   onLogout: () => void | Promise<void>;
@@ -67,8 +71,15 @@ function AuthedApp({
   state: MobileState;
   update: (patch: Partial<MobileState> | ((s: MobileState) => Partial<MobileState>)) => void;
   store: FleetStore;
+  pendingNotification: AdminNotificationRoute | null;
+  onNotificationHandled: () => void;
 }) {
   const v = useMobileView(store.cars, store.movs, store.pagos, store.locations, state, update, store, cambiarPassword);
+  useEffect(() => {
+    if (!pendingNotification || store.cargando) return;
+    v.openNotification(pendingNotification);
+    onNotificationHandled();
+  }, [pendingNotification, store.cargando, v.openNotification, onNotificationHandled]);
   if (store.cargando) return <Spinner />;
   return (
     // Sin el borde "bottom": ese inset lo absorbe BottomNav (su fondo tiene

@@ -269,6 +269,14 @@ export function openDb() {
       updated_at  TEXT NOT NULL
     );
 
+    -- Deduplicación persistente del resumen diario de alertas del dueño.
+    CREATE TABLE IF NOT EXISTS admin_alert_digest_log (
+      owner_id INTEGER NOT NULL,
+      day      TEXT NOT NULL,
+      sent_at  TEXT NOT NULL,
+      PRIMARY KEY (owner_id, day)
+    );
+
     -- Banderas de migraciones que corren una sola vez en la vida de la base.
     -- No usar la ausencia/presencia de una columna como guard cuando la propia
     -- migración la borra: en el siguiente arranque la columna vuelve a estar
@@ -287,6 +295,7 @@ export function openDb() {
     CREATE INDEX IF NOT EXISTS idx_reportes_car   ON reportes_falla(car_id);
     CREATE INDEX IF NOT EXISTS idx_driver_locations_received ON driver_locations(received_at);
     CREATE INDEX IF NOT EXISTS idx_admin_push_tokens_owner ON admin_push_tokens(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_admin_alert_digest_log_day ON admin_alert_digest_log(day);
   `);
 
   // Los índices sobre owner_id se crean dentro de la migración, no acá: en una

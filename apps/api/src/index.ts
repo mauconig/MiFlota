@@ -43,6 +43,8 @@ import {
 import { imputar } from './cobranza.js';
 import { answerAssistant, buildAssistantSnapshot, unavailableAssistantReply, type AssistantFile, type AssistantHistoryItem, type AssistantQueryGroup, type AssistantQueryRequest, type AssistantQueryResult, type AssistantQueryRow, type AssistantReportRequest } from './assistant.js';
 import { sendOwnerPush } from './push.js';
+import { startDailyAlertDigest } from './ownerNotifications.js';
+import { localDateISO } from './time.js';
 import * as XLSX from 'xlsx';
 import PDFDocument from 'pdfkit';
 
@@ -54,10 +56,7 @@ const PORT = Number(process.env.PORT ?? 3000);
  *  fecha (ver `TODAY` en el cliente), y sin poder alinear las dos el servidor
  *  rechazaría por "futuro" todo lo que se cargue desde esa app. En producción
  *  no se define y manda el reloj real. */
-const hoyISO = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
+const hoyISO = () => localDateISO();
 const diasEntreISO = (desde: string | null, hasta = hoyISO()) => (desde ? Math.floor((Date.parse(`${hasta}T12:00:00Z`) - Date.parse(`${desde}T12:00:00Z`)) / 86400000) : Number.POSITIVE_INFINITY);
 const ASSISTANT_REPORTS_DIR = process.env.MIFLOTA_ASSISTANT_REPORTS ?? join(dirname(DB_PATH), 'assistant-reports');
 await mkdir(ASSISTANT_REPORTS_DIR, { recursive: true });
@@ -1854,18 +1853,6 @@ app.get('/api/chofer/resumen', async (req, reply) => {
   const diasTranscurridos = Number(hoy.slice(8, 10));
 
   const kilometrajeVencido = diasEntreISO(carActual?.kilometraje_actualizado ?? null) > 7;
-  if (kilometrajeVencido && carActual) {
-    const hoy = hoyISO();
-    const alertada = db.prepare('INSERT OR IGNORE INTO kilometraje_alertas (owner_id, car_id, notified_date) VALUES (?, ?, ?)').run(s.ownerId, s.carId, hoy).changes > 0;
-    if (alertada) {
-      void sendOwnerPush(db, s.ownerId, {
-        title: 'Kilometraje pendiente',
-        body: `${s.driver} todavía no actualizó el kilometraje de su auto después de siete días.`,
-        data: { type: 'kilometraje_pending', carId: s.carId ?? '' },
-      }).catch((e: Error) => req.log.warn({ err: e, ownerId: s.ownerId }, 'no se pudo enviar alerta de kilometraje'));
-    }
-  }
-
   return {
     estado,
     deuda,
@@ -1947,9 +1934,10 @@ app.post<{ Params: never }>('/api/chofer/pagos', async (req, reply) => {
   }
 
   req.log.info({ driver: s.driver, monto, medio, comprobante: !!archivo }, 'pago de chofer registrado');
+  const pagoCar = s.carId ? (db.prepare('SELECT plate FROM cars WHERE id = ? AND owner_id = ?').get(s.carId, s.ownerId) as { plate: string } | undefined) : undefined;
   void sendOwnerPush(db, s.ownerId, {
     title: 'Pago recibido',
-    body: `${s.driver} registró un pago de ₲ ${Math.round(monto).toLocaleString('es-PY')}.`,
+    body: `${s.driver} registró un pago${pagoCar ? ` de ${pagoCar.plate}` : ''} por ₲ ${Math.round(monto).toLocaleString('es-PY')}.`,
     data: { type: 'driver_payment', paymentId: Number(info.lastInsertRowid), carId: s.carId ?? '' },
   }).catch((e: Error) => req.log.warn({ err: e, ownerId: s.ownerId }, 'no se pudo enviar push de pago'));
   return reply.code(201).send(pagoToJson(db.prepare('SELECT * FROM pagos WHERE id = ?').get(info.lastInsertRowid) as PagoRow));
@@ -2016,8 +2004,10 @@ if (existsSync(PUBLIC_DIR)) {
 
 /* ------------------------------ arranque ---------------------------- */
 
+let stopDailyAlertDigest = () => {};
 const cerrar = (sig: string) => {
   app.log.info({ sig }, 'cerrando');
+  stopDailyAlertDigest();
   app.close().then(() => {
     db.close();
     process.exit(0);
@@ -2027,3 +2017,4 @@ process.on('SIGTERM', () => cerrar('SIGTERM'));
 process.on('SIGINT', () => cerrar('SIGINT'));
 
 await app.listen({ port: PORT, host: '0.0.0.0' });
+stopDailyAlertDigest = startDailyAlertDigest(db, app.log, { timeZone: process.env.MIFLOTA_TIME_ZONE });

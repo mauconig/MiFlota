@@ -97,3 +97,31 @@
 - Los recordatorios son locales al teléfono del chofer; la alerta al dueño utiliza el sistema push existente.
 - El servidor continúa siendo la fuente de verdad para kilometraje, atraso y aislamiento de datos.
 - La notificación diaria no reemplaza el aviso visual dentro de la pantalla de Inicio.
+
+## 4. Notificaciones push de Admin Mobile - implementación completada
+
+### Cambios implementados
+
+- La API ejecuta un scheduler dentro del proceso que envía a las 08:00 de
+  `America/Asuncion` un único resumen diario por dueño cuando existen alertas
+  pendientes de service, kilometraje, taller o seguro del día.
+- La deduplicación se persiste en `admin_alert_digest_log`, por lo que un
+  reinicio de la VPS no repite el resumen del mismo día.
+- Si Expo falla, se libera la marca del día para que el scheduler pueda
+  reintentar; si no hay alertas no se envía ninguna notificación.
+- Los pagos de choferes mantienen el push inmediato e incluyen chofer,
+  vehículo y monto.
+- Al tocar el resumen se abre Alertas; al tocar un pago se abre el vehículo y
+  el detalle del movimiento seleccionado.
+- Admin Mobile procesa notificaciones con la app abierta, en segundo plano o
+  cerrada. El cierre de sesión y la limpieza de tokens existentes se mantienen.
+- La zona horaria se configura con `MIFLOTA_TIME_ZONE` y por defecto es
+  `America/Asuncion`.
+
+### Validación técnica
+
+- Ejecutar TypeScript de API y Admin Mobile.
+- Probar el scheduler con reloj simulado antes y después de las 08:00, sin
+  alertas, con duplicación, fallo de Expo y reinicio de proceso.
+- Validar en development build permisos, app cerrada, múltiples dispositivos,
+  apertura de Alertas y apertura del detalle de pagos.

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { BackHandler, Keyboard, Linking } from 'react-native';
-import type { Car, Mov, Pago, MobileState, Screen, RegistrarTab, FleetFilter, PickedFile, CarLocation, ReportCategorySelection, ReportInclude, ReportSelection, ReportStep } from './types';
+import type { AdminNotificationRoute, Car, Mov, Pago, MobileState, Screen, RegistrarTab, FleetFilter, PickedFile, CarLocation, ReportCategorySelection, ReportInclude, ReportSelection, ReportStep } from './types';
 import { imputar, type Aplicacion } from './cobranza';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, daysBetween, durLbl, dLbl, dLblFull, fmt, fmtShort, initials, statusColor, numFromInput, miles, isoLocal } from './format';
@@ -461,6 +461,7 @@ export interface MobileView {
   navReportes: () => void;
   navAlertas: () => void;
   navChoferes: () => void;
+  openNotification: (route: AdminNotificationRoute) => void;
   tabActive: { dash: boolean; flota: boolean; gastos: boolean; mas: boolean };
   registroChoice: { open: boolean; show: () => void; close: () => void; cobro: () => void; gasto: () => void; service: () => void };
 
@@ -800,6 +801,27 @@ export function useMobileView(
     }
     const prev = stackRef.current.pop();
     update(prev ?? { screen: 'dashboard', backTo: 'dashboard', carId: null });
+  };
+
+  const openNotification = (route: AdminNotificationRoute) => {
+    Keyboard.dismiss();
+    stackRef.current = [];
+    const common = {
+      backTo: 'dashboard' as Screen,
+      periodSheet: false,
+      estadoSheet: false,
+      tallerForm: null,
+      kilometrajeSheet: null,
+      choferSheet: false,
+      registroChoice: false,
+      movementDetailId: null,
+      quotaDetailId: null,
+    };
+    if (route.kind === 'alerts') {
+      update({ ...common, screen: 'alertas', carId: null });
+      return;
+    }
+    update({ ...common, screen: 'detalle', carId: route.carId, movementDetailId: 'pago-' + route.paymentId });
   };
 
   // Misma validación para el botón "Agregar a la flota" (decide si se abre
@@ -1889,6 +1911,7 @@ export function useMobileView(
     navReportes: goReportes,
     navAlertas: () => push('alertas'),
     navChoferes: () => push('choferes'),
+    openNotification,
     tabActive: {
       dash: state.screen === 'dashboard',
       flota: state.screen === 'flota' || state.screen === 'detalle' || state.screen === 'nuevoVehiculo',

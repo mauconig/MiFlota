@@ -100,7 +100,7 @@ export function Dashboard({ v }: { v: MobileView }) {
         <Pagination page={page} pageSize={PAGE_SIZE} total={d.bars.length} itemLabel="vehículos" onPageChange={setPage} />
       </View>
 
-      <HealthCard d={d} />
+      <HealthCard d={d} onPress={v.navAlertas} />
     </View>
   );
 }
