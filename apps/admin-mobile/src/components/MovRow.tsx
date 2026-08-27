@@ -1,4 +1,4 @@
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { Tag } from './Tag';
 
 interface MovRowView {
@@ -12,11 +12,12 @@ interface MovRowView {
   tag: string;
   tagBg: string;
   tagFg: string;
+  onPress?: () => void;
 }
 
 export function MovRow({ m }: { m: MovRowView }) {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#f4efe4' }}>
+    <Pressable onPress={m.onPress} disabled={!m.onPress} accessibilityRole={m.onPress ? 'button' : undefined} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#f4efe4' }}>
       <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: m.iconBg, alignItems: 'center', justifyContent: 'center' }}>
         <Text style={{ color: m.color, fontSize: 11, fontWeight: '700' }}>{m.icon}</Text>
       </View>
@@ -30,6 +31,6 @@ export function MovRow({ m }: { m: MovRowView }) {
       </View>
       {m.showTag && <Tag label={m.tag} bg={m.tagBg} fg={m.tagFg} small />}
       <Text style={{ fontSize: 14, fontWeight: '700', letterSpacing: -0.3, color: m.color }}>{m.amt}</Text>
-    </View>
+    </Pressable>
   );
 }

@@ -4,7 +4,7 @@ import type { Car, Mov, Pago, MobileState, Screen, RegistrarTab, FleetFilter, Pi
 import { imputar, type Aplicacion } from './cobranza';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, daysBetween, durLbl, dLbl, dLblFull, fmt, fmtShort, initials, statusColor, numFromInput, miles, isoLocal } from './format';
-import type { FleetStore, NuevoCarPayload } from './api';
+import { getAuthHeaders, type FleetStore, type NuevoCarPayload } from './api';
 import { API_BASE } from './config';
 
 const UMBRAL_VERDE = 2500000;
@@ -207,6 +207,7 @@ export function initialMobileState(): MobileState {
     cFrom: '2026-08-01',
     cTo: isoLocal(TODAY),
     periodSheet: false,
+    movementDetailId: null,
     estadoSheet: false,
     tallerForm: null,
     choferSheet: false,
@@ -273,6 +274,27 @@ interface MovRowView {
   tag: string;
   tagBg: string;
   tagFg: string;
+  onPress?: () => void;
+}
+
+export interface MovementDetailView {
+  title: string;
+  type: string;
+  typeBg: string;
+  typeFg: string;
+  amount: string;
+  amountColor: string;
+  date: string;
+  vehicle: string;
+  driver: string;
+  category: string;
+  medio: string;
+  note: string;
+  comprobanteName: string;
+  comprobante: { uri: string; name: string; type: string; headers?: Record<string, string> } | null;
+  items: { nombre: string; cantidad: number; costoUnitario: string; subtotal: string }[];
+  manoObra: string;
+  close: () => void;
 }
 
 interface DetalleView {
@@ -480,6 +502,7 @@ export interface MobileView {
   choferes: { items: ChoferView[] };
 
   detalle: DetalleView | null;
+  movementDetail: MovementDetailView | null;
 
   nuevoVehiculo: {
     editando: boolean;
@@ -1099,6 +1122,7 @@ export function useMobileView(
 
   // ---- detalle -------------------------------------------------------
   let detalle: DetalleView | null = null;
+  let movementDetail: MovementDetailView | null = null;
   if (car) {
     const cs = stats(movs, aplicaciones, (m) => m.carId === car.id && inR(m), (a) => a.carId === car.id && inRA(a), pagos, (p) => p.carId === car.id && inRP(p));
     const carAlerts = alertsByCar.get(car.id) ?? [];
@@ -1139,6 +1163,7 @@ export function useMobileView(
           tag: '',
           tagBg: '#e7f2ec',
           tagFg: '#256b4d',
+          onPress: () => update({ movementDetailId: 'pago-' + p.id }),
         },
       })),
       ...carMovs.filter((m) => m.type === 'egreso').map((m) => ({
@@ -1155,10 +1180,61 @@ export function useMobileView(
           tag: '',
           tagBg: '#fdeeea',
           tagFg: '#a8412f',
+          onPress: () => update({ movementDetailId: 'gasto-' + m.id }),
         },
       })),
     ];
     const timeline = movementRowsWithDate.sort((a, b) => +b.fecha - +a.fecha).map((item) => item.row);
+    movementDetail = (() => {
+      const selectedPago = state.movementDetailId?.startsWith('pago-')
+        ? pagos.find((p) => 'pago-' + p.id === state.movementDetailId)
+        : undefined;
+      const selectedGasto = state.movementDetailId?.startsWith('gasto-')
+        ? carMovs.find((m) => 'gasto-' + m.id === state.movementDetailId)
+        : undefined;
+      if (selectedPago) {
+        const ajuste = selectedPago.tipo === 'ajuste';
+        return {
+          title: ajuste ? 'Ajuste registrado' : 'Pago recibido',
+          type: ajuste ? 'Ajuste' : 'Ingreso',
+          typeBg: '#e7f2ec',
+          typeFg: '#256b4d',
+          amount: '+' + fmtShort(selectedPago.monto),
+          amountColor: COLORS.pos,
+          date: dLblFull(selectedPago.fecha),
+          vehicle: car.plate,
+          driver: selectedPago.driver || car.driver,
+          category: ajuste ? 'Ajuste' : 'Pago',
+          medio: selectedPago.medio || 'Sin especificar',
+          note: selectedPago.nota || '',
+          comprobanteName: selectedPago.comprobante?.nombre || '',
+          comprobante: selectedPago.comprobante ? { uri: API_BASE + '/api/comprobantes/' + encodeURIComponent(selectedPago.comprobante.id), name: selectedPago.comprobante.nombre, type: selectedPago.comprobante.tipo, headers: getAuthHeaders() } : null,
+          items: [],
+          manoObra: '',
+          close: () => update({ movementDetailId: null }),
+        };
+      }
+      if (!selectedGasto) return null;
+      return {
+        title: selectedGasto.desc,
+        type: 'Gasto',
+        typeBg: '#fdeeea',
+        typeFg: '#a8412f',
+        amount: '−' + fmtShort(selectedGasto.amount),
+        amountColor: COLORS.neg,
+        date: dLblFull(selectedGasto.date),
+        vehicle: car.plate,
+        driver: selectedGasto.driver || car.driver || 'Sin chofer',
+        category: selectedGasto.cat || 'Otros',
+        medio: 'Sin especificar',
+        note: selectedGasto.desc,
+        comprobanteName: selectedGasto.comprobante?.nombre || '',
+        comprobante: selectedGasto.comprobante ? { uri: API_BASE + '/api/comprobantes/' + encodeURIComponent(selectedGasto.comprobante.id), name: selectedGasto.comprobante.nombre, type: selectedGasto.comprobante.tipo, headers: getAuthHeaders() } : null,
+        items: (selectedGasto.items || []).map((item) => ({ nombre: item.nombre, cantidad: item.cantidad, costoUnitario: fmt(item.costoUnitario), subtotal: fmt(item.subtotal) })),
+        manoObra: selectedGasto.manoObra ? fmt(selectedGasto.manoObra) : '',
+        close: () => update({ movementDetailId: null }),
+      };
+    })();
     detalle = {
       car,
       plate: car.plate,
@@ -1806,6 +1882,7 @@ export function useMobileView(
     choferes: { items: choferViews },
 
     detalle,
+    movementDetail: car ? movementDetail : null,
 
     nuevoVehiculo: {
       editando: state.carId !== null,

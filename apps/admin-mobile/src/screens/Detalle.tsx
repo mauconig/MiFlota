@@ -6,6 +6,7 @@ import { Avatar } from '../components/Avatar';
 import { AlertCard } from '../components/AlertCard';
 import { MovRow } from '../components/MovRow';
 import { Pagination } from '../components/Pagination';
+import { MovementDetailSheet } from '../components/MovementDetailSheet';
 
 const ALERT_PAGE_SIZE = 4;
 const MOV_PAGE_SIZE = 5;
@@ -70,6 +71,7 @@ export function Detalle({ v }: { v: MobileView }) {
 
   if (!dc) return null;
   return (
+    <>
     <View style={{ paddingHorizontal: 16, paddingTop: 6, paddingBottom: 16, gap: 14 }}>
       <View style={{ backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 22, padding: 18 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13 }}>
@@ -214,5 +216,7 @@ export function Detalle({ v }: { v: MobileView }) {
       </View>
 
     </View>
+    <MovementDetailSheet movement={v.movementDetail} />
+    </>
   );
 }

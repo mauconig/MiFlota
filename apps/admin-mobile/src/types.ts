@@ -86,6 +86,7 @@ export interface Pago {
   tipo: PagoTipo;
   medio?: string;
   nota?: string;
+  comprobante?: { id: string; nombre: string; tipo: string };
 }
 
 /** Última posición conocida de un auto (una fila por auto en el servidor). */
@@ -211,6 +212,7 @@ export interface MobileState {
   cFrom: string;
   cTo: string;
   periodSheet: boolean;
+  movementDetailId: string | null;
   estadoSheet: boolean;
   tallerForm: TallerForm | null;
   choferSheet: boolean;

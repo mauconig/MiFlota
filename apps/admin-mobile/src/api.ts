@@ -76,6 +76,10 @@ const TOKEN_KEY = 'miflota_admin_token';
 const BIOMETRIC_KEY = 'miflota_admin_biometria';
 let authToken: string | null = null;
 
+export function getAuthHeaders(): Record<string, string> {
+  return authToken ? { Authorization: `Bearer ${authToken}` } : {};
+}
+
 async function guardarToken(token: string | null): Promise<void> {
   authToken = token;
   try {
