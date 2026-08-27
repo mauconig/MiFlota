@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator } from 'react-native';
+import { ActivityIndicator, AppState } from 'react-native';
 // El `SafeAreaView` que trae 'react-native' es un no-op en Android (solo
 // funciona en iOS) — con ese, el header queda debajo de la barra de estado.
 // Este es el que respeta el inset en las dos plataformas.
@@ -32,6 +32,14 @@ export default function App() {
   // estado local (el POST /api/logout que dispara es inofensivo aunque la
   // sesión ya esté vencida del otro lado).
   const store = useFleetStore(onError, auth.salir, !!auth.sesion);
+
+  useEffect(() => {
+    if (!auth.sesion) return;
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') void store.refresh().catch(() => {});
+    });
+    return () => subscription.remove();
+  }, [auth.sesion, store.refresh]);
 
   if (auth.cargando) return <Spinner />;
   if (!auth.sesion) {
@@ -67,7 +75,7 @@ function AuthedApp({
     // que llegar hasta el borde real de la pantalla), no un padding en blanco
     // acá arriba de él — si los dos lo reservaran, quedaba un hueco doble.
     <SafeAreaView style={{ flex: 1, backgroundColor: '#f4f0e8' }} edges={['top', 'left', 'right']}>
-      <Shell v={v} nombre={sesion.nombre} usuario={sesion.usuario} onLogout={onLogout} />
+      <Shell v={v} nombre={sesion.nombre} usuario={sesion.usuario} onLogout={onLogout} onRefresh={() => void store.refresh().catch(() => {})} refreshing={store.refrescando} syncError={store.error} />
     </SafeAreaView>
   );
 }

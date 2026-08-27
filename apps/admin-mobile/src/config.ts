@@ -1,5 +1,4 @@
-export const API_BASE = (() => {
-  const url = process.env.EXPO_PUBLIC_API_URL;
-  if (!url) throw new Error('EXPO_PUBLIC_API_URL no está configurada (ver .env.example)');
-  return url;
-})();
+/** Admin Mobile usa una sola fuente de datos: la API HTTPS de la VPS.
+ * Si cambia el dominio de producción, se debe generar un APK nuevo.
+ */
+export const API_BASE = 'https://miflota.147-93-180-120.sslip.io';

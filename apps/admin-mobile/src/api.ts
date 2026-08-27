@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { API_BASE } from './config';
@@ -362,7 +362,9 @@ export interface FleetStore {
   pagos: Pago[];
   locations: CarLocation[];
   cargando: boolean;
+  refrescando: boolean;
   error: string;
+  refresh: () => Promise<void>;
   patchCar: (id: string, patch: Partial<Car>) => void;
   previewDriverCredentials: (id: string, driver: string) => Promise<DriverCredentials>;
   assignDriver: (id: string, payload: AssignDriverPayload) => Promise<Car>;
@@ -388,18 +390,45 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
   const [pagos, setPagos] = useState<Pago[]>([]);
   const [locations, setLocations] = useState<CarLocation[]>([]);
   const [cargando, setCargando] = useState(true);
+  const [refrescando, setRefrescando] = useState(false);
   const [error, setError] = useState('');
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+  const refreshGeneration = useRef(0);
 
-  const recargar = useCallback(async () => {
-    const [s, l] = await Promise.all([
-      req<{ cars: CarDto[]; movs: MovDto[]; pagos: PagoDto[] }>('/api/state'),
-      req<CarLocation[]>('/api/locations'),
-    ]);
-    setCars(s.cars.map(toCar));
-    setMovs(s.movs.map(toMov));
-    setPagos(s.pagos.map(toPago));
-    setLocations(l);
-  }, []);
+  const refresh = useCallback((): Promise<void> => {
+    if (refreshInFlight.current) return refreshInFlight.current;
+    const generation = refreshGeneration.current;
+
+    const promise = (async () => {
+      setRefrescando(true);
+      try {
+        const [s, l] = await Promise.all([
+          req<{ cars: CarDto[]; movs: MovDto[]; pagos: PagoDto[] }>('/api/state'),
+          req<CarLocation[]>('/api/locations'),
+        ]);
+        // Una respuesta de una sesión anterior no puede repoblar el store
+        // después de cerrar sesión o cambiar de usuario.
+        if (generation !== refreshGeneration.current) return;
+        setCars(s.cars.map(toCar));
+        setMovs(s.movs.map(toMov));
+        setPagos(s.pagos.map(toPago));
+        setLocations(l);
+        setError('');
+      } catch (e) {
+        if (e instanceof SinSesion) onSinSesion();
+        setError(e instanceof Error ? e.message : 'No se pudieron actualizar los datos');
+        throw e;
+      } finally {
+        if (generation === refreshGeneration.current) {
+          setRefrescando(false);
+          refreshInFlight.current = null;
+        }
+      }
+    })();
+
+    refreshInFlight.current = promise;
+    return promise;
+  }, [onSinSesion]);
 
   useEffect(() => {
     if (!enabled) {
@@ -412,21 +441,22 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
       setLocations([]);
       setError('');
       setCargando(true);
+      setRefrescando(false);
+      refreshGeneration.current += 1;
+      refreshInFlight.current = null;
       return;
     }
     let vivo = true;
-    recargar()
+    refresh()
       .then(() => vivo && setError(''))
       .catch((e: Error) => {
-        if (!vivo) return;
-        if (e instanceof SinSesion) onSinSesion();
-        else setError(e.message);
+        if (vivo) setError(e.message);
       })
       .finally(() => vivo && setCargando(false));
     return () => {
       vivo = false;
     };
-  }, [enabled, recargar, onSinSesion]);
+  }, [enabled, refresh]);
 
   const patchCar = useCallback(
     (id: string, patch: Partial<Car>) => {
@@ -436,10 +466,10 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
       req(`/api/cars/${id}`, { method: 'PATCH', body: JSON.stringify(dto) }).catch((e: Error) => {
         if (e instanceof SinSesion) return onSinSesion();
         onError('No se pudo guardar: ' + e.message);
-        void recargar();
+        void refresh();
       });
     },
-    [onError, onSinSesion, recargar],
+    [onError, onSinSesion, refresh],
   );
 
   const previewDriverCredentials = useCallback(
@@ -516,7 +546,9 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     pagos,
     locations,
     cargando,
+    refrescando,
     error,
+    refresh,
     patchCar,
     previewDriverCredentials,
     assignDriver,

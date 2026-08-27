@@ -1,101 +1,99 @@
-# Plan y estado de MiFlota
+# MiFlota — pendientes activos
 
-Última actualización: 26/08/2026
+## 1. Kilometraje diario de los choferes — implementación completada
 
-## Criterio de producto
+### Estado actual
 
-MiFlota debe pedir una decisión por vez. Las pantallas móviles priorizan
-preguntas simples, botones grandes, textos cotidianos y una acción principal
-clara. Los datos detallados aparecen después de elegir el vehículo, período o
-tipo de movimiento correspondiente.
+- El dueño puede cargar o editar el kilometraje del vehículo.
+- La app del chofer muestra el kilometraje actual y permite informar un nuevo valor.
+- `POST /api/chofer/kilometraje` valida números enteros y rechaza valores menores al anterior.
+- Cada actualización guarda `kilometraje_actualizado`.
+- El servidor calcula si el kilometraje está atrasado.
+- `kilometraje_alertas` evita repetir la alerta del dueño para el mismo vehículo y día.
+- Admin-mobile muestra las alertas de kilometraje junto con service, seguro y taller.
 
-## Estado actual
+### Cambios implementados
 
-### Administración móvil
+- El aviso del chofer dejó de ser semanal y ahora se agenda diariamente a las 19:00 hora local.
+- Si el chofer todavía no actualizó el día actual, se agenda el aviso de esa jornada; si ya pasaron las 19:00, se agenda para el día siguiente.
+- Si ya actualizó el kilometraje hoy, se cancela el aviso anterior y se programa únicamente el del día siguiente.
+- Al volver a abrir, refrescar o enfocar la pantalla de Inicio, el aviso anterior se cancela antes de crear uno nuevo.
+- Las sincronizaciones concurrentes se serializan para evitar que focus, refresh y background creen notificaciones duplicadas.
+- El aviso de kilometraje atrasado se limita a una notificación inmediata por día mediante SecureStore.
+- La falta de actualización no bloquea pagos, reportes ni navegación.
+- Se mantienen la validación server-side, el aislamiento por dueño/vehículo y la regla de kilometraje no decreciente.
 
-- ✅ Navegación principal: **Inicio**, **Vehículos**, **Registrar**, **Gastos** y
-  **Más**.
-- ✅ Ranking reemplazado por **Ganancia por vehículo** dentro de Inicio.
-- ✅ Pantallas de Gastos, Alertas, Choferes y Reportes integradas a la
-  navegación.
-- ✅ Paginación en listas de vehículos, choferes, alertas, gastos, reportes,
-  resultados de la IA y detalle de vehículo.
-- ✅ Detalle de vehículo con edición de datos y selector entre Movimientos y
-  Cuotas.
-- ✅ Registro desde el botón `+` con elección de Ingreso o Egreso y flujo
-  guiado.
-- ✅ Egresos con selección de vehículo, categoría, descripción, repuestos,
-  mano de obra, nota, comprobante opcional para el dueño y resumen previo.
-- ✅ Se pueden agregar varios repuestos y el total se calcula como repuestos +
-  mano de obra.
-- ✅ Reportes paso a paso: contenido, vehículos, categorías, vista previa de
-  datos y exportación a PDF o Excel.
-- ✅ Las listas de selección de vehículos y categorías tienen scroll interno,
-  sin mover toda la pantalla.
-- ✅ Datos de service, seguro y kilometraje opcionales al crear un vehículo,
-  con edición posterior desde el detalle.
-- ✅ Íconos opacos y diferenciados para Admin Mobile y MiFlota Chofer.
+### Validación pendiente en dispositivo
 
-### API y datos
+- Confirmar el aviso diario con el teléfono antes y después de las 19:00.
+- Actualizar el kilometraje y confirmar que el próximo aviso quede para el día siguiente.
+- Abrir y refrescar Inicio varias veces y verificar que exista un solo aviso programado.
+- Probar vehículo sin kilometraje inicial y kilometraje inicial igual a cero.
+- Probar error de red, sesión vencida y kilometraje decreciente.
+- Confirmar que un chofer sin vehículo no pueda consultar ni modificar un vehículo ajeno.
+- Verificar la alerta al dueño después de siete días sin actualización.
 
-- ✅ Reportes autenticados en PDF/XLSX con filtros server-side, aislamiento por
-  dueño y nombres únicos con fecha y hora.
-- ✅ PDF con resumen, tabla y diseño visual.
-- ✅ Gastos detallados por ítem, cantidad, costo unitario, subtotal y mano de
-  obra, manteniendo compatibilidad con gastos antiguos.
-- ✅ Los cobros se calculan como dinero efectivamente cobrado, incluyendo
-  cobros que todavía no fueron asociados a una cuota.
-- ✅ Movimientos y cuotas se muestran como conceptos separados.
-- ✅ Pagos registrados por el chofer: sólo transferencia y comprobante
-  obligatorio. El dueño conserva sus medios de pago actuales.
-- ✅ Identidad y sesiones in-house, con aislamiento por dueño y roles de dueño
-  y chofer.
-- ✅ IA conectada al proveedor configurado, con herramientas para consultar la
-  flota y generar archivos descargables.
+## 2. Notificaciones de la app del chofer — implementación completada
 
-### MiFlota Chofer
+### Cambios implementados
 
-- ✅ Actualización semanal de kilometraje.
-- ✅ Recordatorios de kilometraje sin bloquear el uso de la app.
-- ✅ Aviso al dueño cuando el kilometraje lleva siete días sin actualizarse.
-- ✅ Biometría y pagos por transferencia implementados.
+- La configuración de `expo-notifications` quedó centralizada en `apps/driver/src/notifications.ts`.
+- Se creó el canal Android `driver-events` con nombre visible `Avisos de MiFlota`.
+- Los eventos de pago, reporte, cuota y kilometraje incluyen metadatos de grupo y tipo para mantenerlos identificables.
+- Los recordatorios programados guardan sus identificadores en SecureStore.
+- Antes de programar un nuevo recordatorio se cancela el identificador anterior.
+- El aviso de kilometraje atrasado se deduplica por fecha local.
+- El layout raíz configura permisos y canal antes de programar el recordatorio diario de cuota.
+- Al limpiar las notificaciones se limpian también los identificadores persistidos.
+- Si el usuario rechaza permisos, la app continúa funcionando sin notificaciones.
 
-## Pendiente inmediato
+### Validación pendiente en dispositivo
 
-1. **Validar definitivamente el teclado del chat en el teléfono conectado.**
-   El código ya usa `KeyboardChatScrollView`, `KeyboardStickyView` sin offset
-   fijo, medición dinámica del composer y oculta la barra inferior sólo mientras
-   el teclado está abierto. Falta confirmar visualmente foco, escritura,
-   multilinea, respuesta larga y apertura/cierre repetido en un teléfono viejo.
-2. Revisar en el teléfono conectado las pantallas de Registrar, Gastos,
-   Reportes y formularios largos con teclado abierto.
-3. Corregir cualquier problema de textos, tamaños o desbordes detectado en la
-   prueba de UI angosta.
-4. Revisar la UI pendiente de Admin Web después de cerrar la validación móvil.
-5. Generar las APK de Admin Mobile y MiFlota Chofer sólo después de validar la
-   interfaz móvil en desarrollo.
+- Probar varios pagos y reportes consecutivos con la app abierta.
+- Probar avisos con la app en segundo plano y cerrada.
+- Confirmar que no se superpongan avisos ni se repita el mismo recordatorio.
+- Revisar el comportamiento del canal en Android nuevo y teléfono antiguo.
+- Verificar textos, sonido, banner y listado de notificaciones.
+- Confirmar que los avisos de cuota y kilometraje no se cancelen entre sí.
+- Revocar permisos y confirmar que pagos y reportes sigan funcionando.
 
-## Criterios de validación
+## Validación técnica
 
-- El teclado nunca tapa el input activo ni deja una franja artificial.
-- La barra inferior aparece con el teclado cerrado y desaparece sólo en
-  MiFlota IA mientras se escribe.
-- El botón físico Atrás conserva las respuestas del flujo y vuelve al paso
-  anterior.
-- Los filtros de reportes afectan tanto la vista previa como el PDF y el Excel.
-- Los totales de gastos coinciden con repuestos más mano de obra.
-- Las listas largas se pueden usar en pantalla angosta y teléfono antiguo.
-- Cada dueño sólo ve sus propios vehículos, movimientos, gastos, cobros y
-  reportes.
-- No se genera una nueva APK hasta completar la validación visual en el
-  teléfono.
+- TypeScript de `apps/driver` pasa correctamente.
+- Falta ejecutar el build/export de driver y API después de cerrar las pruebas visuales.
+- Los cambios de `expo-notifications` requieren una nueva development build nativa para probarlos en un teléfono real.
+- La validación se hizo con el development client y Metro; no fue necesario
+  generar un APK nuevo para estos cambios visuales.
 
-## Historial reciente
+## 3. Sincronizacion de Admin Web y Admin Mobile - completada
 
-- `494b0d4` — teclado móvil y ocultamiento contextual de la barra inferior.
-- `3eab3e1` — separación de Movimientos y Cuotas.
-- `1b2dda9` — paginación y selección múltiple de vehículos en Gastos.
-- `e8c021e` — edición de datos del vehículo.
-- `747e4b9` — reportes guiados desde móvil.
-- `4073c79` — PDF visual y nombres únicos de exportación.
-- `a1cd04f` — navegación simplificada y pantalla de Gastos.
+### Estado actual
+
+- Admin Web y Admin Mobile ya consultan la misma API HTTPS de la VPS:
+  `https://miflota.147-93-180-120.sslip.io`.
+- La base de datos oficial es la SQLite de la VPS; no se usa ninguna base local
+  de `apps/api/.localdata` para el panel de administracion.
+- Las bases de datos de Admin Web y Admin Mobile ya estan sincronizadas al
+  compartir la misma fuente de verdad a traves de la API.
+- Admin Mobile refresca vehiculos, movimientos, pagos y ubicaciones al iniciar
+  sesion, al volver a primer plano y mediante el boton `Actualizar`.
+- Las recargas se serializan para evitar pedidos concurrentes duplicados y los
+  errores de red se muestran en la interfaz.
+- El login movil usa el logo actualizado de MiFlota y permite mostrar u ocultar
+  la contrasena con el icono de ojo dentro del campo.
+
+### Validacion realizada
+
+- La VPS responde correctamente en `/api/health`.
+- Admin Web local se levanto en `http://localhost:5173/` y respondio HTTP 200.
+- El development client de Admin Mobile cargo la configuracion y la pantalla de
+  login desde Metro en el emulador Android.
+- TypeScript de Admin Mobile pasa correctamente.
+- No se realizaron altas, pagos ni modificaciones reales en produccion.
+
+## Supuestos
+
+- El horario predeterminado de kilometraje es 19:00 hora local.
+- Los recordatorios son locales al teléfono del chofer; la alerta al dueño utiliza el sistema push existente.
+- El servidor continúa siendo la fuente de verdad para kilometraje, atraso y aislamiento de datos.
+- La notificación diaria no reemplaza el aviso visual dentro de la pantalla de Inicio.

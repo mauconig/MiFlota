@@ -1,4 +1,4 @@
-import { View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { KeyboardAwareScrollView, useKeyboardState } from 'react-native-keyboard-controller';
 import type { MobileView } from '../useMobileView';
 import { TabHeader, SubHeader } from './Header';
@@ -22,7 +22,7 @@ import { Ranking } from '../screens/Ranking';
 import { Assistant } from '../screens/Assistant';
 import { Perfil } from '../screens/Perfil';
 
-export function Shell({ v, nombre, usuario, onLogout }: { v: MobileView; nombre: string; usuario: string; onLogout: () => void }) {
+export function Shell({ v, nombre, usuario, onLogout, onRefresh, refreshing, syncError }: { v: MobileView; nombre: string; usuario: string; onLogout: () => void; onRefresh: () => void; refreshing: boolean; syncError: string }) {
   const keyboardVisible = useKeyboardState((state) => state.isVisible);
   const showBottomNav = v.screen !== 'registrar' && !(v.isAssistant && keyboardVisible);
 
@@ -34,9 +34,14 @@ export function Shell({ v, nombre, usuario, onLogout }: { v: MobileView; nombre:
     // lo puede mover — solo el contenido de arriba se corre para el teclado.
     <View style={{ flex: 1, backgroundColor: '#f4f0e8' }}>
       <View style={{ flex: 1 }}>
-        {v.isTab && <TabHeader title={v.headerTitle} sub={v.headerSub} onAssistant={v.openAssistant} onProfile={v.goPerfil} nombre={nombre} />}
+        {v.isTab && <TabHeader title={v.headerTitle} sub={v.headerSub} onAssistant={v.openAssistant} onProfile={v.goPerfil} onRefresh={onRefresh} refreshing={refreshing} nombre={nombre} />}
         {v.isSub && <SubHeader title={v.headerTitle} onBack={v.back} />}
         {v.isAssistant && <SubHeader title={v.headerTitle} onBack={v.back} />}
+        {!!syncError && (
+          <Pressable onPress={onRefresh} style={{ marginHorizontal: 20, marginBottom: 8, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, backgroundColor: '#fbe9e5', borderWidth: 1, borderColor: '#efc8bc' }} accessibilityRole="button" accessibilityLabel="Reintentar actualización de datos">
+            <Text style={{ color: '#a8412f', fontSize: 12, fontWeight: '600' }}>No se pudieron actualizar los datos: {syncError}. Tocá para reintentar.</Text>
+          </Pressable>
+        )}
 
         {v.isAssistant ? (
           // El chat necesita su propio scroll para que los mensajes y el

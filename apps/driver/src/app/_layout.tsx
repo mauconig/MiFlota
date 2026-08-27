@@ -8,8 +8,7 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 export default function RootLayout() {
   useEffect(() => {
-    configureNotifications();
-    scheduleDailyReminder();
+    void configureNotifications().then(() => scheduleDailyReminder()).catch(() => {});
   }, []);
 
   return (

@@ -13,7 +13,7 @@ import { SkeletonDashboard } from '../../components/Skeleton';
 import { fmtG, fmtD, fmtHoy, mesLabel } from '../../format';
 import { COLORS } from '../../theme';
 import type { Resumen } from '../../types';
-import { notifyKilometrajePendiente, scheduleKilometrajeReminder } from '../../notifications';
+import { syncKilometrajeReminder } from '../../notifications';
 
 const ESTADO_TAG: Record<Resumen['estado'], { label: string; bg: string; fg: string }> = {
   atrasado: { label: 'Atrasado', bg: COLORS.redDark, fg: COLORS.onDark },
@@ -46,8 +46,7 @@ export default function Inicio() {
       const r = await api.getResumen(token);
       setResumen(r);
       setKmInput(String(r.kilometraje));
-      if (r.kilometrajeVencido) void notifyKilometrajePendiente();
-      else void scheduleKilometrajeReminder();
+      void syncKilometrajeReminder(r.kilometrajeActualizado, r.kilometrajeVencido);
     } catch (e) {
       if (e instanceof SinSesion) sesionVencida();
     } finally {
