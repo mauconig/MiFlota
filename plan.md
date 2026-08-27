@@ -46,6 +46,26 @@
 - Si el chofer acumula siete días sin actualizar, se enviará además una alerta al dueño.
 - La falta de actualización no bloqueará la app ni impedirá registrar movimientos.
 
+## 4. Selector de chofer en editar datos del vehiculo
+
+- En `Editar datos` -> `Chofer`, `Nombre del chofer` debe ser un selector con los choferes disponibles, no un campo de texto libre.
+- Al seleccionar un chofer se debe conservar el flujo de revision de usuario y contrasena correspondiente.
+
+## 5. Notificaciones de la app del chofer
+
+- Corregir las notificaciones apiladas de la app del chofer cuando aparecen varias a la vez.
+- Revisar el contenedor, el espaciado y la duracion para que cada aviso sea legible y no se dibuje encima del anterior.
+- Validar varias notificaciones consecutivas en telefonos nuevos y antiguos.
+
+## 6. Unificar Cobros y Movimientos
+
+- Eliminar la pagina o seccion independiente `Movimientos` de la web.
+- Mantener una unica pagina de `Cobros` para consultar cobros y movimientos reales.
+- En la pagina de Cobros, el tab principal y seleccionado por defecto sera siempre `Cobros`.
+- Si es posible, renombrar visualmente la pagina o tab `Cobros` a `Movimientos`, sin volver a crear dos destinos separados.
+- Mantener una distincion clara dentro de la pagina entre cuotas/cobros y movimientos reales.
+- Ajustar enlaces, menu, navegacion y botones que actualmente apuntan a `Movimientos` para que dirijan al destino unico.
+
 ## Estado al cerrar hoy
 
 - La build EAS remota quedó cancelada.

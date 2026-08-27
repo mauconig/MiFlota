@@ -493,6 +493,7 @@ export interface View {
   carModal: boolean;
   editCarModal: boolean;
   editCar: EditCarForm;
+  editCarDriverOptions: { value: string; label: string }[];
   editCarChange: <K extends keyof EditCarForm>(key: K, value: EditCarForm[K]) => void;
   editCarSave: () => void;
   editCarClose: () => void;
@@ -1170,6 +1171,16 @@ export function useFleetView(
     plate: '', model: '', year: '', gpsTag: '', kilometraje: '', lastService: '', serviceCada: '', serviceUnidad: 'meses' as const,
     seguroVence: '', seguroNombre: '', seguroCada: '', estado: 'activo' as const, driver: '', cuota: '', section: 'general' as const, guardando: false,
   };
+  const editCarDriverOptions = [
+    { value: '', label: 'Sin chofer' },
+    ...[...new Set(
+      cars
+        .filter((c) => c.driver !== 'Sin chofer')
+        .map((c) => c.driver),
+    )]
+      .sort((a, b) => a.localeCompare(b, 'es'))
+      .map((name) => ({ value: name, label: name })),
+  ];
   const editCarChange = <K extends keyof EditCarForm>(key: K, value: EditCarForm[K]) => update((s) => ({ editCar: s.editCar ? { ...s.editCar, [key]: value } : s.editCar }));
   const editCarSave = () => {
     const f = st.editCar;
@@ -2256,6 +2267,7 @@ export function useFleetView(
     carModal: st.modal === 'car',
     editCarModal: !!st.editCar,
     editCar,
+    editCarDriverOptions,
     editCarChange,
     editCarSave,
     editCarClose,
