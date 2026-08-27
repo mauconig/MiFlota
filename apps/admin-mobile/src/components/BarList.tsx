@@ -12,7 +12,7 @@ export function BarList({ bars, labelWidth = 66 }: { bars: Bar[]; labelWidth?: n
     <View style={{ gap: 10 }}>
       {bars.map((b, i) => (
         <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <Text style={{ width: labelWidth, fontSize: 12, fontWeight: '600', letterSpacing: 0.1 }} numberOfLines={1}>
+          <Text style={{ width: labelWidth, minWidth: 0, fontSize: 12, fontWeight: '600', letterSpacing: 0.1 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} allowFontScaling={false}>
             {b.label}
           </Text>
           <View style={{ flex: 1, height: 8, borderRadius: 4, backgroundColor: '#f0ebe0' }}>

@@ -11,8 +11,21 @@ import { Pagination } from '../components/Pagination';
 const card = { backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 20, padding: 16 };
 const PAGE_SIZE = 5;
 
+function SummaryAmount({ value, fontSize }: { value: string; fontSize: number }) {
+  const hasCurrency = value.startsWith('₲');
+  const number = hasCurrency ? value.slice(1).trim() : value;
+  return (
+    <View style={{ minWidth: 0, flexShrink: 1, flexDirection: 'row', alignItems: 'baseline', marginTop: 4 }}>
+      {hasCurrency && <Text allowFontScaling={false} style={{ color: '#16150f', fontSize: Math.max(14, fontSize - 4), fontWeight: '700', marginRight: 4 }}>₲</Text>}
+      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82} allowFontScaling={false} style={{ minWidth: 0, flexShrink: 1, fontSize, fontWeight: '700', letterSpacing: -0.4, color: '#16150f' }}>{number}</Text>
+    </View>
+  );
+}
+
 export function Dashboard({ v }: { v: MobileView }) {
   const d = v.dashboard;
+  const summaryAmountLength = Math.max(d.heroIng.length, d.heroEgr.length);
+  const summaryAmountSize = summaryAmountLength > 13 ? 17 : 20;
   const [page, setPage] = useState(0);
   const resetKey = useMemo(() => d.bars.map((bar) => bar.plate).join('|'), [d.bars]);
   const pageCount = Math.max(1, Math.ceil(d.bars.length / PAGE_SIZE));
@@ -54,14 +67,14 @@ export function Dashboard({ v }: { v: MobileView }) {
       </View>
 
       <View style={{ flexDirection: 'row', gap: 12 }}>
-        <View style={[card, { flex: 1 }]}>
-          <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c' }}>Cobrado · {v.period.short}</Text>
-          <Text style={{ fontSize: 21, fontWeight: '700', letterSpacing: -0.4, marginTop: 4 }}>{d.heroIng}</Text>
+        <View style={[card, { flex: 1, minWidth: 0 }]}>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78} allowFontScaling={false} style={{ width: '100%', fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c' }}>Cobrado · {v.period.short}</Text>
+          <SummaryAmount value={d.heroIng} fontSize={summaryAmountSize} />
           <View style={{ height: 4, borderRadius: 2, backgroundColor: '#2e7d5b', marginTop: 10 }} />
         </View>
-        <View style={[card, { flex: 1 }]}>
-          <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c' }}>Gastos · {v.period.short}</Text>
-          <Text style={{ fontSize: 21, fontWeight: '700', letterSpacing: -0.4, marginTop: 4 }}>{d.heroEgr}</Text>
+        <View style={[card, { flex: 1, minWidth: 0 }]}>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78} allowFontScaling={false} style={{ width: '100%', fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c' }}>Gastos · {v.period.short}</Text>
+          <SummaryAmount value={d.heroEgr} fontSize={summaryAmountSize} />
           <View style={{ height: 4, borderRadius: 2, backgroundColor: '#e8a13a', marginTop: 10, width: `${d.egrBarW}%` }} />
         </View>
       </View>

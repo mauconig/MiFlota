@@ -23,7 +23,7 @@ export function Donut({ d }: { d: MobileView['dashboard'] }) {
         {d.donut.map((s, i) => (
           <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: s.color }} />
-            <Text style={{ flex: 1, fontSize: 13, fontWeight: '500' }}>{s.cat}</Text>
+            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} allowFontScaling={false} style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: '500' }}>{s.cat}</Text>
             <Text style={{ color: '#6b665c', fontWeight: '600', fontSize: 13 }}>{s.pctTxt}</Text>
           </View>
         ))}
