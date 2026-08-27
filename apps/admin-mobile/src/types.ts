@@ -216,6 +216,7 @@ export interface MobileState {
   quotaDetailId: number | null;
   estadoSheet: boolean;
   tallerForm: TallerForm | null;
+  kilometrajeSheet: { carId: string; valor: string } | null;
   choferSheet: boolean;
   choferForm: ChoferForm;
   choferCredentials: DriverCredentialDraft | null;

@@ -6,6 +6,7 @@ import { BottomNav } from './BottomNav';
 import { Toast } from './Toast';
 import { PeriodoSheet } from './PeriodoSheet';
 import { EstadoSheet } from './EstadoSheet';
+import { KilometrajeSheet } from './KilometrajeSheet';
 import { ChoferSheet } from './ChoferSheet';
 import { RegistroChoiceSheet } from './RegistroChoiceSheet';
 import { Dashboard } from '../screens/Dashboard';
@@ -79,6 +80,7 @@ export function Shell({ v, nombre, usuario, onLogout, onRefresh, refreshing, syn
       <View style={{ position: 'relative' }}>
         {v.period.open && <PeriodoSheet v={v} />}
         {v.estadoSheet.open && <EstadoSheet v={v} />}
+        {v.kilometrajeSheet.open && <KilometrajeSheet v={v} />}
         {v.choferSheet.open && <ChoferSheet v={v} />}
         {v.registroChoice.open && <RegistroChoiceSheet v={v} />}
         <Toast msg={v.toast} />

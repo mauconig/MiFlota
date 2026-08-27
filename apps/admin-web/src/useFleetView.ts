@@ -1090,12 +1090,12 @@ export function useFleetView(
         text: 'Service ' + svcLeftLbl(dLeft, true),
       });
     const segLeft = daysBetween(TODAY, c.seguroDate);
-    if (c.seguroCada > 0 && c.seguroNombre.trim() && c.seguroDate.getFullYear() > 1970 && segLeft <= 20)
+    if (c.seguroCada > 0 && c.seguroNombre.trim() && c.seguroDate.getFullYear() > 1970 && segLeft === 0)
       alertList.push({
         car: c,
         kind: 'Seguro',
-        sev: segLeft < 0 ? 2 : 1,
-        text: 'Seguro ' + (segLeft < 0 ? 'vencido hace ' + durLbl(segLeft) : segLeft === 0 ? 'vence hoy' : 'vence en ' + durLbl(segLeft)),
+        sev: 1,
+        text: 'Seguro vence hoy',
       });
     if (c.estado === 'taller') alertList.push({ car: c, kind: 'Taller', sev: 1, text: 'En taller, sin generar cuota' });
     const kmDays = c.kilometrajeActualizado ? daysBetween(new Date(c.kilometrajeActualizado + 'T12:00:00'), TODAY) : Number.POSITIVE_INFINITY;

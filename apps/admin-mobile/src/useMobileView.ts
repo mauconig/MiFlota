@@ -9,7 +9,6 @@ import { API_BASE } from './config';
 
 const UMBRAL_VERDE = 2500000;
 const SVC_AVISO_DIAS = 15;
-const SEG_AVISO_DIAS = 20;
 /** Tope de meses entre renovaciones de la póliza. Coincide con el del servidor. */
 const SEG_CADA_MAX = 120;
 const MESES_ABR = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -125,8 +124,8 @@ function buildAlerts(active: Car[]): Alerta[] {
       list.push({ car: c, kind: 'Service', sev: dLeft < 0 ? 2 : 1, text: 'Service ' + (dLeft < 0 ? 'vencido hace ' + durLbl(dLeft) : dLeft === 0 ? 'vence hoy' : 'vence en ' + durLbl(dLeft)) });
     }
     const segLeft = daysBetween(TODAY, c.seguroDate);
-    if (c.seguroCada > 0 && c.seguroNombre.trim() && c.seguroDate.getFullYear() > 1970 && segLeft <= SEG_AVISO_DIAS) {
-      list.push({ car: c, kind: 'Seguro', sev: segLeft < 0 ? 2 : 1, text: 'Seguro ' + (segLeft < 0 ? 'vencido hace ' + durLbl(segLeft) : segLeft === 0 ? 'vence hoy' : 'vence en ' + durLbl(segLeft)) });
+    if (c.seguroCada > 0 && c.seguroNombre.trim() && c.seguroDate.getFullYear() > 1970 && segLeft === 0) {
+      list.push({ car: c, kind: 'Seguro', sev: 1, text: 'Seguro vence hoy' });
     }
     if (c.estado === 'taller') list.push({ car: c, kind: 'Taller', sev: 1, text: 'En taller, sin generar cuota' });
     const kmDays = c.kilometrajeActualizado ? daysBetween(new Date(c.kilometrajeActualizado + 'T12:00:00'), TODAY) : Number.POSITIVE_INFINITY;
@@ -211,6 +210,7 @@ export function initialMobileState(): MobileState {
     quotaDetailId: null,
     estadoSheet: false,
     tallerForm: null,
+    kilometrajeSheet: null,
     choferSheet: false,
     choferForm: { name: '', cuota: '' },
     choferCredentials: null,
@@ -679,6 +679,17 @@ export interface MobileView {
     } | null;
   };
 
+  kilometrajeSheet: {
+    open: boolean;
+    plate: string;
+    model: string;
+    actual: string;
+    valor: string;
+    setValor: (v: string) => void;
+    close: () => void;
+    guardar: () => void;
+  };
+
   choferSheet: {
     open: boolean;
     close: () => void;
@@ -1128,7 +1139,14 @@ export function useMobileView(
     kind: a.kind,
     text: a.text,
     sev: a.sev,
-    open: () => push('detalle', { carId: a.car.id }),
+    open: () => {
+      if (a.kind === 'Service') return goRegistrarService(a.car.id);
+      if (a.kind === 'Kilometraje') {
+        return update({ kilometrajeSheet: { carId: a.car.id, valor: a.car.kilometraje ? miles(String(a.car.kilometraje)) : '' } });
+      }
+      if (a.kind === 'Taller') return push('detalle', { carId: a.car.id, estadoSheet: true });
+      push('detalle', { carId: a.car.id });
+    },
   }));
 
   const driverGroups = new Map<string, { name: string; cars: Car[] }>();
@@ -2144,6 +2162,30 @@ export function useMobileView(
         };
       })(),
     },
+
+    kilometrajeSheet: (() => {
+      const sheet = state.kilometrajeSheet;
+      const selected = sheet ? carDe.get(sheet.carId) : undefined;
+      return {
+        open: Boolean(sheet && selected),
+        plate: selected?.plate ?? '',
+        model: selected?.model ?? '',
+        actual: selected?.kilometraje ? miles(String(selected.kilometraje)) + ' km' : 'Sin informar',
+        valor: sheet?.valor ?? '',
+        setValor: (valor: string) => update((s) => (s.kilometrajeSheet ? { kilometrajeSheet: { ...s.kilometrajeSheet, valor: miles(valor) } } : {})),
+        close: () => update({ kilometrajeSheet: null }),
+        guardar: () => {
+          if (!sheet || !selected) return;
+          const kilometraje = numFromInput(sheet.valor);
+          if (!kilometraje) return toast('Ingresá el kilometraje');
+          if (kilometraje > 10_000_000) return toast('El kilometraje no puede superar 10.000.000 km');
+          if (kilometraje < selected.kilometraje) return toast('El kilometraje no puede disminuir');
+          persist.patchCar(selected.id, { kilometraje });
+          update({ kilometrajeSheet: null });
+          toast(selected.plate + ' · kilometraje actualizado a ' + miles(String(kilometraje)) + ' km');
+        },
+      };
+    })(),
 
     choferSheet: {
       open: state.choferSheet,
