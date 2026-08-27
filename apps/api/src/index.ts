@@ -506,8 +506,8 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
   const path = join(ASSISTANT_REPORTS_DIR, name);
   let data: Buffer;
   if (request.format === 'xlsx') {
-    const sheetRows = rows.map((row) => [row.fecha, row.vehiculo, row.categoria, row.detalle, row.items, row.repuestos, row.manoObra, row.total]);
-    const sheet = XLSX.utils.aoa_to_sheet([['Fecha', 'Vehículo', 'Categoría', 'Detalle', 'Repuestos / ítems', 'Repuestos', 'Mano de obra', 'Total'], ...sheetRows]);
+    const sheetRows = rows.map((row) => [row.fecha, row.vehiculo, row.categoria, row.detalle, row.total]);
+    const sheet = XLSX.utils.aoa_to_sheet([['Fecha', 'Vehículo', 'Categoría', 'Descripción', 'Total gasto'], ...sheetRows]);
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, sheet, 'Gastos');
     data = XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
@@ -694,12 +694,12 @@ async function pdfFromFleetReport(data: {
       );
     }
     if (data.expenseRows.length) {
-      sectionTitle('Gastos', `${data.expenseRows.length} gasto(s) · repuestos y mano de obra`);
+      sectionTitle('Gastos', `${data.expenseRows.length} gasto(s)`);
       drawTable(
-        ['Fecha', 'Vehículo', 'Categoría', 'Descripción', 'Repuestos', 'Mano de obra', 'Total'],
-        data.expenseRows.map((row) => [row.fecha, row.vehiculo, row.categoria, row.detalle, reportMoney(row.repuestos), reportMoney(row.manoObra), reportMoney(row.total)]),
-        [58, 82, 72, 128, 68, 70, width - 478],
-        ['left', 'left', 'left', 'left', 'right', 'right', 'right'],
+        ['Fecha', 'Vehículo', 'Categoría', 'Descripción', 'Total'],
+        data.expenseRows.map((row) => [row.fecha, row.vehiculo, row.categoria, row.detalle, reportMoney(row.total)]),
+        [62, 100, 86, width - 350, 102],
+        ['left', 'left', 'left', 'left', 'right'],
       );
     }
     if (!data.incomeRows.length && !data.expenseRows.length) {
@@ -802,8 +802,8 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
       ]), 'Ingresos');
     }
     if (expenseRows.length) {
-      const detailRows: (string | number)[][] = [['Fecha', 'Vehículo', 'Categoría', 'Descripción', 'Repuestos', 'Mano de obra', 'Total gasto']];
-      expenseRows.forEach((row) => detailRows.push([row.fecha, row.vehiculo, row.categoria, row.detalle, row.repuestos, row.manoObra, row.total]));
+      const detailRows: (string | number)[][] = [['Fecha', 'Vehículo', 'Categoría', 'Descripción', 'Total gasto']];
+      expenseRows.forEach((row) => detailRows.push([row.fecha, row.vehiculo, row.categoria, row.detalle, row.total]));
       XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(detailRows), 'Gastos');
     }
     data = XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
