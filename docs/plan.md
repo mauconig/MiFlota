@@ -125,3 +125,9 @@
   alertas, con duplicación, fallo de Expo y reinicio de proceso.
 - Validar en development build permisos, app cerrada, múltiples dispositivos,
   apertura de Alertas y apertura del detalle de pagos.
+
+## 5. Pendientes
+
+1. Implementar el desbloqueo por huella/telemetría en la app.
+2. Mostrar en Alertas de Admin los reportes enviados desde la app de choferes,
+   agrupados con la categoría `Reportes`.

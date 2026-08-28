@@ -15,11 +15,13 @@ import { COLORS } from '../../theme';
 import type { Resumen } from '../../types';
 import { notifyPago } from '../../notifications';
 
+type OpcionPago = number | 'todo';
+
 export default function Pagar() {
   const { token, sesionVencida } = useAuth();
   const router = useRouter();
   const [resumen, setResumen] = useState<Resumen | null>(null);
-  const [dias, setDias] = useState(1);
+  const [opcionPago, setOpcionPago] = useState<OpcionPago>(1);
   const medio = 'Transferencia';
   const [comprobante, setComprobante] = useState<ComprobanteFile | null>(null);
   const [enviando, setEnviando] = useState(false);
@@ -31,7 +33,7 @@ export default function Pagar() {
       .getResumen(token)
       .then((r) => {
         setResumen(r);
-        setDias(r.estado === 'atrasado' ? Math.max(1, Math.round(r.deuda / (r.cuota || 1))) : 1);
+        setOpcionPago(r.estado === 'atrasado' && r.deuda > 0 ? 'todo' : 1);
       })
       .catch((e) => {
         if (e instanceof SinSesion) sesionVencida();
@@ -47,14 +49,13 @@ export default function Pagar() {
   }
 
   const cuota = resumen.cuota;
-  const deudaDias = cuota > 0 ? Math.max(0, Math.round(resumen.deuda / cuota)) : 0;
   const chipsDias = [1, 3, 7];
-  const total = dias * cuota;
+  const total = opcionPago === 'todo' ? resumen.deuda : opcionPago * cuota;
   const needsProof = true;
 
   const confirmar = async () => {
     if (!token) return;
-    if (!dias || total <= 0) {
+    if (total <= 0) {
       setErr('Elegí cuántos días vas a pagar');
       return;
     }
@@ -87,8 +88,8 @@ export default function Pagar() {
           <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', color: COLORS.textMuted }}>Cuántos días pagás</Text>
           <ChipRow
             chips={[
-              ...chipsDias.map((n) => ({ label: plural(n, 'día', 'días'), selected: dias === n, pick: () => setDias(n) })),
-              ...(deudaDias > 1 ? [{ label: 'Todo lo atrasado · ' + deudaDias, selected: dias === deudaDias, pick: () => setDias(deudaDias) }] : []),
+              ...chipsDias.map((n) => ({ label: plural(n, 'día', 'días'), selected: opcionPago === n, pick: () => setOpcionPago(n) })),
+              ...(resumen.deuda > 0 ? [{ label: 'Todo lo atrasado', selected: opcionPago === 'todo', pick: () => setOpcionPago('todo') }] : []),
             ]}
           />
           <View style={{ paddingTop: 12, borderTopWidth: 1, borderTopColor: '#f0ebe0', flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
