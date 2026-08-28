@@ -13,6 +13,7 @@ const KM_REMINDER_MINUTE = 0;
 // Las cargas de Inicio pueden ocurrir en paralelo (focus, refresh y regreso
 // del background). Serializar la sincronización evita programar dos avisos.
 let kilometrajeSync: Promise<void> = Promise.resolve();
+let dailyReminderSync: Promise<void> = Promise.resolve();
 
 export async function configureNotifications() {
   Notifications.setNotificationHandler({
@@ -68,6 +69,36 @@ async function cancelStoredNotification(key: string): Promise<void> {
   const id = await SecureStore.getItemAsync(key);
   if (id) await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
   await SecureStore.deleteItemAsync(key).catch(() => {});
+}
+
+function isDailyQuotaReminder(request: Notifications.NotificationRequest): boolean {
+  const data = request.content.data;
+  return (data?.notificationGroup === DRIVER_NOTIFICATION_GROUP && data?.kind === 'cuota') || request.content.title === 'Recordatorio de cuota';
+}
+
+/**
+ * Limpia recordatorios de cuota creados por versiones anteriores y por
+ * ejecuciones concurrentes. El ID de SecureStore no alcanza si una llamada
+ * quedó a mitad de camino y su ID fue reemplazado por otra llamada.
+ */
+async function clearDailyQuotaReminders(): Promise<void> {
+  const [scheduled, presented, storedId] = await Promise.all([
+    Notifications.getAllScheduledNotificationsAsync().catch(() => [] as Notifications.NotificationRequest[]),
+    Notifications.getPresentedNotificationsAsync().catch(() => [] as Notifications.Notification[]),
+    SecureStore.getItemAsync(DAILY_REMINDER_KEY),
+  ]);
+
+  const scheduledIds = new Set(
+    scheduled.filter(isDailyQuotaReminder).map((request) => request.identifier),
+  );
+  if (storedId) scheduledIds.add(storedId);
+  await Promise.all([...scheduledIds].map((id) => Notifications.cancelScheduledNotificationAsync(id).catch(() => {})));
+
+  const presentedIds = presented
+    .filter((notification) => isDailyQuotaReminder(notification.request))
+    .map((notification) => notification.request.identifier);
+  await Promise.all(presentedIds.map((id) => Notifications.dismissNotificationAsync(id).catch(() => {})));
+  await SecureStore.deleteItemAsync(DAILY_REMINDER_KEY).catch(() => {});
 }
 
 function localDay(date = new Date()): string {
@@ -146,23 +177,28 @@ export async function scheduleKilometrajeReminder(updatedAt?: string | null) {
 }
 
 /** Programa el recordatorio diario de cuota. */
-export async function scheduleDailyReminder(hora: number = 19, minuto: number = 0) {
-  await cancelStoredNotification(DAILY_REMINDER_KEY);
-  const id = await Notifications.scheduleNotificationAsync({
-    content: {
-      title: 'Recordatorio de cuota',
-      body: 'Recordá pagar tu cuota diaria antes de finalizar la jornada.',
-      sound: true,
-      data: { notificationGroup: DRIVER_NOTIFICATION_GROUP, kind: 'cuota' },
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DAILY,
-      hour: hora,
-      minute: minuto,
-      channelId: DRIVER_CHANNEL_ID,
-    },
-  });
-  await SecureStore.setItemAsync(DAILY_REMINDER_KEY, id);
+export function scheduleDailyReminder(hora: number = 19, minuto: number = 0): Promise<void> {
+  dailyReminderSync = dailyReminderSync
+    .catch(() => {})
+    .then(async () => {
+      await clearDailyQuotaReminders();
+      const id = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Recordatorio de cuota',
+          body: 'Recordá pagar tu cuota diaria antes de finalizar la jornada.',
+          sound: true,
+          data: { notificationGroup: DRIVER_NOTIFICATION_GROUP, kind: 'cuota' },
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DAILY,
+          hour: hora,
+          minute: minuto,
+          channelId: DRIVER_CHANNEL_ID,
+        },
+      });
+      await SecureStore.setItemAsync(DAILY_REMINDER_KEY, id);
+    });
+  return dailyReminderSync;
 }
 
 /** Cancela recordatorios al cerrar sesión y limpia sus identificadores. */
