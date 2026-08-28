@@ -61,9 +61,13 @@ export async function postPago(token: string, monto: number, medio: string, comp
   fd.append('monto', String(monto));
   fd.append('medio', medio);
   if (comprobante) {
-    // RN's fetch/FormData acepta este shape para adjuntar un archivo real:
-    // ver expo-image-picker / expo-document-picker, que ya devuelven esto.
-    fd.append('comprobante', { uri: comprobante.uri, name: comprobante.name, type: comprobante.type } as unknown as Blob);
+    // Expo's fetch does not accept RN's proprietary `{ uri, name, type }`
+    // object when it serializes FormData. Read the local picker URI into a
+    // real Blob first so the multipart encoder can serialize it correctly.
+    const archivoResponse = await fetch(comprobante.uri);
+    const archivoBlob = await archivoResponse.blob();
+    const archivo = new Blob([archivoBlob], { type: comprobante.type || archivoBlob.type || 'application/octet-stream' });
+    fd.append('comprobante', archivo, comprobante.name);
   }
   const r = await fetch(`${API_BASE}/api/chofer/pagos`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
   if (r.status === 401) throw new SinSesion();

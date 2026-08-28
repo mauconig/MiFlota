@@ -57,6 +57,18 @@ function parseCloudinaryReference(value: string): CloudinaryReference | null {
   }
 }
 
+/**
+ * Fastify decodifica una vez los parámetros de ruta. Las referencias de
+ * Cloudinary guardadas en SQLite, en cambio, mantienen el public_id escapado
+ * (`%2F` para la barra de la carpeta). Canonicalizar antes de consultar la
+ * base permite aceptar tanto la referencia almacenada como la que llega ya
+ * parcialmente decodificada desde una URL.
+ */
+export function canonicalizarComprobanteId(value: string): string {
+  const remote = parseCloudinaryReference(value);
+  return remote ? cloudinaryReference(remote.resourceType, remote.publicId) : value;
+}
+
 function localComprobantePath(id: string): string | null {
   // Los ids locales históricos son nombres planos generados por el servidor.
   // No permitir rutas aquí protege también a los registros viejos dañados.

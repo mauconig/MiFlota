@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { CarRow, GastoItemRow, LocationRow, MovRow, PagoRow, ReporteRow } from './db.js';
 import { DB_PATH, carToJson, ensureDriver, locationToJson, movToJson, openDb, pagoToJson, reporteToJson } from './db.js';
-import { borrarComprobante, COMPROBANTES_STORAGE, guardarComprobante, leerComprobante, type ComprobanteInput } from './comprobantes.js';
+import { borrarComprobante, canonicalizarComprobanteId, COMPROBANTES_STORAGE, guardarComprobante, leerComprobante, type ComprobanteInput } from './comprobantes.js';
 import {
   COOKIE,
   bloqueado,
@@ -1584,20 +1584,21 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/service', async (req, reply)
 app.get<{ Params: { id: string } }>('/api/comprobantes/:id', async (req, reply) => {
   type Fila = { comprobante: string; comprobante_nombre: string | null; comprobante_tipo: string | null };
   const owner = usuarioDeSesion(db, tokenDueno(req));
+  const comprobanteId = canonicalizarComprobanteId(req.params.id);
   let fila: Fila | undefined;
   if (owner) {
     fila =
-      (db.prepare('SELECT comprobante, comprobante_nombre, comprobante_tipo FROM movs WHERE comprobante = ? AND owner_id = ?').get(req.params.id, owner.id) as Fila | undefined) ??
-      (db.prepare('SELECT comprobante, comprobante_nombre, comprobante_tipo FROM pagos WHERE comprobante = ? AND owner_id = ?').get(req.params.id, owner.id) as Fila | undefined);
+      (db.prepare('SELECT comprobante, comprobante_nombre, comprobante_tipo FROM movs WHERE comprobante = ? AND owner_id = ?').get(comprobanteId, owner.id) as Fila | undefined) ??
+      (db.prepare('SELECT comprobante, comprobante_nombre, comprobante_tipo FROM pagos WHERE comprobante = ? AND owner_id = ?').get(comprobanteId, owner.id) as Fila | undefined);
   } else {
     const chofer = quienChofer(db, req);
     if (!chofer) return reply.code(401).send({ error: 'SesiÃ³n requerida' });
     fila = db
       .prepare(`SELECT comprobante, comprobante_nombre, comprobante_tipo
-                  FROM pagos
+                 FROM pagos
                  WHERE comprobante = ? AND owner_id = ?
                    AND (driver_id = ? OR (driver_id IS NULL AND driver = ?))`)
-      .get(req.params.id, chofer.ownerId, chofer.driverId, chofer.driver) as Fila | undefined;
+      .get(comprobanteId, chofer.ownerId, chofer.driverId, chofer.driver) as Fila | undefined;
   }
   if (!fila) return reply.code(404).send({ error: 'Comprobante inexistente' });
 
