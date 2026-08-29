@@ -1,24 +1,28 @@
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, Text, TextInput, View } from 'react-native';
 import { useEffect, useMemo, useState } from 'react';
 import type { MobileView } from '../useMobileView';
 import { ChipRow } from '../components/ChipRow';
 import { Pagination } from '../components/Pagination';
 
 const PAGE_SIZE = 6;
-type AlertFilter = 'todos' | 'Service' | 'Seguro' | 'Taller' | 'Kilometraje';
+type AlertFilter = 'todos' | 'Service' | 'Seguro' | 'Taller' | 'Kilometraje' | 'Reporte';
 const FILTERS: { key: AlertFilter; label: string }[] = [
   { key: 'todos', label: 'Todas' },
   { key: 'Service', label: 'Service' },
   { key: 'Seguro', label: 'Seguro' },
   { key: 'Taller', label: 'Taller' },
   { key: 'Kilometraje', label: 'Kilometraje' },
+  { key: 'Reporte', label: 'Reportes' },
 ];
 
 export function Alertas({ v }: { v: MobileView }) {
   const [page, setPage] = useState(0);
   const [filter, setFilter] = useState<AlertFilter>('todos');
-  const resetKey = useMemo(() => v.alertas.items.map((alert) => `${alert.carId}-${alert.kind}`).join('|'), [v.alertas.items]);
-  const filteredAlerts = filter === 'todos' ? v.alertas.items : v.alertas.items.filter((alert) => alert.kind === filter);
+  const [query, setQuery] = useState('');
+  const resetKey = useMemo(() => v.alertas.items.map((alert) => alert.key).join('|'), [v.alertas.items]);
+  const filteredByKind = filter === 'todos' ? v.alertas.items : v.alertas.items.filter((alert) => alert.kind === filter);
+  const needle = query.trim().toLowerCase();
+  const filteredAlerts = needle ? filteredByKind.filter((alert) => alert.searchText.includes(needle)) : filteredByKind;
   const pageCount = Math.max(1, Math.ceil(filteredAlerts.length / PAGE_SIZE));
   const visibleAlerts = filteredAlerts.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const filterChips = FILTERS.map((item) => ({
@@ -43,6 +47,12 @@ export function Alertas({ v }: { v: MobileView }) {
 
   return (
     <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 18, gap: 10 }}>
+      <TextInput
+        value={query}
+        onChangeText={setQuery}
+        placeholder="Buscar por chapa, chofer, categoría o texto"
+        style={{ minHeight: 44, borderWidth: 1, borderColor: '#e6ded0', borderRadius: 15, backgroundColor: '#fffdf8', paddingHorizontal: 14, fontSize: 13, color: '#16150f' }}
+      />
       <ChipRow chips={filterChips} />
 
       {emptyFiltered ? (
@@ -55,7 +65,7 @@ export function Alertas({ v }: { v: MobileView }) {
       ) : (
         visibleAlerts.map((a) => (
           <Pressable
-            key={`${a.carId}-${a.kind}`}
+            key={a.key}
             onPress={a.open}
             style={{ minHeight: 72, backgroundColor: a.sev > 1 ? '#fdeeea' : '#fdf6e8', borderWidth: 1, borderColor: a.sev > 1 ? '#f4d9d2' : '#f2e4c6', borderRadius: 18, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}
           >

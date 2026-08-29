@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { API_BASE } from './config';
-import type { Car, CarLocation, Mov, Pago, PickedFile } from './types';
+import type { Car, CarLocation, Mov, Pago, PickedFile, Reporte, ReportStatus } from './types';
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`. Se parsean a mediodía para que
  *  ningún huso horario corra el día al construir el Date. */
@@ -364,6 +364,7 @@ export interface FleetStore {
   cars: Car[];
   movs: Mov[];
   pagos: Pago[];
+  reportes: Reporte[];
   locations: CarLocation[];
   cargando: boolean;
   refrescando: boolean;
@@ -375,7 +376,8 @@ export interface FleetStore {
   addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
   addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
   addEgreso: (carId: string, datos: NuevoEgresoPayload) => Promise<Mov>;
-  mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: PickedFile | null }) => Promise<void>;
+  mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: PickedFile | null; reportId?: number | null }) => Promise<void>;
+  updateReporte: (id: number, estado: Extract<ReportStatus, 'en_taller' | 'resuelta'>) => Promise<Reporte>;
   exportReport: (payload: ReportExportPayload) => Promise<ReportExportResponse>;
 }
 
@@ -392,6 +394,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
   const [cars, setCars] = useState<Car[]>([]);
   const [movs, setMovs] = useState<Mov[]>([]);
   const [pagos, setPagos] = useState<Pago[]>([]);
+  const [reportes, setReportes] = useState<Reporte[]>([]);
   const [locations, setLocations] = useState<CarLocation[]>([]);
   const [cargando, setCargando] = useState(true);
   const [refrescando, setRefrescando] = useState(false);
@@ -407,7 +410,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
       setRefrescando(true);
       try {
         const [s, l] = await Promise.all([
-          req<{ cars: CarDto[]; movs: MovDto[]; pagos: PagoDto[] }>('/api/state'),
+          req<{ cars: CarDto[]; movs: MovDto[]; pagos: PagoDto[]; reportes?: Reporte[] }>('/api/state'),
           req<CarLocation[]>('/api/locations'),
         ]);
         // Una respuesta de una sesión anterior no puede repoblar el store
@@ -416,6 +419,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
         setCars(s.cars.map(toCar));
         setMovs(s.movs.map(toMov));
         setPagos(s.pagos.map(toPago));
+        setReportes(s.reportes ?? []);
         setLocations(l);
         setError('');
       } catch (e) {
@@ -442,6 +446,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
       setCars([]);
       setMovs([]);
       setPagos([]);
+      setReportes([]);
       setLocations([]);
       setError('');
       setCargando(true);
@@ -532,22 +537,31 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
   // Mandar a taller cambia el estado y crea el gasto en la misma operación, así
   // que no puede aplicarse en optimista: se espera al servidor y se aplican las
   // dos cosas juntas o ninguna.
-  const mandarATaller = useCallback(async (id: string, datos: { razon: string; monto: number; comprobante: PickedFile | null }) => {
+  const mandarATaller = useCallback(async (id: string, datos: { razon: string; monto: number; comprobante: PickedFile | null; reportId?: number | null }) => {
     const fd = new FormData();
     fd.append('razon', datos.razon);
     fd.append('monto', String(datos.monto));
+    if (datos.reportId != null) fd.append('reportId', String(datos.reportId));
     if (datos.comprobante) {
       fd.append('comprobante', { uri: datos.comprobante.uri, name: datos.comprobante.name, type: datos.comprobante.mimeType } as unknown as Blob);
     }
-    const r = await req<{ car: CarDto; mov: MovDto }>(`/api/cars/${id}/taller`, { method: 'POST', body: fd });
+    const r = await req<{ car: CarDto; mov?: MovDto; reporte?: Reporte }>(`/api/cars/${id}/taller`, { method: 'POST', body: fd });
     setCars((cs) => cs.map((c) => (c.id === id ? toCar(r.car) : c)));
-    setMovs((ms) => [toMov(r.mov), ...ms]);
+    if (r.mov) setMovs((ms) => [toMov(r.mov!), ...ms]);
+    if (r.reporte) setReportes((rs) => rs.map((reporte) => (reporte.id === r.reporte!.id ? r.reporte! : reporte)));
+  }, []);
+
+  const updateReporte = useCallback(async (id: number, estado: Extract<ReportStatus, 'en_taller' | 'resuelta'>) => {
+    const reporte = await req<Reporte>(`/api/reportes/${id}`, { method: 'PATCH', body: JSON.stringify({ estado }) });
+    setReportes((rs) => rs.map((r) => (r.id === id ? reporte : r)));
+    return reporte;
   }, []);
 
   return {
     cars,
     movs,
     pagos,
+    reportes,
     locations,
     cargando,
     refrescando,
@@ -560,6 +574,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     addPago,
     addEgreso,
     mandarATaller,
+    updateReporte,
     exportReport: exportFleetReport,
   };
 }

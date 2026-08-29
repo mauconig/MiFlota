@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef } from 'react';
-import type { Car, CarLocation, Mov, Pago, UIState, NewCarForm, NewDriverForm, EditCarForm } from './types';
+import type { Car, CarLocation, Mov, Pago, Reporte, UIState, NewCarForm, NewDriverForm, EditCarForm } from './types';
 import type { DriverCredentials, NuevoCarPayload, NuevoPagoPayload, ReportExportPayload } from './api';
 import type { Aplicacion } from './cobranza';
 import { imputar } from './cobranza';
@@ -104,6 +104,7 @@ export interface CatItem {
 }
 
 export interface AlertFull {
+  key: string;
   plate: string;
   model: string;
   gpsTag: string;
@@ -131,6 +132,21 @@ export interface PendFull {
   debeFg: string;
   sort: Record<string, string | number>;
   open: () => void;
+}
+
+export interface ReportDetailView {
+  id: number;
+  plate: string;
+  driver: string;
+  date: string;
+  category: string;
+  urgency: string;
+  description: string;
+  status: string;
+  inWorkshop: boolean;
+  close: () => void;
+  sendToWorkshop: () => void;
+  resolve: () => void;
 }
 
 export interface AppliedPaymentView {
@@ -517,6 +533,7 @@ export interface View {
 
   movementDetail: MovementDetailView | null;
   quotaDetail: QuotaDetailView | null;
+  reportDetail: ReportDetailView | null;
 
   hasDetail: boolean;
   detail: DetailView;
@@ -674,6 +691,7 @@ const KTAG: Record<string, [string, string]> = {
   Seguro: ['#eef1f6', '#4a6d99'],
   Taller: ['#f3eefa', '#6b52a1'],
   Kilometraje: ['#fdf3e2', '#a8730f'],
+  Reporte: ['#fdeeea', '#a8412f'],
 };
 
 function gpsTagLabel(car: Car): string {
@@ -789,6 +807,7 @@ export function useFleetView(
   cars: Car[],
   movs: Mov[],
   pagos: Pago[],
+  reportes: Reporte[],
   locations: CarLocation[],
   state: UIState,
   update: (patch: Partial<UIState> | ((s: UIState) => Partial<UIState>)) => void,
@@ -799,7 +818,8 @@ export function useFleetView(
     assignDriver: (id: string, payload: DriverCredentials & { driver: string; cuota: number }) => Promise<Car>;
     addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
     deleteCar: (id: string) => Promise<{ plate: string; movs: number }>;
-    mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: File | null }) => Promise<void>;
+    mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: File | null; reportId?: number | null }) => Promise<void>;
+    updateReporte: (id: number, estado: 'en_taller' | 'resuelta') => Promise<Reporte>;
     registrarService: (id: string, datos: { fecha: string; descripcion: string; kilometraje?: number; costo?: number; comprobante?: File | null }) => Promise<{ car: Car; mov?: Mov }>;
     exportReport: (payload: ReportExportPayload) => Promise<{ file: { name: string; url: string; mimeType: string }; counts: { ingresos: number; gastos: number; total: number } }>;
     addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
@@ -1078,7 +1098,7 @@ export function useFleetView(
     deudaPorChofer.set(d, (deudaPorChofer.get(d) ?? 0) + falta);
   });
 
-  const alertList: { car: Car; kind: string; sev: number; text: string }[] = [];
+  const alertList: { car: Car; kind: string; sev: number; text: string; report?: Reporte }[] = [];
   active.forEach((c) => {
     const configuredService = svcConfigured(c);
     const dLeft = configuredService ? svcDaysLeft(c) : 0;
@@ -1101,7 +1121,13 @@ export function useFleetView(
     const kmDays = c.kilometrajeActualizado ? daysBetween(new Date(c.kilometrajeActualizado + 'T12:00:00'), TODAY) : Number.POSITIVE_INFINITY;
     if (!c.kilometrajeActualizado || kmDays > 7) alertList.push({ car: c, kind: 'Kilometraje', sev: 1, text: c.kilometraje ? 'Kilometraje pendiente de actualizar' : 'Falta cargar el kilometraje' });
   });
-  alertList.sort((a, b) => b.sev - a.sev);
+  reportes.forEach((report) => {
+    if (report.estado === 'resuelta') return;
+    const car = cars.find((candidate) => candidate.id === report.carId);
+    if (!car) return;
+    alertList.push({ car, kind: 'Reporte', sev: report.urgencia === 'urgente' ? 2 : 1, text: `${report.cat}: ${report.texto}`, report });
+  });
+  alertList.sort((a, b) => b.sev - a.sev || (b.report?.fecha ?? '').localeCompare(a.report?.fecha ?? ''));
 
   const perCar = cars.map((c) => ({ c, ...stats(movs, aplicaciones, (m) => m.carId === c.id && inR(m), (a) => a.carId === c.id && inRA(a), pagos, (p) => p.carId === c.id && inRP(p)) }));
   const maxNet = Math.max(...perCar.map((x) => Math.abs(x.net)), 1);
@@ -1841,6 +1867,41 @@ export function useFleetView(
       ? 'Cierra hoy.'
       : 'Faltan ' + diasCierre + (diasCierre === 1 ? ' día' : ' días') + ' para cerrar ' + mesActual + '.';
 
+  const reportDetail: ReportDetailView | null = (() => {
+    const report = reportes.find((item) => item.id === st.reportDetailId && item.estado !== 'resuelta');
+    const car = report ? cars.find((item) => item.id === report.carId) : undefined;
+    if (!report || !car) return null;
+    const close = () => update({ reportDetailId: null });
+    return {
+      id: report.id,
+      plate: car.plate,
+      driver: report.driver || car.driver,
+      date: dLblFull(new Date(report.fecha + 'T12:00:00')),
+      category: report.cat,
+      urgency: report.urgencia === 'urgente' ? 'Urgente' : 'Puede circular',
+      description: report.texto,
+      status: report.estado === 'en_taller' ? 'En taller' : 'Pendiente',
+      inWorkshop: car.estado === 'taller',
+      close,
+      sendToWorkshop: () => {
+        if (car.estado === 'taller') {
+          persist.updateReporte(report.id, 'en_taller').then(() => {
+            close();
+            toast(`Reporte vinculado al taller · ${car.plate}`);
+          }).catch((e: Error) => toast('No se pudo vincular: ' + e.message));
+          return;
+        }
+        update({ reportDetailId: null, taller: { carId: car.id, reportId: report.id, razon: `${report.cat}: ${report.texto}`, monto: '', archivo: null, guardando: false } });
+      },
+      resolve: () => {
+        persist.updateReporte(report.id, 'resuelta').then(() => {
+          close();
+          toast(`Reporte resuelto · ${car.plate}`);
+        }).catch((e: Error) => toast('No se pudo resolver: ' + e.message));
+      },
+    };
+  })();
+
   return {
     kicker: TITLES[nav][1],
     pageTitle: TITLES[nav][0],
@@ -1960,13 +2021,14 @@ export function useFleetView(
     alertCount: alertList.length,
     alertsSummary: (() => {
       if (!alertList.length) return 'Todo al día';
-      const vencidos = alertList.filter((a) => a.sev === 2).length;
+      const prioritarios = alertList.filter((a) => a.sev === 2).length;
       const avisos = alertList.length + (alertList.length === 1 ? ' aviso' : ' avisos');
-      return vencidos ? avisos + ' · ' + vencidos + (vencidos === 1 ? ' vencido' : ' vencidos') : avisos;
+      return prioritarios ? avisos + ' · ' + prioritarios + ' de prioridad alta' : avisos;
     })(),
     alertsFull: (st.alertKind === 'todas' ? alertList : alertList.filter((a) => a.kind === st.alertKind))
-      .filter((a) => matches(st.alertQ, a.car.plate, a.car.model, a.car.driver, a.car.gpsTag, a.text))
+      .filter((a) => matches(st.alertQ, a.car.plate, a.car.model, a.car.driver, a.car.gpsTag, a.text, a.report?.driver, a.report?.cat, a.report?.texto))
       .map((a) => ({
+        key: a.report ? `report:${a.report.id}` : `${a.car.id}:${a.kind}`,
         plate: a.car.plate,
         model: a.car.model + ' · ' + a.car.year,
         gpsTag: gpsTagLabel(a.car),
@@ -1975,10 +2037,10 @@ export function useFleetView(
         dot: a.sev === 2 ? COLORS.neg : COLORS.warn,
         tagBg: KTAG[a.kind][0],
         tagFg: KTAG[a.kind][1],
-        open: () => update({ detailId: a.car.id }),
+        open: () => (a.report ? update({ reportDetailId: a.report.id }) : update({ detailId: a.car.id })),
       })),
     alertKindChips: (['todas', ...Object.keys(KTAG)] as string[]).map((k) => ({
-      label: k === 'todas' ? 'Todas' : k,
+      label: k === 'todas' ? 'Todas' : k === 'Reporte' ? 'Reportes' : k,
       ...CH(st.alertKind === k),
       pick: () => update({ alertKind: k }),
     })),
@@ -2282,6 +2344,7 @@ export function useFleetView(
     movementOpenRow: (id) => update((s) => ({ movExpanded: s.movExpanded === id ? null : id })),
     movementDetail,
     quotaDetail,
+    reportDetail,
 
     hasDetail: !!st.detailId,
     detail,
@@ -2363,7 +2426,7 @@ export function useFleetView(
           // hay tiempo de sobra para apretarlo dos veces y duplicar el gasto.
           editar({ guardando: true });
           persist
-            .mandarATaller(car.id, { razon, monto, comprobante: t.archivo })
+            .mandarATaller(car.id, { razon, monto, comprobante: t.archivo, reportId: t.reportId })
             .then(() => {
               cerrar();
               toast(car.plate + ' en taller · gasto de ' + fmt(monto) + ' registrado');

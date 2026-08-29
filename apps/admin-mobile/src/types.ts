@@ -106,7 +106,7 @@ export interface CarLocation {
 // admin-web, así que este estado no se parece al `UIState` de ahí.
 
 export type Screen = 'dashboard' | 'flota' | 'gastos' | 'mas' | 'alertas' | 'choferes' | 'detalle' | 'nuevoVehiculo' | 'registrar' | 'reportes' | 'ranking' | 'assistant' | 'perfil';
-export type AdminNotificationRoute = { kind: 'alerts' } | { kind: 'payment'; carId: string; paymentId: number };
+export type AdminNotificationRoute = { kind: 'alerts' } | { kind: 'payment'; carId: string; paymentId: number } | { kind: 'report'; carId: string; reportId: number };
 export type Period = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
 export type RegistrarTab = 'cobro' | 'gasto';
 export type RegistrarStep = number;
@@ -116,6 +116,21 @@ export interface RegistrarSuccess {
   title: string;
   detail: string;
   amount: string;
+}
+
+export type ReportUrgency = 'puedo' | 'urgente';
+export type ReportStatus = 'enviada' | 'vista' | 'en_taller' | 'resuelta';
+
+export interface Reporte {
+  id: number;
+  carId: string;
+  driver: string;
+  driverId?: number | null;
+  cat: string;
+  urgencia: ReportUrgency;
+  texto: string;
+  estado: ReportStatus;
+  fecha: string;
 }
 
 export interface NuevoVehiculoForm {
@@ -199,6 +214,7 @@ export interface PickedFile {
  *  pregunta antes, no después (ver `mandarATaller` en api.ts). */
 export interface TallerForm {
   carId: string;
+  reportId?: number | null;
   razon: string;
   monto: string;
   comprobante: PickedFile | null;
@@ -215,6 +231,7 @@ export interface MobileState {
   periodSheet: boolean;
   movementDetailId: string | null;
   quotaDetailId: number | null;
+  reportDetailId: number | null;
   estadoSheet: boolean;
   tallerForm: TallerForm | null;
   kilometrajeSheet: { carId: string; valor: string } | null;

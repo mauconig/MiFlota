@@ -99,6 +99,21 @@ export interface Pago {
   comprobante?: { id: string; nombre: string; tipo: string };
 }
 
+export type ReportUrgency = 'puedo' | 'urgente';
+export type ReportStatus = 'enviada' | 'vista' | 'en_taller' | 'resuelta';
+
+export interface Reporte {
+  id: number;
+  carId: string;
+  driver: string;
+  driverId?: number | null;
+  cat: string;
+  urgencia: ReportUrgency;
+  texto: string;
+  estado: ReportStatus;
+  fecha: string;
+}
+
 export type Nav = 'resumen' | 'flota' | 'movimientos' | 'choferes' | 'alertas' | 'reportes' | 'cobros';
 export type Period = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
 export type FleetFilter = 'todos' | 'activo' | 'taller' | 'baja';
@@ -171,11 +186,12 @@ export interface UIState {
   driverCredentials: DriverCredentialDraft | null;
   driverCredentialsLoading: boolean;
   detailId: string | null;
+  reportDetailId: number | null;
   /** Intervalo de service que se está editando en la ficha, sin guardar todavía.
       Lleva el id del vehículo para que abrir otro no arrastre el borrador. */
   svcEdit: { carId: string; cada: string; unidad: ServiceUnidad } | null;
   /** Entrada a taller a medio cargar. Null = el modal está cerrado. */
-  taller: { carId: string; razon: string; monto: string; archivo: File | null; guardando: boolean } | null;
+  taller: { carId: string; reportId?: number | null; razon: string; monto: string; archivo: File | null; guardando: boolean } | null;
   /** Qué mira la pantalla de Cobros: las cuotas emitidas o el libro de pagos. */
   cobrosTab: 'cuotas' | 'pagos';
   movementDetailId: string | null;

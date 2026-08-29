@@ -261,6 +261,7 @@ app.post<{ Body: { actual?: string; nueva?: string } }>('/api/me/password', asyn
 const selCars = db.prepare('SELECT * FROM cars WHERE owner_id = ? ORDER BY rowid');
 const selMovs = db.prepare('SELECT * FROM movs WHERE owner_id = ? ORDER BY date DESC, id DESC');
 const selPagos = db.prepare('SELECT * FROM pagos WHERE owner_id = ? ORDER BY fecha DESC, id DESC');
+const selReportes = db.prepare('SELECT * FROM reportes_falla WHERE owner_id = ? ORDER BY fecha DESC, id DESC');
 const selCar = db.prepare('SELECT * FROM cars WHERE id = ? AND owner_id = ?');
 const selItems = db.prepare('SELECT * FROM gasto_items WHERE mov_id = ? ORDER BY id');
 const selLocations = db.prepare(`
@@ -845,6 +846,7 @@ app.get('/api/state', async (req) => {
     cars: (selCars.all(u.id) as CarRow[]).map(carToJson),
     movs: (selMovs.all(u.id) as MovRow[]).map((m) => movToJson(m, selItems.all(m.id) as GastoItemRow[])),
     pagos: (selPagos.all(u.id) as PagoRow[]).map(pagoToJson),
+    reportes: (selReportes.all(u.id) as ReporteRow[]).map(reporteToJson),
   };
 });
 
@@ -1325,6 +1327,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
 
   let razon = '';
   let monto = 0;
+  let reportId: number | null = null;
   let archivoPendiente: ComprobantePendiente | null = null;
 
   try {
@@ -1332,6 +1335,10 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
       if (parte.type === 'field') {
         if (parte.fieldname === 'razon') razon = String(parte.value).trim().slice(0, 120);
         if (parte.fieldname === 'monto') monto = Number(String(parte.value).replace(/\D/g, '')) || 0;
+        if (parte.fieldname === 'reportId') {
+          const value = Number(parte.value);
+          reportId = Number.isInteger(value) && value > 0 ? value : null;
+        }
         continue;
       }
       if (parte.fieldname !== 'comprobante') {
@@ -1355,6 +1362,22 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
     throw e;
   }
 
+  const reporte = reportId
+    ? (db.prepare('SELECT * FROM reportes_falla WHERE id = ? AND owner_id = ?').get(reportId, u.id) as ReporteRow | undefined)
+    : undefined;
+  if (reportId && !reporte) return reply.code(404).send({ error: 'Reporte inexistente' });
+  if (reporte?.car_id !== undefined && reporte.car_id !== car.id) return reply.code(400).send({ error: 'El reporte no corresponde a este vehículo' });
+  if (reporte?.estado === 'resuelta') return reply.code(409).send({ error: 'El reporte ya está resuelto' });
+
+  // Vincular un reporte a un vehículo que ya está en taller no representa una
+  // nueva entrada ni un gasto nuevo. Este atajo también protege contra dobles
+  // envíos desde clientes desactualizados.
+  if (reporte && car.estado === 'taller') {
+    db.prepare("UPDATE reportes_falla SET estado = 'en_taller' WHERE id = ? AND owner_id = ?").run(reporte.id, u.id);
+    const reporteActualizado = db.prepare('SELECT * FROM reportes_falla WHERE id = ? AND owner_id = ?').get(reporte.id, u.id) as ReporteRow;
+    return reply.send({ car: carToJson(car), reporte: reporteToJson(reporteActualizado) });
+  }
+
   if (!razon) return reply.code(400).send({ error: 'Indicá el motivo de la entrada a taller' });
   if (monto <= 0) return reply.code(400).send({ error: 'Indicá cuánto se gasta en el taller' });
 
@@ -1362,14 +1385,17 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
   const hoy = hoyISO();
   let info;
   try {
-    info = db
-      .prepare(
-        `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
-         VALUES (?, ?, 'egreso', ?, ?, ?, 'Taller', NULL, ?, ?, ?)`,
-      )
-      .run(u.id, car.id, monto, hoy, razon, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
-
-    db.prepare("UPDATE cars SET estado = 'taller' WHERE id = ? AND owner_id = ?").run(car.id, u.id);
+    info = db.transaction(() => {
+      const inserted = db
+        .prepare(
+          `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
+           VALUES (?, ?, 'egreso', ?, ?, ?, 'Taller', NULL, ?, ?, ?)`,
+        )
+        .run(u.id, car.id, monto, hoy, razon, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
+      db.prepare("UPDATE cars SET estado = 'taller' WHERE id = ? AND owner_id = ?").run(car.id, u.id);
+      if (reporte) db.prepare("UPDATE reportes_falla SET estado = 'en_taller' WHERE id = ? AND owner_id = ?").run(reporte.id, u.id);
+      return inserted;
+    })();
   } catch (error) {
     if (archivo) await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
     throw error;
@@ -1377,7 +1403,14 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
   req.log.info({ car: car.plate, monto, comprobante: !!archivo }, 'vehículo a taller');
 
   const mov = db.prepare('SELECT * FROM movs WHERE id = ?').get(info.lastInsertRowid) as MovRow;
-  return reply.code(201).send({ car: carToJson(selCar.get(car.id, u.id) as CarRow), mov: movToJson(mov) });
+  const reporteActualizado = reporte
+    ? (db.prepare('SELECT * FROM reportes_falla WHERE id = ? AND owner_id = ?').get(reporte.id, u.id) as ReporteRow)
+    : null;
+  return reply.code(201).send({
+    car: carToJson(selCar.get(car.id, u.id) as CarRow),
+    mov: movToJson(mov),
+    ...(reporteActualizado ? { reporte: reporteToJson(reporteActualizado) } : {}),
+  });
 });
 
 /** Categorías válidas para un gasto suelto. Mismo set que `CATS` en el cliente. */
@@ -1998,8 +2031,30 @@ app.post<{ Body: { cat?: string; urgencia?: string; texto?: string } }>('/api/ch
  *  para cuando admin-web los sume a `alertList` (Service/Seguro/Taller). */
 app.get('/api/reportes', async (req) => {
   const u = quien(req);
-  const filas = db.prepare('SELECT * FROM reportes_falla WHERE owner_id = ? ORDER BY fecha DESC, id DESC').all(u.id) as ReporteRow[];
+  const filas = selReportes.all(u.id) as ReporteRow[];
   return filas.map(reporteToJson);
+});
+
+app.patch<{ Params: { id: string }; Body: { estado?: string } }>('/api/reportes/:id', async (req, reply) => {
+  const u = quien(req);
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: 'Reporte inválido' });
+  const reporte = db.prepare('SELECT * FROM reportes_falla WHERE id = ? AND owner_id = ?').get(id, u.id) as ReporteRow | undefined;
+  if (!reporte) return reply.code(404).send({ error: 'Reporte inexistente' });
+
+  const estado = req.body?.estado;
+  if (estado !== 'en_taller' && estado !== 'resuelta') return reply.code(400).send({ error: 'Estado de reporte inválido' });
+  if (reporte.estado === 'resuelta' && estado !== 'resuelta') return reply.code(409).send({ error: 'El reporte ya está resuelto' });
+  const car = selCar.get(reporte.car_id, u.id) as CarRow | undefined;
+  if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
+  if (estado === 'en_taller') {
+    if (car.estado !== 'taller') return reply.code(409).send({ error: 'Primero tenés que enviar el vehículo al taller' });
+  }
+
+  db.prepare('UPDATE reportes_falla SET estado = ? WHERE id = ? AND owner_id = ?').run(estado, reporte.id, u.id);
+  const actualizado = db.prepare('SELECT * FROM reportes_falla WHERE id = ? AND owner_id = ?').get(reporte.id, u.id) as ReporteRow;
+  req.log.info({ reportId: reporte.id, estado }, 'estado de reporte actualizado');
+  return reporteToJson(actualizado);
 });
 
 /* --------------------------- SPA estática --------------------------- */

@@ -25,6 +25,7 @@ import { EditCarModal } from './components/EditCarModal';
 import { ServiceModal } from './components/ServiceModal';
 import { MovementDetailModal } from './components/MovementDetailModal';
 import { QuotaDetailModal } from './components/QuotaDetailModal';
+import { ReportDetailModal } from './components/ReportDetailModal';
 import { TODAY, isoLocal } from './format';
 
 const currentMonthStart = isoLocal(new Date(TODAY.getFullYear(), TODAY.getMonth(), 1, 12));
@@ -59,6 +60,7 @@ const initialState: UIState = {
   driverCredentials: null,
   driverCredentialsLoading: false,
   detailId: null,
+  reportDetailId: null,
   svcEdit: null,
   taller: null,
   cobrosTab: 'cuotas',
@@ -98,7 +100,7 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
   }, []);
 
   const store = useFleetStore(avisar, onSalir);
-  const v = useFleetView(store.cars, store.movs, store.pagos, store.locations, state, update, store);
+  const v = useFleetView(store.cars, store.movs, store.pagos, store.reportes, store.locations, state, update, store);
 
   if (store.cargando || store.error) return <Arranque error={store.error} />;
 
@@ -141,6 +143,7 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
       <PagoModal v={v} />
       <MovementDetailModal v={v} />
       <QuotaDetailModal v={v} />
+      <ReportDetailModal v={v} />
       <Toast v={v} />
     </div>
   );

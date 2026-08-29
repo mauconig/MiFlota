@@ -22,6 +22,7 @@ import { Choferes } from '../screens/Choferes';
 import { Ranking } from '../screens/Ranking';
 import { Assistant } from '../screens/Assistant';
 import { Perfil } from '../screens/Perfil';
+import { ReportDetailModal } from './ReportDetailModal';
 
 export function Shell({ v, nombre, usuario, onLogout, onRefresh, refreshing, syncError }: { v: MobileView; nombre: string; usuario: string; onLogout: () => void; onRefresh: () => void; refreshing: boolean; syncError: string }) {
   const keyboardVisible = useKeyboardState((state) => state.isVisible);
@@ -86,6 +87,7 @@ export function Shell({ v, nombre, usuario, onLogout, onRefresh, refreshing, syn
         <Toast msg={v.toast} />
         {showBottomNav && <BottomNav v={v} />}
       </View>
+      <ReportDetailModal v={v} />
     </View>
   );
 }

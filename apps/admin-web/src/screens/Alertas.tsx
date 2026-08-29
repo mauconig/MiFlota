@@ -21,9 +21,9 @@ export function Alertas({ v }: { v: View }) {
       </div>
       {!v.alertsFull.length && <div style={{ padding: '30px 0', fontSize: 13, color: '#6b665c', textAlign: 'center' }}>Sin alertas de este tipo</div>}
       <ScrollArea style={{ padding: '8px 20px' }}>
-        {v.alertsFull.map((a, i) => (
+        {v.alertsFull.map((a) => (
           <Btn
-            key={i}
+            key={a.key}
             onClick={a.open}
             style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14, width: '100%', padding: '14px 0', border: 'none', background: 'none', borderBottom: '1px solid #f4efe4', textAlign: 'left', color: 'inherit', cursor: 'pointer', font: 'inherit' }}
             hoverStyle={{ background: '#fbf7ee' }}

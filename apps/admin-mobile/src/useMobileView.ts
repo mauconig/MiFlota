@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { BackHandler, Keyboard, Linking } from 'react-native';
-import type { AdminNotificationRoute, Car, Mov, Pago, MobileState, Screen, RegistrarTab, FleetFilter, PickedFile, CarLocation, ReportCategorySelection, ReportInclude, ReportSelection, ReportStep } from './types';
+import type { AdminNotificationRoute, Car, Mov, Pago, Reporte, MobileState, Screen, RegistrarTab, FleetFilter, PickedFile, CarLocation, ReportCategorySelection, ReportInclude, ReportSelection, ReportStep } from './types';
 import { imputar, type Aplicacion } from './cobranza';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, daysBetween, durLbl, dLbl, dLblFull, fmt, fmtShort, initials, statusColor, numFromInput, miles, isoLocal } from './format';
@@ -111,12 +111,13 @@ const chipStyle = (active: boolean, tone?: 'amber') => {
 
 interface Alerta {
   car: Car;
-  kind: 'Service' | 'Seguro' | 'Taller' | 'Kilometraje';
+  kind: 'Service' | 'Seguro' | 'Taller' | 'Kilometraje' | 'Reporte';
   sev: number;
   text: string;
+  report?: Reporte;
 }
 
-function buildAlerts(active: Car[]): Alerta[] {
+function buildAlerts(active: Car[], reportes: Reporte[], cars: Car[]): Alerta[] {
   const list: Alerta[] = [];
   active.forEach((c) => {
     const dLeft = svcDaysLeft(c);
@@ -131,7 +132,12 @@ function buildAlerts(active: Car[]): Alerta[] {
     const kmDays = c.kilometrajeActualizado ? daysBetween(new Date(c.kilometrajeActualizado + 'T12:00:00'), TODAY) : Number.POSITIVE_INFINITY;
     if (!c.kilometrajeActualizado || kmDays > 7) list.push({ car: c, kind: 'Kilometraje', sev: 1, text: c.kilometraje ? 'Kilometraje pendiente de actualizar' : 'Falta cargar el kilometraje' });
   });
-  list.sort((a, b) => b.sev - a.sev);
+  reportes.forEach((report) => {
+    if (report.estado === 'resuelta') return;
+    const car = cars.find((candidate) => candidate.id === report.carId);
+    if (car) list.push({ car, kind: 'Reporte', sev: report.urgencia === 'urgente' ? 2 : 1, text: `${report.cat}: ${report.texto}`, report });
+  });
+  list.sort((a, b) => b.sev - a.sev || (b.report?.fecha ?? '').localeCompare(a.report?.fecha ?? ''));
   return list;
 }
 
@@ -208,6 +214,7 @@ export function initialMobileState(): MobileState {
     periodSheet: false,
     movementDetailId: null,
     quotaDetailId: null,
+    reportDetailId: null,
     estadoSheet: false,
     tallerForm: null,
     kilometrajeSheet: null,
@@ -427,11 +434,13 @@ interface ReportPreviewRow {
 }
 
 interface AlertView {
+  key: string;
   carId: string;
   plate: string;
   kind: string;
   text: string;
   sev: number;
+  searchText: string;
   open: () => void;
 }
 
@@ -532,6 +541,19 @@ export interface MobileView {
   detalle: DetalleView | null;
   movementDetail: MovementDetailView | null;
   quotaDetail: QuotaDetailView | null;
+  reportDetail: {
+    plate: string;
+    driver: string;
+    date: string;
+    category: string;
+    urgency: string;
+    status: string;
+    description: string;
+    inWorkshop: boolean;
+    close: () => void;
+    sendToWorkshop: () => Promise<void>;
+    resolve: () => Promise<void>;
+  } | null;
 
   nuevoVehiculo: {
     editando: boolean;
@@ -728,10 +750,11 @@ export function useMobileView(
   cars: Car[],
   movs: Mov[],
   pagos: Pago[],
+  reportes: Reporte[],
   locations: CarLocation[],
   state: MobileState,
   update: (patch: Partial<MobileState> | ((s: MobileState) => Partial<MobileState>)) => void,
-  persist: Pick<FleetStore, 'patchCar' | 'previewDriverCredentials' | 'assignDriver' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller' | 'exportReport'>,
+  persist: Pick<FleetStore, 'patchCar' | 'previewDriverCredentials' | 'assignDriver' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller' | 'updateReporte' | 'exportReport'>,
   cambiarPassword: (actual: string, nueva: string) => Promise<void>,
 ): MobileView {
   const toast = (msg: string) => update({ toast: msg });
@@ -816,9 +839,14 @@ export function useMobileView(
       registroChoice: false,
       movementDetailId: null,
       quotaDetailId: null,
+      reportDetailId: null,
     };
     if (route.kind === 'alerts') {
       update({ ...common, screen: 'alertas', carId: null });
+      return;
+    }
+    if (route.kind === 'report') {
+      update({ ...common, screen: 'alertas', carId: null, reportDetailId: route.reportId });
       return;
     }
     update({ ...common, screen: 'detalle', carId: route.carId, movementDetailId: 'pago-' + route.paymentId });
@@ -931,7 +959,7 @@ export function useMobileView(
   const tot = stats(movs, aplicaciones, inR, inRA, pagos, inRP);
   const prev = stats(movs, aplicaciones, inPrev, inPrevA, pagos, inPrevP);
 
-  const alerts = buildAlerts(active);
+  const alerts = buildAlerts(active, reportes, cars);
   const alertsByCar = new Map<string, Alerta[]>();
   alerts.forEach((a) => {
     const arr = alertsByCar.get(a.car.id) ?? [];
@@ -1156,12 +1184,15 @@ export function useMobileView(
   };
 
   const alertViews: AlertView[] = alerts.map((a) => ({
+    key: a.report ? `report:${a.report.id}` : `${a.car.id}:${a.kind}`,
     carId: a.car.id,
     plate: a.car.plate,
     kind: a.kind,
     text: a.text,
     sev: a.sev,
+    searchText: [a.car.plate, a.car.driver, a.text, a.report?.driver, a.report?.cat, a.report?.texto].filter(Boolean).join(' ').toLowerCase(),
     open: () => {
+      if (a.report) return update({ reportDetailId: a.report.id });
       if (a.kind === 'Service') return goRegistrarService(a.car.id);
       if (a.kind === 'Kilometraje') {
         return update({ kilometrajeSheet: { carId: a.car.id, valor: a.car.kilometraje ? miles(String(a.car.kilometraje)) : '' } });
@@ -1170,6 +1201,45 @@ export function useMobileView(
       push('detalle', { carId: a.car.id });
     },
   }));
+
+  const reportDetail = (() => {
+    const report = reportes.find((item) => item.id === state.reportDetailId && item.estado !== 'resuelta');
+    const reportCar = report ? cars.find((item) => item.id === report.carId) : undefined;
+    if (!report || !reportCar) return null;
+    const close = () => update({ reportDetailId: null });
+    return {
+      plate: reportCar.plate,
+      driver: report.driver || reportCar.driver,
+      date: dLblFull(new Date(report.fecha + 'T12:00:00')),
+      category: report.cat,
+      urgency: report.urgencia === 'urgente' ? 'Urgente' : 'Puede circular',
+      status: report.estado === 'en_taller' ? 'En taller' : 'Pendiente',
+      description: report.texto,
+      inWorkshop: reportCar.estado === 'taller',
+      close,
+      sendToWorkshop: async () => {
+        if (reportCar.estado === 'taller') {
+          await persist.updateReporte(report.id, 'en_taller').then(() => {
+            close();
+            toast(`Reporte vinculado al taller · ${reportCar.plate}`);
+          }).catch((e: Error) => toast('No se pudo vincular: ' + e.message));
+          return;
+        }
+        push('detalle', {
+          carId: reportCar.id,
+          reportDetailId: null,
+          estadoSheet: true,
+          tallerForm: { carId: reportCar.id, reportId: report.id, razon: `${report.cat}: ${report.texto}`, monto: '', comprobante: null, guardando: false },
+        });
+      },
+      resolve: async () => {
+        await persist.updateReporte(report.id, 'resuelta').then(() => {
+          close();
+          toast(`Reporte resuelto · ${reportCar.plate}`);
+        }).catch((e: Error) => toast('No se pudo resolver: ' + e.message));
+      },
+    };
+  })();
 
   const driverGroups = new Map<string, { name: string; cars: Car[] }>();
   active.forEach((c) => {
@@ -2009,6 +2079,7 @@ export function useMobileView(
     detalle,
     movementDetail: car ? movementDetail : null,
     quotaDetail: car ? quotaDetail : null,
+    reportDetail,
 
     nuevoVehiculo: {
       editando: state.carId !== null,
@@ -2172,7 +2243,7 @@ export function useMobileView(
             // hay tiempo de sobra para apretarlo dos veces y duplicar el gasto.
             editar({ guardando: true });
             persist
-              .mandarATaller(car.id, { razon, monto, comprobante: t.comprobante })
+              .mandarATaller(car.id, { razon, monto, comprobante: t.comprobante, reportId: t.reportId })
               .then(() => {
                 update({ tallerForm: null, estadoSheet: false });
                 toast(car.plate + ' en taller · gasto de ' + fmt(monto) + ' registrado');

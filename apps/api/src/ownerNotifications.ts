@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { CarRow } from './db.js';
+import type { CarRow, ReporteRow } from './db.js';
 import { APP_TIME_ZONE, localDateTime } from './time.js';
 import { sendOwnerPush, type OwnerPushMessage } from './push.js';
 
@@ -9,7 +9,7 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 export interface OwnerAlertDigestItem {
   carId: string;
   plate: string;
-  kind: 'Service' | 'Seguro' | 'Taller' | 'Kilometraje';
+  kind: 'Service' | 'Seguro' | 'Taller' | 'Kilometraje' | 'Reporte';
   text: string;
   severity: number;
 }
@@ -46,7 +46,7 @@ function daysBetween(from: string, to: string): number {
 }
 
 /** Misma definición que la pantalla Alertas de Admin Mobile. */
-export function buildOwnerAlertDigest(cars: CarRow[], today: string): OwnerAlertDigestItem[] {
+export function buildOwnerAlertDigest(cars: CarRow[], today: string, reports: ReporteRow[] = []): OwnerAlertDigestItem[] {
   const items: OwnerAlertDigestItem[] = [];
   for (const car of cars) {
     if (car.estado === 'baja') continue;
@@ -73,6 +73,18 @@ export function buildOwnerAlertDigest(cars: CarRow[], today: string): OwnerAlert
     if (!car.kilometraje_actualizado || daysSinceUpdate > 7) {
       items.push({ carId: car.id, plate: car.plate, kind: 'Kilometraje', text: car.kilometraje ? 'Kilometraje pendiente' : 'Falta cargar kilometraje', severity: 1 });
     }
+  }
+  const plateByCar = new Map(cars.map((car) => [car.id, car.plate]));
+  for (const report of reports) {
+    if (report.estado === 'resuelta') continue;
+    const urgent = report.urgencia === 'urgente';
+    items.push({
+      carId: report.car_id,
+      plate: plateByCar.get(report.car_id) ?? report.car_id,
+      kind: 'Reporte',
+      text: `${urgent ? 'Reporte urgente' : 'Reporte'} · ${report.cat}: ${report.texto}`,
+      severity: urgent ? 2 : 1,
+    });
   }
   return items.sort((a, b) => b.severity - a.severity || a.plate.localeCompare(b.plate));
 }
@@ -112,6 +124,7 @@ export async function runDailyAlertDigest(db: Database.Database, options: DailyD
   const claim = db.prepare('INSERT OR IGNORE INTO admin_alert_digest_log (owner_id, day, sent_at) VALUES (?, ?, ?)');
   const release = db.prepare('DELETE FROM admin_alert_digest_log WHERE owner_id = ? AND day = ?');
   const cars = db.prepare('SELECT * FROM cars WHERE owner_id = ? ORDER BY rowid');
+  const reports = db.prepare("SELECT * FROM reportes_falla WHERE owner_id = ? AND estado <> 'resuelta' ORDER BY fecha DESC, id DESC");
   const send = options.send ?? sendOwnerPush;
 
   for (const { owner_id: ownerId } of owners) {
@@ -119,7 +132,7 @@ export async function runDailyAlertDigest(db: Database.Database, options: DailyD
       result.skipped += 1;
       continue;
     }
-    const alerts = buildOwnerAlertDigest(cars.all(ownerId) as CarRow[], day);
+    const alerts = buildOwnerAlertDigest(cars.all(ownerId) as CarRow[], day, reports.all(ownerId) as ReporteRow[]);
     if (!alerts.length) continue;
 
     const details = alerts.slice(0, 3).map((alert) => `${alert.plate}: ${alert.text}`);

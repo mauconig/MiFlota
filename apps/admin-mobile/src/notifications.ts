@@ -57,6 +57,12 @@ export async function unregisterAdminPushNotifications(): Promise<void> {
 function routeFromResponse(response: Notifications.NotificationResponse): AdminNotificationRoute | null {
   const data = response.notification.request.content.data as Record<string, unknown> | undefined;
   if (data?.type === 'daily_alert_digest') return { kind: 'alerts' };
+  if (data?.type === 'driver_report') {
+    const carId = typeof data.carId === 'string' ? data.carId : '';
+    const reportId = Number(data.reportId);
+    if (!carId || !Number.isInteger(reportId) || reportId <= 0) return null;
+    return { kind: 'report', carId, reportId };
+  }
   if (data?.type !== 'driver_payment') return null;
   const carId = typeof data.carId === 'string' ? data.carId : '';
   const paymentId = Number(data.paymentId);
