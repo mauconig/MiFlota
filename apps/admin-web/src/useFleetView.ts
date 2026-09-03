@@ -368,6 +368,7 @@ export interface DetailMov {
 }
 
 export interface DetailView {
+  carId: string;
   plate: string;
   rawModel: string;
   model: string;
@@ -387,6 +388,7 @@ export interface DetailView {
     latitude: number;
     longitude: number;
     accuracy: number | null;
+    receivedAt: string;
     age: string;
     stale: boolean;
     mapsUrl: string;
@@ -847,15 +849,16 @@ export function useFleetView(
 
   const locationView = (location: CarLocation | undefined): DetailView['location'] => {
     if (!location) return null;
-    const ageMinutes = Math.max(0, Math.floor((Date.now() - new Date(location.recordedAt).getTime()) / 60_000));
+    const ageMinutes = Math.max(0, Math.floor((Date.now() - new Date(location.receivedAt).getTime()) / 60_000));
     const age = ageMinutes < 2 ? 'hace un momento' : ageMinutes < 60 ? 'hace ' + ageMinutes + ' min' : 'hace ' + Math.floor(ageMinutes / 60) + ' h';
     return {
       latitude: location.latitude,
       longitude: location.longitude,
       accuracy: location.accuracy ?? null,
+      receivedAt: location.receivedAt,
       age,
-      stale: ageMinutes > 10,
-      mapsUrl: `https://www.google.com/maps/search/?api=1&query=${location.latitude},${location.longitude}`,
+      stale: ageMinutes >= 60,
+      mapsUrl: `https://www.openstreetmap.org/?mlat=${location.latitude}&mlon=${location.longitude}#map=17/${location.latitude}/${location.longitude}`,
     };
   };
 
@@ -1551,6 +1554,7 @@ export function useFleetView(
     const c = cars.find((c2) => c2.id === st.detailId);
     if (!c) {
       return {
+        carId: '',
         plate: '',
         rawModel: '',
         model: '',
@@ -1626,8 +1630,9 @@ export function useFleetView(
     const editarSvc = (patch: Partial<typeof bor>) => update({ svcEdit: { ...bor, ...patch } });
     const agregarDatos = openEditCar;
 
-    return {
-      plate: c.plate,
+      return {
+        carId: c.id,
+        plate: c.plate,
       rawModel: c.model,
       model: c.model + ' · ' + c.year,
       driver: c.driver,

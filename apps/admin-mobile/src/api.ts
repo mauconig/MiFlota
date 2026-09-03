@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { API_BASE } from './config';
-import type { Car, CarLocation, Mov, Pago, PickedFile, Reporte, ReportStatus } from './types';
+import type { Car, CarLocation, LocationHistory, Mov, Pago, PickedFile, Reporte, ReportStatus } from './types';
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`. Se parsean a mediodía para que
  *  ningún huso horario corra el día al construir el Date. */
@@ -22,6 +22,8 @@ const toMov = (m: MovDto): Mov => ({ ...m, date: parseDate(m.date) });
 const toPago = (p: PagoDto): Pago => ({ ...p, fecha: parseDate(p.fecha) });
 
 export class SinSesion extends Error {}
+
+export const listarHistorialUbicacion = (carId: string) => req<LocationHistory[]>(`/api/locations/${encodeURIComponent(carId)}/history?limit=200`);
 
 type JsonResponse = Pick<Response, 'ok' | 'status' | 'json'>;
 
@@ -465,6 +467,14 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     return () => {
       vivo = false;
     };
+  }, [enabled, refresh]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = setInterval(() => {
+      void refresh().catch(() => {});
+    }, 30_000);
+    return () => clearInterval(timer);
   }, [enabled, refresh]);
 
   const patchCar = useCallback(

@@ -66,7 +66,7 @@ export default function Perfil() {
           <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', color: COLORS.textMuted }}>Ubicación del auto</Text>
           <Text style={{ fontSize: 13, color: COLORS.text }}>
             {locationStatus === 'active'
-              ? 'Ubicación compartida. Se actualiza cada hora mientras la app esté abierta.'
+              ? 'Ubicación compartida al iniciar y al volver a abrir la app.'
               : locationStatus === 'services-disabled'
                 ? 'Activá la ubicación del teléfono para compartirla.'
                 : locationStatus === 'permission-required'

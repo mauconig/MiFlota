@@ -331,7 +331,7 @@ export interface QuotaDetailView {
   close: () => void;
 }
 
-interface DetalleView {
+export interface DetalleView {
   car: Car;
   plate: string;
   model: string;
@@ -362,6 +362,9 @@ interface DetalleView {
   openEstadoSheet: () => void;
   openChoferSheet: () => void;
   location: {
+    latitude: number;
+    longitude: number;
+    receivedAt: string;
     age: string;
     stale: boolean;
     accuracy: number | null;
@@ -994,17 +997,20 @@ export function useMobileView(
   const car = state.carId ? cars.find((c) => c.id === state.carId) : undefined;
 
   // Última posición conocida del auto. Misma lógica que admin-web: la edad se
-  // calcula desde `recorded_at` y pasada una hora se avisa que está vieja.
+  // calcula desde `received_at` y pasada una hora se avisa que está vieja.
   const carLocation = car ? locations.find((l) => l.carId === car.id) : undefined;
   const locationView = (() => {
     if (!carLocation) return null;
-    const ageMinutes = Math.max(0, Math.floor((Date.now() - new Date(carLocation.recordedAt).getTime()) / 60_000));
+    const ageMinutes = Math.max(0, Math.floor((Date.now() - new Date(carLocation.receivedAt).getTime()) / 60_000));
     const age = ageMinutes < 2 ? 'hace un momento' : ageMinutes < 60 ? 'hace ' + ageMinutes + ' min' : 'hace ' + Math.floor(ageMinutes / 60) + ' h';
     return {
+      latitude: carLocation.latitude,
+      longitude: carLocation.longitude,
+      receivedAt: carLocation.receivedAt,
       age,
-      stale: ageMinutes > 60,
+      stale: ageMinutes >= 60,
       accuracy: carLocation.accuracy ?? null,
-      mapsUrl: `https://www.google.com/maps/search/?api=1&query=${carLocation.latitude},${carLocation.longitude}`,
+      mapsUrl: `https://www.openstreetmap.org/?mlat=${carLocation.latitude}&mlon=${carLocation.longitude}#map=17/${carLocation.latitude}/${carLocation.longitude}`,
     };
   })();
 

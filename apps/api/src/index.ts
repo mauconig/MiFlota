@@ -7,8 +7,8 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { CarRow, GastoItemRow, LocationRow, MovRow, PagoRow, ReporteRow } from './db.js';
-import { DB_PATH, carToJson, ensureDriver, locationToJson, movToJson, openDb, pagoToJson, reporteToJson } from './db.js';
+import type { CarRow, GastoItemRow, LocationHistoryRow, LocationRow, MovRow, PagoRow, ReporteRow } from './db.js';
+import { DB_PATH, carToJson, ensureDriver, locationHistoryToJson, locationToJson, movToJson, openDb, pagoToJson, reporteToJson } from './db.js';
 import { borrarComprobante, canonicalizarComprobanteId, COMPROBANTES_STORAGE, guardarComprobante, leerComprobante, type ComprobanteInput } from './comprobantes.js';
 import {
   COOKIE,
@@ -270,6 +270,14 @@ const selLocations = db.prepare(`
     JOIN cars c ON c.id = l.car_id
    WHERE c.owner_id = ?
    ORDER BY l.received_at DESC
+`);
+const selLocationHistory = db.prepare(`
+  SELECT h.*
+    FROM driver_location_history h
+    JOIN cars c ON c.id = h.car_id
+   WHERE h.car_id = ? AND c.owner_id = ?
+   ORDER BY h.received_at DESC
+   LIMIT ?
 `);
 
 /** El preHandler ya rechazó las peticiones sin sesión, así que acá siempre hay usuario. */
@@ -973,6 +981,15 @@ app.get<{ Params: { id: string } }>('/api/reports/files/:id', async (req, reply)
 app.get('/api/locations', async (req) => {
   const u = quien(req);
   return (selLocations.all(u.id) as LocationRow[]).map(locationToJson);
+});
+
+app.get<{ Params: { carId: string }; Querystring: { limit?: string } }>('/api/locations/:carId/history', async (req, reply) => {
+  const u = quien(req);
+  const car = db.prepare('SELECT id FROM cars WHERE id = ? AND owner_id = ?').get(req.params.carId, u.id) as { id: string } | undefined;
+  if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
+  const requested = Number(req.query?.limit ?? 200);
+  const limit = Number.isInteger(requested) ? Math.min(200, Math.max(1, requested)) : 200;
+  return (selLocationHistory.all(car.id, u.id, limit) as LocationHistoryRow[]).map(locationHistoryToJson);
 });
 
 const ESTADOS = new Set(['activo', 'taller', 'baja']);
@@ -1807,38 +1824,61 @@ app.post<{ Body: DriverLocationBody }>('/api/chofer/location', async (req, reply
 
   const latitude = Number(req.body?.latitude);
   const longitude = Number(req.body?.longitude);
-  const accuracy = req.body?.accuracy == null ? null : Number(req.body.accuracy);
+  const accuracy = req.body?.accuracy == null ? Number.NaN : Number(req.body.accuracy);
   const recorded = new Date(String(req.body?.recordedAt ?? ''));
   if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    req.log.warn({ carId: s.carId, reason: 'invalid_coordinates' }, 'driver location rejected');
     return reply.code(400).send({ error: 'Coordenadas inválidas' });
   }
-  if (accuracy !== null && (!Number.isFinite(accuracy) || accuracy < 0)) {
+  if (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > 50) {
+    req.log.warn({ carId: s.carId, reason: 'invalid_accuracy' }, 'driver location rejected');
     return reply.code(400).send({ error: 'Precisión inválida' });
   }
-  if (Number.isNaN(recorded.getTime())) return reply.code(400).send({ error: 'Fecha de ubicación inválida' });
-  if (recorded.getTime() > Date.now() + 5 * 60_000) return reply.code(400).send({ error: 'La ubicación no puede ser futura' });
+  if (Number.isNaN(recorded.getTime())) {
+    req.log.warn({ carId: s.carId, reason: 'invalid_recorded_at' }, 'driver location rejected');
+    return reply.code(400).send({ error: 'Fecha de ubicación inválida' });
+  }
+  if (recorded.getTime() > Date.now() + 5 * 60_000) {
+    req.log.warn({ carId: s.carId, reason: 'future_recorded_at' }, 'driver location rejected');
+    return reply.code(400).send({ error: 'La ubicación no puede ser futura' });
+  }
 
   // Android puede marcar una ubicación proveniente de un proveedor de mock.
   // No es una defensa contra un cliente modificado, pero evita aceptar el caso
+  if (req.body?.mocked === true) req.log.warn({ carId: s.carId, reason: 'mocked_location' }, 'driver location rejected');
   // detectable sin impedir ubicaciones legítimas donde el campo no existe.
   if (req.body?.mocked === true) return reply.code(400).send({ error: 'La ubicación simulada no está permitida' });
 
   const recordedAt = recorded.toISOString();
   const receivedAt = new Date().toISOString();
-  db.prepare(`
-    INSERT INTO driver_locations (car_id, latitude, longitude, accuracy, recorded_at, received_at, mocked)
-    VALUES (?, ?, ?, ?, ?, ?, 0)
-    ON CONFLICT(car_id) DO UPDATE SET
-      latitude = excluded.latitude,
-      longitude = excluded.longitude,
-      accuracy = excluded.accuracy,
-      recorded_at = excluded.recorded_at,
-      received_at = excluded.received_at,
-      mocked = excluded.mocked
-    WHERE excluded.recorded_at >= driver_locations.recorded_at
-  `).run(s.carId, latitude, longitude, accuracy, recordedAt, receivedAt);
+  const info = db.transaction(() => {
+    const upsert = db.prepare(`
+      INSERT INTO driver_locations (car_id, latitude, longitude, accuracy, recorded_at, received_at, mocked)
+      VALUES (?, ?, ?, ?, ?, ?, 0)
+      ON CONFLICT(car_id) DO UPDATE SET
+        latitude = excluded.latitude,
+        longitude = excluded.longitude,
+        accuracy = excluded.accuracy,
+        recorded_at = excluded.recorded_at,
+        received_at = excluded.received_at,
+        mocked = excluded.mocked
+      WHERE excluded.recorded_at >= driver_locations.recorded_at
+        AND julianday(excluded.recorded_at) >= julianday('now', '-5 minutes')
+    `).run(s.carId, latitude, longitude, accuracy, recordedAt, receivedAt);
+    if (upsert.changes === 0) return upsert;
+    db.prepare(`
+      INSERT OR IGNORE INTO driver_location_history
+        (car_id, latitude, longitude, accuracy, recorded_at, received_at, mocked)
+      VALUES (?, ?, ?, ?, ?, ?, 0)
+    `).run(s.carId, latitude, longitude, accuracy, recordedAt, receivedAt);
+    db.prepare("DELETE FROM driver_location_history WHERE received_at < datetime('now', '-30 days')").run();
+    return upsert;
+  })();
 
-  return { ok: true, recordedAt };
+  if (info.changes === 0) req.log.warn({ carId: s.carId, reason: 'stale_recorded_at' }, 'driver location rejected');
+  if (info.changes === 0) return reply.code(409).send({ ok: false, accepted: false, error: 'La ubicaciÃ³n estÃ¡ desactualizada' });
+  req.log.info({ carId: s.carId, accuracy, recordedAt }, 'driver location received');
+  return { ok: true, accepted: true, recordedAt, receivedAt };
 });
 
 app.post<{ Body: { kilometraje?: number } }>('/api/chofer/kilometraje', async (req, reply) => {

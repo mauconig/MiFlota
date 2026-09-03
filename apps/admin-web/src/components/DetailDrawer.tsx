@@ -2,8 +2,12 @@ import type { View } from '../useFleetView';
 import { Btn } from './Btn';
 import { BrandIcon, CloseIcon, GpsIcon } from '../icons';
 import { cardTight } from '../styles';
+import { LocationHistoryModal } from './LocationHistoryModal';
+import { useEffect, useState } from 'react';
 
 export function DetailDrawer({ v }: { v: View }) {
+  const [locationOpen, setLocationOpen] = useState(false);
+  useEffect(() => { setLocationOpen(false); }, [v.hasDetail, v.detail?.carId]);
   if (!v.hasDetail) return null;
   const d = v.detail;
   return (
@@ -17,7 +21,7 @@ export function DetailDrawer({ v }: { v: View }) {
           <Btn onClick={v.closeDetail} ariaLabel="Cerrar" style={{ width: 38, height: 38, borderRadius: 19, border: '1px solid #e6ded0', background: '#fffdf8', cursor: 'pointer', color: '#3d3a34', display: 'flex', alignItems: 'center', justifyContent: 'center' }} hoverStyle={{ background: '#f7f1e5' }}><CloseIcon size={16} /></Btn>
         </div>
 
-        <div style={{ ...cardTight, padding: 16, display: 'flex', alignItems: 'center', gap: 14 }}><span style={{ width: 40, height: 40, borderRadius: 13, background: d.location && !d.location.stale ? '#eef4f0' : '#fdf3e2', color: d.location && !d.location.stale ? '#2e7d5b' : '#a8730f', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><GpsIcon size={19} /></span><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#6b665c' }}>Ubicación del teléfono</div><div style={{ fontSize: 13, fontWeight: 700, marginTop: 3 }}>{d.location ? (d.location.stale ? 'Ubicación desactualizada' : 'Auto localizado') : 'Nunca se recibió una ubicación'}</div>{d.location && <div style={{ fontSize: 11, color: '#6b665c', marginTop: 2 }}>{d.location.age} · precisión ±{Math.round(d.location.accuracy ?? 0)} m</div>}</div>{d.location && <a href={d.location.mapsUrl} target="_blank" rel="noreferrer" style={{ color: '#8d5c10', fontSize: 12, fontWeight: 700 }}>Abrir mapa</a>}</div>
+        <div style={{ ...cardTight, padding: 16, display: 'flex', alignItems: 'center', gap: 14 }}><span style={{ width: 40, height: 40, borderRadius: 13, background: d.location && !d.location.stale ? '#eef4f0' : '#fdf3e2', color: d.location && !d.location.stale ? '#2e7d5b' : '#a8730f', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><GpsIcon size={19} /></span><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#6b665c' }}>Ubicación del teléfono</div><div style={{ fontSize: 13, fontWeight: 700, marginTop: 3 }}>{d.location ? (d.location.stale ? 'Ubicación desactualizada' : 'Auto localizado') : 'Nunca se recibió una ubicación'}</div>{d.location && <div style={{ fontSize: 11, color: '#6b665c', marginTop: 2 }}>{d.location.age} · precisión ±{Math.round(d.location.accuracy ?? 0)} m</div>}</div>{d.location && <button type="button" onClick={() => setLocationOpen(true)} style={{ border: 0, background: 'none', color: '#8d5c10', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Ver detalles</button>}</div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}><Metric label="Ingresos reales" value={d.ing} color="#2e7d5b" /><Metric label="Gastos" value={d.egr} color="#c0553f" /><Metric label="Resultado" value={d.net} color="#fffdf8" dark /></div>
 
@@ -33,6 +37,7 @@ export function DetailDrawer({ v }: { v: View }) {
           </div>
         </div>
       </div>
+      {locationOpen && d.location && <LocationHistoryModal carId={d.carId} plate={d.plate} latest={d.location} onClose={() => setLocationOpen(false)} />}
     </div>
   );
 }

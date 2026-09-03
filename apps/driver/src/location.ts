@@ -1,22 +1,34 @@
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
-import { AppState } from 'react-native';
+import * as TaskManager from 'expo-task-manager';
 import { API_BASE } from './config';
 import { TOKEN_KEY } from './session';
 
+export const LOCATION_TASK_NAME = 'miflota-driver-location';
 export type LocationSharingStatus = 'active' | 'permission-required' | 'services-disabled' | 'unavailable' | 'error';
 
-/** Cada cuánto se re-comparte la posición mientras la app está en primer plano. */
-const HORARIO_MS = 60 * 60 * 1000;
+const MAX_ACCURACY_METERS = 50;
+const RETRY_WINDOW_MS = 10 * 60 * 1000;
+const ATTEMPT_STARTED_KEY = 'miflota_location_attempt_started';
+const ATTEMPT_DEADLINE_KEY = 'miflota_location_attempt_deadline';
 
-/** Último envío exitoso, para saber si al volver del background hay que
- *  compartir de nuevo o todavía está fresco. */
-let ultimoEnvio = 0;
+type LocationAttempt = { startedAt: number; deadline: number };
 
-let timer: ReturnType<typeof setInterval> | null = null;
-let appStateSub: ReturnType<typeof AppState.addEventListener> | null = null;
+function isGoodLocation(location: Location.LocationObject, startedAt: number): boolean {
+  const accuracy = location.coords.accuracy;
+  const timestamp = Number(location.timestamp);
+  return (
+    location.mocked !== true &&
+    accuracy != null &&
+    Number.isFinite(accuracy) &&
+    accuracy >= 0 &&
+    accuracy <= MAX_ACCURACY_METERS &&
+    Number.isFinite(timestamp) &&
+    timestamp >= startedAt - 60_000
+  );
+}
 
-async function sendLocation(token: string, location: Location.LocationObject) {
+async function sendLocation(token: string, location: Location.LocationObject): Promise<void> {
   const response = await fetch(`${API_BASE}/api/chofer/location`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -31,11 +43,64 @@ async function sendLocation(token: string, location: Location.LocationObject) {
   if (!response.ok) throw new Error(`location ${response.status}`);
 }
 
-/** Toma la posición actual y la manda al servidor una sola vez. Sin seguimiento
- *  continuo: el dueño ve la última posición conocida, que se refresca cada hora
- *  mientras la app esté abierta (ver `startHourlySharing`). */
-export async function shareLocationOnce(): Promise<LocationSharingStatus> {
+async function readAttempt(): Promise<LocationAttempt | null> {
+  const [started, deadline] = await Promise.all([
+    SecureStore.getItemAsync(ATTEMPT_STARTED_KEY),
+    SecureStore.getItemAsync(ATTEMPT_DEADLINE_KEY),
+  ]);
+  const startedAt = Number(started);
+  const deadlineAt = Number(deadline);
+  return Number.isFinite(startedAt) && Number.isFinite(deadlineAt) ? { startedAt, deadline: deadlineAt } : null;
+}
+
+async function finishAttempt(): Promise<void> {
+  await Promise.all([
+    SecureStore.deleteItemAsync(ATTEMPT_STARTED_KEY),
+    SecureStore.deleteItemAsync(ATTEMPT_DEADLINE_KEY),
+  ]);
+}
+
+async function acceptLocation(location: Location.LocationObject, attempt: LocationAttempt, token: string): Promise<boolean> {
+  const current = await readAttempt();
+  if (!current || current.startedAt !== attempt.startedAt) return false;
+  if (!isGoodLocation(location, attempt.startedAt)) return false;
+  await sendLocation(token, location);
+  await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => {});
+  await finishAttempt();
+  return true;
+}
+
+// Android can execute this task while the UI JavaScript tree is not mounted.
+TaskManager.defineTask<{ locations?: Location.LocationObject[] }>(LOCATION_TASK_NAME, async ({ data, error }) => {
+  if (error) return;
+  const attempt = await readAttempt();
+  const token = await SecureStore.getItemAsync(TOKEN_KEY);
+  if (!attempt || !token) {
+    await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => {});
+    return;
+  }
+  if (Date.now() >= attempt.deadline) {
+    await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => {});
+    await finishAttempt();
+    return;
+  }
+
+  const locations = data?.locations ?? [];
+  // Android may deliver a batch. Try newest first and keep the service alive
+  // when every fix is too imprecise or the network is temporarily unavailable.
+  for (const location of [...locations].sort((a, b) => b.timestamp - a.timestamp)) {
+    try {
+      if (await acceptLocation(location, attempt, token)) return;
+    } catch {
+      return;
+    }
+  }
+});
+
+/** Starts one acquisition attempt. A successful fix stops the background task. */
+export async function startLocationSharing(): Promise<LocationSharingStatus> {
   if (!(await Location.hasServicesEnabledAsync())) return 'services-disabled';
+  if (!(await TaskManager.isAvailableAsync().catch(() => false))) return 'unavailable';
 
   let foreground = await Location.getForegroundPermissionsAsync();
   if (foreground.status !== Location.PermissionStatus.GRANTED) {
@@ -43,40 +108,51 @@ export async function shareLocationOnce(): Promise<LocationSharingStatus> {
   }
   if (foreground.status !== Location.PermissionStatus.GRANTED) return 'permission-required';
 
+  let background = await Location.getBackgroundPermissionsAsync();
+  if (background.status !== Location.PermissionStatus.GRANTED) {
+    background = await Location.requestBackgroundPermissionsAsync();
+  }
+  if (background.status !== Location.PermissionStatus.GRANTED) return 'permission-required';
+
   const token = await SecureStore.getItemAsync(TOKEN_KEY);
   if (!token) return 'error';
 
+  await stopLocationSharing();
+  const startedAt = Date.now();
+  const attempt = { startedAt, deadline: startedAt + RETRY_WINDOW_MS };
+  await SecureStore.setItemAsync(ATTEMPT_STARTED_KEY, String(attempt.startedAt));
+  await SecureStore.setItemAsync(ATTEMPT_DEADLINE_KEY, String(attempt.deadline));
+
   try {
-    const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-    await sendLocation(token, location);
-    ultimoEnvio = Date.now();
+    await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+      accuracy: Location.Accuracy.BestForNavigation,
+      timeInterval: 5_000,
+      distanceInterval: 0,
+      deferredUpdatesInterval: 5_000,
+      pausesUpdatesAutomatically: false,
+      showsBackgroundLocationIndicator: true,
+      foregroundService: {
+        notificationTitle: 'MiFlota comparte tu ubicación',
+        notificationBody: 'Se está buscando una ubicación precisa del auto.',
+        notificationColor: '#e8a13a',
+        killServiceOnDestroy: true,
+      },
+    });
+
+    // Ask for an immediate foreground fix too; the task handles retries and
+    // continues if this first request is not yet accurate enough.
+    void Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation, mayShowUserSettingsDialog: true })
+      .then((location) => acceptLocation(location, attempt, token))
+      .catch(() => {});
     return 'active';
   } catch {
+    await finishAttempt();
     return 'error';
   }
 }
 
-/** Comparte al momento y agenda un envío por hora mientras la app esté en
- *  primer plano. En background el timer se pausa (el intervalo no corre y no
- *  hay task de fondo); al volver, si pasó más de una hora desde el último
- *  envío, comparte de una vez y retoma el ciclo. */
-export function startHourlySharing(): void {
-  stopLocationSharing();
-  void shareLocationOnce();
-  timer = setInterval(() => void shareLocationOnce(), HORARIO_MS);
-  appStateSub = AppState.addEventListener('change', (next) => {
-    if (next === 'active' && Date.now() - ultimoEnvio >= HORARIO_MS) {
-      void shareLocationOnce();
-    }
-  });
-}
-
-/** Cancela el timer horario y el listener de AppState. */
-export function stopLocationSharing(): void {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
-  appStateSub?.remove();
-  appStateSub = null;
+/** Stops the current acquisition attempt and removes its persisted deadline. */
+export async function stopLocationSharing(): Promise<void> {
+  await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => {});
+  await finishAttempt().catch(() => {});
 }

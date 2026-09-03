@@ -4,7 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as api from './api';
 import { SinSesion } from './api';
-import { shareLocationOnce, startHourlySharing, stopLocationSharing, type LocationSharingStatus } from './location';
+import { startLocationSharing, stopLocationSharing, type LocationSharingStatus } from './location';
 import { TOKEN_KEY } from './session';
 import type { Me } from './types';
 
@@ -46,9 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const activarUbicacion = useCallback(async () => {
     try {
-      // Comparte al momento y agenda el refresco horario en primer plano.
-      const status = await shareLocationOnce();
-      if (status === 'active') startHourlySharing();
+      const status = await startLocationSharing();
       setLocationStatus(status);
       return status;
     } catch {
@@ -93,13 +91,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setLocationStatus('inactive');
           } else {
             startTimer();
+            if (token) void activarUbicacion();
           }
         });
       }
       appState.current = next;
     });
     return () => sub.remove();
-  }, [startTimer, resetTimer]);
+  }, [activarUbicacion, resetTimer, startTimer, token]);
 
   /** Guarda timestamp de última actividad cada vez que hay token. */
   useEffect(() => {
@@ -177,7 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const salir = useCallback(async () => {
     resetTimer();
     if (token) await api.logout(token).catch(() => {});
-    stopLocationSharing();
+    await stopLocationSharing();
     await SecureStore.deleteItemAsync(TOKEN_KEY);
     await SecureStore.deleteItemAsync(BIOMETRIC_KEY);
     await SecureStore.deleteItemAsync('last_active');

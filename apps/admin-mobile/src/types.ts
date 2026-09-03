@@ -100,6 +100,11 @@ export interface CarLocation {
   mocked: boolean;
 }
 
+export interface LocationHistory extends CarLocation {
+  id: number;
+  accuracy: number;
+}
+
 // ---------------------------------------------------------------------------
 // Estado de UI propio de admin-mobile. La app es una pila de pantallas sobre
 // un frame de teléfono, no un dashboard de pestañas siempre montadas como

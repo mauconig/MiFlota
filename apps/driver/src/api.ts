@@ -40,7 +40,7 @@ export interface DriverLocationPayload {
 }
 
 export const postLocation = (token: string, location: DriverLocationPayload) =>
-  req<{ ok: true; recordedAt: string }>('/api/chofer/location', token, {
+  req<{ ok: true; accepted: true; recordedAt: string; receivedAt: string }>('/api/chofer/location', token, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(location),

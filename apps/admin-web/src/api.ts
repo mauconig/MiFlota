@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Car, CarLocation, Mov, Pago, Reporte, ReportStatus } from './types';
+import type { Car, CarLocation, LocationHistory, Mov, Pago, Reporte, ReportStatus } from './types';
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`. Se parsean a mediodía UTC para que
  *  ningún huso horario corra el día al construir el Date. */
@@ -19,6 +19,8 @@ const toMov = (m: MovDto): Mov => ({ ...m, date: parseDate(m.date) });
 const toPago = (p: PagoDto): Pago => ({ ...p, fecha: parseDate(p.fecha) });
 
 export class SinSesion extends Error {}
+
+export const listarHistorialUbicacion = (carId: string) => req<LocationHistory[]>(`/api/locations/${encodeURIComponent(carId)}/history?limit=200`);
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   // El Content-Type solo va cuando hay cuerpo: si se anuncia JSON y el cuerpo
@@ -228,9 +230,16 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     };
     cargar();
     const timer = setInterval(cargar, 30_000);
+    const alVolver = () => {
+      if (!document.hidden) cargar();
+    };
+    window.addEventListener('focus', alVolver);
+    document.addEventListener('visibilitychange', alVolver);
     return () => {
       vivo = false;
       clearInterval(timer);
+      window.removeEventListener('focus', alVolver);
+      document.removeEventListener('visibilitychange', alVolver);
     };
   }, [recargarLocations, onSinSesion]);
 

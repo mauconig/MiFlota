@@ -1,4 +1,4 @@
-import { Linking, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { useEffect, useMemo, useState } from 'react';
 import Svg, { Circle, Path } from 'react-native-svg';
 import type { MobileView } from '../useMobileView';
@@ -8,6 +8,7 @@ import { MovRow } from '../components/MovRow';
 import { Pagination } from '../components/Pagination';
 import { MovementDetailSheet } from '../components/MovementDetailSheet';
 import { QuotaDetailSheet } from '../components/QuotaDetailSheet';
+import { LocationHistoryModal } from '../components/LocationHistoryModal';
 
 const ALERT_PAGE_SIZE = 4;
 const MOV_PAGE_SIZE = 5;
@@ -29,6 +30,8 @@ export function Detalle({ v }: { v: MobileView }) {
   const [movPage, setMovPage] = useState(0);
   const [cuotaPage, setCuotaPage] = useState(0);
   const [activeTable, setActiveTable] = useState<'movs' | 'cuotas'>('movs');
+  const [locationOpen, setLocationOpen] = useState(false);
+  useEffect(() => { setLocationOpen(false); }, [dc?.car.id]);
   const alertKey = useMemo(() => dc?.alerts.map((alert) => `${alert.txt}-${alert.sub}`).join('|') ?? '', [dc?.alerts]);
   const movKey = useMemo(() => dc?.movs.map((mov) => String(mov.id)).join('|') ?? '', [dc?.movs]);
   const cuotaKey = useMemo(() => dc?.cuotas.map((cuota) => String(cuota.id)).join('|') ?? '', [dc?.cuotas]);
@@ -166,9 +169,12 @@ export function Detalle({ v }: { v: MobileView }) {
               {dc.location.age}
               {dc.location.accuracy != null ? ' · precisión ±' + Math.round(dc.location.accuracy) + ' m' : ''}
             </Text>
+            <Text style={{ fontSize: 10, color: '#6b665c', marginTop: 2 }}>
+              {dc.location.latitude.toFixed(6)}, {dc.location.longitude.toFixed(6)}
+            </Text>
           </View>
-          <Pressable onPress={() => void Linking.openURL(dc.location!.mapsUrl)} style={{ borderRadius: 12, backgroundColor: '#16150f', paddingVertical: 9, paddingHorizontal: 13 }}>
-            <Text style={{ color: '#fffdf8', fontSize: 12, fontWeight: '700' }}>Mapa</Text>
+          <Pressable onPress={() => setLocationOpen(true)} style={{ borderRadius: 12, backgroundColor: '#16150f', paddingVertical: 9, paddingHorizontal: 13 }}>
+            <Text style={{ color: '#fffdf8', fontSize: 12, fontWeight: '700' }}>Ver detalles</Text>
           </Pressable>
         </View>
       )}
@@ -226,6 +232,7 @@ export function Detalle({ v }: { v: MobileView }) {
     </View>
     <QuotaDetailSheet quota={v.quotaDetail} />
     <MovementDetailSheet movement={v.movementDetail} />
+      {locationOpen && dc.location && <LocationHistoryModal carId={dc.car.id} plate={dc.plate} latest={dc.location} onClose={() => setLocationOpen(false)} />}
     </>
   );
 }

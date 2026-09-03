@@ -40,6 +40,11 @@ export interface CarLocation {
   mocked: boolean;
 }
 
+export interface LocationHistory extends CarLocation {
+  id: number;
+  accuracy: number;
+}
+
 export type MovEstado = 'pagado' | 'pendiente' | 'parcial';
 
 export interface Mov {

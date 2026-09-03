@@ -129,6 +129,10 @@ export interface LocationRow {
   mocked: number;
 }
 
+export interface LocationHistoryRow extends LocationRow {
+  id: number;
+}
+
 /** Las fechas viajan como ISO `YYYY-MM-DD`: ordenan lexicográficamente en SQL y
  *  no arrastran zona horaria, que es la principal fuente de corrimientos de un día. */
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -257,6 +261,18 @@ export function openDb() {
       mocked       INTEGER NOT NULL DEFAULT 0 CHECK (mocked IN (0, 1))
     );
 
+    CREATE TABLE IF NOT EXISTS driver_location_history (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      car_id       TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+      latitude     REAL NOT NULL CHECK (latitude >= -90 AND latitude <= 90),
+      longitude    REAL NOT NULL CHECK (longitude >= -180 AND longitude <= 180),
+      accuracy     REAL NOT NULL CHECK (accuracy >= 0 AND accuracy <= 50),
+      recorded_at  TEXT NOT NULL,
+      received_at  TEXT NOT NULL,
+      mocked       INTEGER NOT NULL DEFAULT 0 CHECK (mocked IN (0, 1)),
+      UNIQUE (car_id, received_at)
+    );
+
     -- Tokens Expo Push del panel del dueño. Un mismo dispositivo puede
     -- registrarse varias veces (por reinstalación o renovación del token),
     -- pero cada token queda asociado a un único dueño.
@@ -294,6 +310,7 @@ export function openDb() {
     CREATE INDEX IF NOT EXISTS idx_reportes_owner ON reportes_falla(owner_id);
     CREATE INDEX IF NOT EXISTS idx_reportes_car   ON reportes_falla(car_id);
     CREATE INDEX IF NOT EXISTS idx_driver_locations_received ON driver_locations(received_at);
+    CREATE INDEX IF NOT EXISTS idx_driver_location_history_car_received ON driver_location_history(car_id, received_at DESC);
     CREATE INDEX IF NOT EXISTS idx_admin_push_tokens_owner ON admin_push_tokens(owner_id);
     CREATE INDEX IF NOT EXISTS idx_admin_alert_digest_log_day ON admin_alert_digest_log(day);
   `);
@@ -301,7 +318,19 @@ export function openDb() {
   // Los índices sobre owner_id se crean dentro de la migración, no acá: en una
   // base anterior la columna todavía no existe cuando corre este bloque.
   migrarOwner(db);
+  migrarHistorialUbicaciones(db);
   return db;
+}
+
+/** Conserva en el historial las últimas posiciones que existían antes de crear
+ * la tabla histórica. Se ejecuta con INSERT OR IGNORE para que sea idempotente. */
+function migrarHistorialUbicaciones(db: Database.Database) {
+  db.prepare(`
+    INSERT OR IGNORE INTO driver_location_history
+      (car_id, latitude, longitude, accuracy, recorded_at, received_at, mocked)
+    SELECT car_id, latitude, longitude, MIN(50, MAX(0, COALESCE(accuracy, 50))), recorded_at, received_at, mocked
+      FROM driver_locations
+  `).run();
 }
 
 /** Agrega `owner_id` a bases creadas antes de que la flota fuera por usuario.
@@ -769,6 +798,19 @@ export function locationToJson(r: LocationRow) {
     latitude: r.latitude,
     longitude: r.longitude,
     ...(r.accuracy == null ? {} : { accuracy: r.accuracy }),
+    recordedAt: r.recorded_at,
+    receivedAt: r.received_at,
+    mocked: Boolean(r.mocked),
+  };
+}
+
+export function locationHistoryToJson(r: LocationHistoryRow) {
+  return {
+    id: r.id,
+    carId: r.car_id,
+    latitude: r.latitude,
+    longitude: r.longitude,
+    accuracy: r.accuracy,
     recordedAt: r.recorded_at,
     receivedAt: r.received_at,
     mocked: Boolean(r.mocked),
