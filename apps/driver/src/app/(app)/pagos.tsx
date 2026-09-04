@@ -13,6 +13,7 @@ import { COLORS } from '../../theme';
 import type { Pago } from '../../types';
 import { API_BASE } from '../../config';
 import { ComprobanteViewer, type ComprobanteSource } from '../../components/ComprobanteViewer';
+import { useComprobanteUri } from '../../components/comprobanteCache';
 
 const FILTROS: { dias: number; label: string }[] = [
   { dias: 7, label: '7 días' },
@@ -140,7 +141,7 @@ export default function Pagos() {
                   {comprobante && (
                     <View style={{ width: 40, height: 40, borderRadius: 9, overflow: 'hidden', marginLeft: 2, backgroundColor: '#f2eadb', borderWidth: 1, borderColor: COLORS.cardBorder, alignItems: 'center', justifyContent: 'center' }}>
                       {comprobante.type.startsWith('image/') ? (
-                        <Image source={{ uri: comprobante.uri, headers: comprobante.headers }} resizeMode="cover" style={{ width: '100%', height: '100%' }} />
+                        <PaymentThumbnail source={comprobante} />
                       ) : (
                         <Text style={{ color: '#b14f3d', fontSize: 9, fontWeight: '800' }}>PDF</Text>
                       )}
@@ -155,6 +156,12 @@ export default function Pagos() {
       <ComprobanteViewer source={comprobanteAbierto} visible={!!comprobanteAbierto} onClose={() => setComprobanteAbierto(null)} />
     </View>
   );
+}
+
+function PaymentThumbnail({ source }: { source: ComprobanteSource }) {
+  const local = useComprobanteUri(source, true);
+  if (local.loading) return <Text style={{ color: COLORS.textMuted, fontSize: 12 }}>…</Text>;
+  return local.uri ? <Image source={{ uri: local.uri }} resizeMode="cover" style={{ width: '100%', height: '100%' }} /> : <Text style={{ color: COLORS.redText2, fontSize: 12 }}>!</Text>;
 }
 
 function initials(name: string) {

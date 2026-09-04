@@ -1,6 +1,7 @@
-import { Image, Modal, Pressable, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Image, Modal, Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { useEffect, useState } from 'react';
 import Svg, { Path } from 'react-native-svg';
+import { useComprobanteUri } from './comprobanteCache';
 
 export interface ComprobanteSource {
   uri: string;
@@ -14,6 +15,7 @@ export function ComprobanteViewer({ source, visible, onClose }: { source: Compro
   const [scale, setScale] = useState(1);
   const [imageError, setImageError] = useState(false);
   const isImage = !!source && (source.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/i.test(source.name));
+  const local = useComprobanteUri(source, visible && isImage);
 
   useEffect(() => {
     if (visible) {
@@ -36,9 +38,9 @@ export function ComprobanteViewer({ source, visible, onClose }: { source: Compro
         </View>
 
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-          {isImage && !imageError ? (
+          {isImage && !imageError && local.loading ? <ActivityIndicator color="#e8a13a" size="large" /> : isImage && !imageError && local.uri ? (
             <Image
-              source={{ uri: source.uri, headers: source.headers }}
+              source={{ uri: local.uri }}
               onError={() => setImageError(true)}
               resizeMode="contain"
               style={{ width: imageSize, height: imageSize, transform: [{ scale }] }}
@@ -48,6 +50,7 @@ export function ComprobanteViewer({ source, visible, onClose }: { source: Compro
               <View style={{ width: 54, height: 62, borderRadius: 8, backgroundColor: '#c0553f', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fffdf8', fontSize: 14, fontWeight: '800' }}>{isImage ? '!' : 'PDF'}</Text></View>
               <Text style={{ color: '#fffdf8', fontSize: 14, fontWeight: '700' }}>{isImage ? 'No se pudo cargar el comprobante' : 'Comprobante en PDF'}</Text>
               <Text style={{ color: '#c9c4b8', fontSize: 12, textAlign: 'center' }}>{isImage ? 'Probá cerrar y volver a abrirlo.' : 'Este formato no se puede previsualizar acá.'}</Text>
+              {isImage && <Pressable onPress={local.retry} style={{ minHeight: 40, paddingHorizontal: 18, borderRadius: 12, backgroundColor: '#2b2a24', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fffdf8', fontSize: 12, fontWeight: '700' }}>Reintentar</Text></Pressable>}
             </View>
           )}
         </View>

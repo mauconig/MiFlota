@@ -1,4 +1,7 @@
-# Backend and Database Audit
+# Backend and Database Audit (snapshot histórico)
+
+> Auditoría cerrada el 13 de agosto de 2026. El modelo de ubicación y los
+> endpoints agregados posteriormente están documentados en [docs/current.md](current.md).
 
 Date: 2026-08-13
 

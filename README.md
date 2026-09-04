@@ -1,5 +1,9 @@
 # MiFlota
 
+La referencia funcional vigente está en [docs/current.md](docs/current.md).
+Ahí se describen el balance acumulado, GPS, historial de ubicaciones, mapas y
+comprobantes autenticados.
+
 Sistema de gestión de flota para dueños, administradores y choferes. Permite
 controlar vehículos, cuotas, cobros, gastos, comprobantes, kilometraje,
 alertas de mantenimiento y reportes de fallas.

@@ -1,5 +1,7 @@
 # MiFlota — Project Overview
 
+Current behavior and operational instructions: [docs/current.md](docs/current.md).
+
 Fleet management app (Spanish-language UI, Paraguayan guaraní ₲ amounts). Monorepo with
 3 frontends + 1 Fastify/SQLite backend.
 
@@ -13,7 +15,8 @@ Fleet management app (Spanish-language UI, Paraguayan guaraní ₲ amounts). Mon
 | `apps/api` | Shared Fastify 5 + better-sqlite3 backend. | **No** — native dep (`better-sqlite3`), own `node_modules`/lockfile |
 
 Root scripts: `npm run dev:api` (:3000), `npm run dev` / `dev:admin-web` (:5173),
-`npm run dev:admin-mobile` (Expo/Metro :8081), `npm run dev:driver` (Expo/Metro :8082).
+`npm run dev:driver` (Expo/Metro :8081) y `npm run dev:admin-mobile`
+(Expo/Metro :8082 cuando se ejecutan juntos).
 Note: `dev:api` only runs `tsc --watch` — the server itself is started separately with
 `node dist/index.js` and the admin env vars from `apps/api/.env` loaded into the process.
 Web frontends proxy `/api` → `127.0.0.1:3000`; there is **no CORS plugin** — dev uses
@@ -41,6 +44,9 @@ Documentación completa del auth in-house (sin Clerk) en `docs/auth.md`.
 - `POST /cars/:id/taller` — multipart: egreso mov (cat Taller) + `estado='taller'`, atomically
 - `POST /cars/:id/egreso` — multipart: generic expense (6 categories) + optional comprobante
 - `GET /comprobantes/:id` — streams attachment (owner-scoped, whitelist Content-Type, CSP sandbox)
+- `POST /chofer/location` — accepts a fresh, non-mocked GPS fix with accuracy ≤50 m
+- `GET /locations` and `GET /locations/:carId/history` — owner-scoped latest location and history
+- `GET /map/tiles/:z/:x/:y.png` — cached OpenStreetMap tile proxy
 - `POST /pagos` — `{driver, carId?, fecha?, monto, tipo: pago|ajuste, medio?, nota}`;
   `DELETE /pagos/:id` (payments are never edited — delete + recreate)
 
@@ -64,7 +70,8 @@ cross-owner ids answer 404.
 
 **Seed** (`src/seed.ts`): deterministic demo fleet (mulberry32 seed 7, `SEED_TODAY =
 2026-08-28`): 15 vehicles, 14 drivers, ~90 days of cuota ingresos + random egresos.
-Both frontends hardcode the same `TODAY`; `MIFLOTA_HOY` aligns the server in dev.
+Los frontends calculan `TODAY` con la fecha local al iniciar; `MIFLOTA_HOY` solo
+permite alinear el servidor durante pruebas de desarrollo.
 
 ## Frontend — `apps/admin-web` (desktop)
 

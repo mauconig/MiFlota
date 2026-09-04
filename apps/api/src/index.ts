@@ -3,7 +3,7 @@ import fastifyStatic from '@fastify/static';
 import fastifyCookie from '@fastify/cookie';
 import fastifyMultipart from '@fastify/multipart';
 import { createReadStream, existsSync } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -59,7 +59,12 @@ const PORT = Number(process.env.PORT ?? 3000);
 const hoyISO = () => localDateISO();
 const diasEntreISO = (desde: string | null, hasta = hoyISO()) => (desde ? Math.floor((Date.parse(`${hasta}T12:00:00Z`) - Date.parse(`${desde}T12:00:00Z`)) / 86400000) : Number.POSITIVE_INFINITY);
 const ASSISTANT_REPORTS_DIR = process.env.MIFLOTA_ASSISTANT_REPORTS ?? join(dirname(DB_PATH), 'assistant-reports');
+const TILE_CACHE_DIR = process.env.MIFLOTA_TILE_CACHE ?? join(dirname(DB_PATH), 'map-tiles');
+const TILE_USER_AGENT = process.env.MIFLOTA_TILE_USER_AGENT ?? 'MiFlota/1.0 (OpenStreetMap tile proxy; contacto del administrador)';
+const TILE_TIMEOUT_MS = 8_000;
+const TILE_MAX_BYTES = 2 * 1024 * 1024;
 await mkdir(ASSISTANT_REPORTS_DIR, { recursive: true });
+await mkdir(TILE_CACHE_DIR, { recursive: true });
 
 interface AssistantReportFileRecord extends AssistantFile {
   path: string;
@@ -125,6 +130,7 @@ app.addHook('preHandler', async (req, reply) => {
   if (req.url.startsWith('/api/assistant/files/')) return;
   if (req.url.startsWith('/api/reports/files/')) return;
   if (req.url.startsWith('/api/comprobantes/')) return;
+  if (req.url.startsWith('/api/map/tiles/')) return;
   if (ABIERTAS.has(req.url.split('?')[0])) return;
   if (!usuarioDeSesion(db, tokenDueno(req))) return reply.code(401).send({ error: 'Sesión requerida' });
 });
@@ -845,6 +851,71 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
 const quien = (req: { cookies: Record<string, string | undefined>; headers: { authorization?: string | string[] } }) => usuarioDeSesion(db, tokenDueno(req))!;
 
 app.get('/api/health', async () => ({ ok: true, db: DB_PATH }));
+
+interface TileParams { z: string; x: string; y: string }
+const tileInFlight = new Map<string, Promise<Buffer>>();
+
+async function cargarTile(z: number, x: number, y: number, cachePath: string): Promise<Buffer> {
+  const cacheado = await readFile(cachePath).catch(() => null);
+  if (cacheado) return cacheado;
+  const key = `${z}/${x}/${y}`;
+  const pendiente = tileInFlight.get(key);
+  if (pendiente) return pendiente;
+  const trabajo = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TILE_TIMEOUT_MS);
+    try {
+      const upstream = await fetch(`https://tile.openstreetmap.org/${z}/${x}/${y}.png`, {
+        signal: controller.signal,
+        headers: { 'User-Agent': TILE_USER_AGENT, Referer: 'https://miflota.147-93-180-120.sslip.io/' },
+      });
+      if (!upstream.ok) throw new Error(`OpenStreetMap respondió ${upstream.status}`);
+      const contentType = upstream.headers.get('content-type') ?? '';
+      if (!contentType.toLowerCase().startsWith('image/png')) throw new Error('Respuesta de mapa no vÃ¡lida');
+      const declared = Number(upstream.headers.get('content-length') ?? 0);
+      if (declared > TILE_MAX_BYTES) throw new Error('Tile demasiado grande');
+      if (!upstream.body) throw new Error('Respuesta de mapa vacÃ­a');
+      const reader = upstream.body.getReader();
+      const chunks: Buffer[] = [];
+      let total = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > TILE_MAX_BYTES) {
+          await reader.cancel().catch(() => {});
+          throw new Error('Tile demasiado grande');
+        }
+        chunks.push(Buffer.from(value));
+      }
+      const bytes = Buffer.concat(chunks, total);
+      await writeFile(cachePath, bytes);
+      return bytes;
+    } finally {
+      clearTimeout(timeout);
+    }
+  })();
+  tileInFlight.set(key, trabajo);
+  try { return await trabajo; } finally { tileInFlight.delete(key); }
+}
+
+app.get<{ Params: TileParams }>('/api/map/tiles/:z/:x/:y.png', async (req, reply) => {
+  const z = Number(req.params.z);
+  const x = Number(req.params.x);
+  const y = Number(req.params.y);
+  const max = Number.isInteger(z) && z >= 0 && z <= 19 ? 2 ** z : 0;
+  if (!max || !Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= max || y >= max) {
+    return reply.code(400).send({ error: 'Tile inválido' });
+  }
+  const cachePath = join(TILE_CACHE_DIR, `${z}-${x}-${y}.png`);
+  try {
+    const bytes = await cargarTile(z, x, y, cachePath);
+    return reply.header('Cache-Control', 'public, max-age=604800, immutable').type('image/png').send(bytes);
+  } catch (error) {
+    req.log.warn({ z, x, y, error: error instanceof Error ? error.message : String(error) }, 'map tile unavailable');
+    return reply.code(502).send({ error: 'No se pudo cargar el mapa' });
+  }
+});
 
 /** Un solo GET con todo: la vista deriva absolutamente todo de estas listas,
  *  así que partirlo en endpoints por pantalla solo agregaría viajes de red. */

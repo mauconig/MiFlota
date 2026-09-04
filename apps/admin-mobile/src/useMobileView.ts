@@ -72,21 +72,29 @@ function stats(
 
 const finDia = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59);
 const iniDia = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const MESES_LARGO = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const inicioMes = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1, 12);
+const finMes = (d: Date) => finDia(new Date(d.getFullYear(), d.getMonth() + 1, 0, 12));
+const etiquetaMes = (d: Date) => `${MESES_LARGO[d.getMonth()]} ${d.getFullYear()}`;
+const capitalizar = (value: string) => value[0].toUpperCase() + value.slice(1);
 
 function range(period: MobileState['period'], cFrom: string, cTo: string) {
   if (period === 'semana') return { start: addD(TODAY, -6), end: finDia(TODAY), label: 'Últimos 7 días', short: '7 días' };
-  if (period === 'jul') return { start: new Date(2026, 6, 1), end: new Date(2026, 6, 31, 23, 59), label: 'Julio 2026', short: 'julio' };
+  if (period === 'jul') {
+    const start = inicioMes(new Date(TODAY.getFullYear(), TODAY.getMonth() - 1, 1, 12));
+    return { start, end: finMes(start), label: etiquetaMes(start), short: 'mes anterior' };
+  }
   if (period === 'd90') return { start: addD(TODAY, -89), end: finDia(TODAY), label: 'Últimos 90 días', short: '90 días' };
   if (period === 'custom') {
     let start = new Date(cFrom + 'T00:00:00');
     let end = new Date(cTo + 'T23:59:59');
     if (isNaN(+start) || isNaN(+end) || end < start) {
-      start = new Date(2026, 7, 1);
+      start = inicioMes(TODAY);
       end = finDia(TODAY);
     }
     return { start, end, label: dLbl(start) + ' – ' + dLbl(end), short: 'el rango' };
   }
-  return { start: new Date(2026, 7, 1), end: finDia(TODAY), label: 'Agosto 2026', short: 'agosto' };
+  return { start: inicioMes(TODAY), end: finDia(TODAY), label: etiquetaMes(TODAY), short: MESES_LARGO[TODAY.getMonth()] };
 }
 
 const delta = (now: number, before: number) => {
@@ -209,7 +217,7 @@ export function initialMobileState(): MobileState {
     backTo: 'dashboard',
     carId: null,
     period: 'mes',
-    cFrom: '2026-08-01',
+    cFrom: isoLocal(inicioMes(TODAY)),
     cTo: isoLocal(TODAY),
     periodSheet: false,
     movementDetailId: null,
@@ -1017,8 +1025,8 @@ export function useMobileView(
   // ---- period sheet --------------------------------------------------------
   const periodOpts: [MobileState['period'], string][] = [
     ['semana', '7 días'],
-    ['mes', 'Agosto'],
-    ['jul', 'Julio'],
+    ['mes', capitalizar(MESES_LARGO[TODAY.getMonth()])],
+    ['jul', capitalizar(MESES_LARGO[(TODAY.getMonth() + 11) % 12])],
     ['d90', '90 días'],
     ['custom', 'Rango'],
   ];

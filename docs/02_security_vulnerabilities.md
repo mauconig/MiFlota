@@ -1,4 +1,7 @@
-# Security Audit: API and Driver App
+# Security Audit: API and Driver App (snapshot histórico)
+
+> Auditoría cerrada el 13 de agosto de 2026. Las capacidades agregadas después
+> de esa fecha están resumidas en [current.md](current.md).
 
 Date: 2026-08-13
 

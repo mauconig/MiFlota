@@ -1,4 +1,7 @@
-# VPS Security and Operations Audit
+# VPS Security and Operations Audit (snapshot histórico)
+
+> Auditoría cerrada el 13 de agosto de 2026. El estado operativo vigente se
+> mantiene en [current.md](current.md).
 
 Date: 2026-08-13
 

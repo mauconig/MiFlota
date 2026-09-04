@@ -100,18 +100,20 @@ the most common failure on Windows is virtualization not being available
 Leave this running in its own window/background process — everything below
 talks to it via `adb`, which auto-detects the running emulator.
 
-## 6. Sideload Expo Go
+## 6. Install the development builds
 
-Expo Go isn't on this emulator's Play Store (there isn't one), so install
-the APK directly. **Get the exact SDK version that matches this project**
-(admin-mobile is on Expo SDK 54) — Expo Go versions are tied to SDK
-versions, and a mismatch is the "incompatible SDK version" error. Download
-from https://expo.dev/go (pick the SDK 54 build) or from the Expo Go GitHub
-releases.
+Chofer y Admin Mobile usan Expo SDK 56, `expo-dev-client` y módulos nativos de
+ubicación/comprobantes. No se deben probar con Expo Go. Generá e instalá el
+APK debug de la app que quieras probar:
 
 ```powershell
-adb install E:\android-tools\expo-go-54.0.8.apk
+Push-Location apps/driver/android
+./gradlew.bat assembleDebug --no-daemon
+Pop-Location
+adb install -r apps/driver/android/app/build/outputs/apk/debug/app-debug.apk
 ```
+
+Repetí con `apps/admin-mobile/android` para Admin Mobile.
 
 ## 7. Point the app at your machine's LAN IP
 
@@ -139,17 +141,16 @@ IP).
 
 ```powershell
 npm --prefix apps/api run dev            # backend, port 3000
-npm --prefix apps/admin-mobile run dev   # Metro/Expo, port 8081
+npm --prefix apps/admin-mobile run dev -- --dev-client --port 8082 --lan
 ```
 
-Then launch Expo Go pointed at your Metro server, either via adb:
+Then launch the installed development client pointed at Metro, either via adb:
 
 ```powershell
-adb shell am start -a android.intent.action.VIEW -d exp://192.168.100.34:8081
+adb shell am start -a android.intent.action.VIEW -d exp://192.168.100.34:8082
 ```
 
-or manually inside the emulator: open Expo Go → "Enter URL manually" →
-`exp://192.168.100.34:8081`.
+or open the development build and enter `exp://192.168.100.34:8082`.
 
 ## 9. If you're testing on a physical phone too: open the firewall
 

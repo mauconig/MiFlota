@@ -1,4 +1,7 @@
-# UI/UX and Functional QA Report
+# UI/UX and Functional QA Report (snapshot histórico)
+
+> QA cerrado el 13 de agosto de 2026. Los hallazgos sobre Admin Mobile, GPS y
+> mapas corresponden a ese corte; ver [docs/current.md](current.md).
 
 Date: 2026-08-13
 

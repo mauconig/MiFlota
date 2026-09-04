@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Modal, Pressable, Text, View, useWindowDimensions, type DimensionValue } from 'react-native';
-import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import Svg, { Path } from 'react-native-svg';
+import { materializeComprobante, useComprobanteUri } from './comprobanteCache';
 
 export interface ComprobanteSource {
   uri: string;
@@ -36,6 +36,7 @@ export function ComprobanteViewer({ source, visible, onClose }: { source: Compro
   const [sharing, setSharing] = useState(false);
   const [shareError, setShareError] = useState('');
   const image = source.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/i.test(source.name);
+  const local = useComprobanteUri(source, visible && image);
   const imageSize = Math.min(width - 36, height * 0.58, 420);
 
   useEffect(() => {
@@ -50,14 +51,8 @@ export function ComprobanteViewer({ source, visible, onClose }: { source: Compro
     setShareError('');
     try {
       if (!(await Sharing.isAvailableAsync())) throw new Error('Compartir no está disponible en este dispositivo');
-      const extension = source.name.split('.').pop()?.replace(/[^a-z0-9]/gi, '').toLowerCase() || (source.type === 'application/pdf' ? 'pdf' : 'jpg');
-      let uri = source.uri;
-      if (/^https?:\/\//i.test(uri)) {
-        const directory = FileSystem.cacheDirectory;
-        if (!directory) throw new Error('No se pudo preparar el archivo para compartir');
-        const downloaded = await FileSystem.downloadAsync(uri, `${directory}miflota-comprobante-${Date.now()}.${extension}`, { headers: source.headers });
-        uri = downloaded.uri;
-      }
+      let uri = await materializeComprobante(source);
+      if (!uri) throw new Error('No se pudo preparar el archivo para compartir');
       await Sharing.shareAsync(uri, { dialogTitle: 'Compartir comprobante', mimeType: source.type });
     } catch (error) {
       setShareError(error instanceof Error ? error.message : 'No se pudo compartir el comprobante');
@@ -77,7 +72,7 @@ export function ComprobanteViewer({ source, visible, onClose }: { source: Compro
         </View>
 
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-          {image ? <Image source={{ uri: source.uri, headers: source.headers }} resizeMode="contain" style={{ width: imageSize, height: imageSize, transform: [{ scale }] }} /> : <View style={{ alignItems: 'center', gap: 12 }}><PdfIcon /><Text style={{ color: '#fffdf8', fontSize: 14, fontWeight: '700' }}>Documento PDF</Text><Text style={{ color: '#c9c4b8', fontSize: 12 }}>Podés compartirlo desde este visor.</Text></View>}
+          {image && local.loading ? <ActivityIndicator color="#e8a13a" size="large" /> : image && local.uri ? <Image source={{ uri: local.uri }} resizeMode="contain" style={{ width: imageSize, height: imageSize, transform: [{ scale }] }} /> : image ? <View style={{ alignItems: 'center', gap: 12 }}><PdfIcon /><Text style={{ color: '#fffdf8', fontSize: 14, fontWeight: '700' }}>No se pudo cargar el comprobante</Text><Pressable onPress={local.retry} style={{ minHeight: 40, paddingHorizontal: 18, borderRadius: 12, backgroundColor: '#2b2a24', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fffdf8', fontSize: 12, fontWeight: '700' }}>Reintentar</Text></Pressable></View> : <View style={{ alignItems: 'center', gap: 12 }}><PdfIcon /><Text style={{ color: '#fffdf8', fontSize: 14, fontWeight: '700' }}>Documento PDF</Text><Text style={{ color: '#c9c4b8', fontSize: 12 }}>Podés compartirlo desde este visor.</Text></View>}
           {image && <Text style={{ color: '#aaa69c', fontSize: 11, marginTop: 16 }}>Usá los botones para ajustar el zoom</Text>}
         </View>
 
@@ -99,7 +94,11 @@ export function ComprobanteViewer({ source, visible, onClose }: { source: Compro
 
 function PreviewImage({ source, style }: { source: ComprobanteSource; style: { width: DimensionValue; height: DimensionValue } }) {
   const image = source.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/i.test(source.name);
-  return image ? <Image source={{ uri: source.uri, headers: source.headers }} resizeMode="cover" style={style} /> : <PdfIcon />;
+  const local = useComprobanteUri(source, image);
+  if (!image) return <PdfIcon />;
+  if (local.loading) return <ActivityIndicator color="#b78324" />;
+  if (!local.uri) return <Text style={{ color: '#a8412f', fontSize: 18 }}>!</Text>;
+  return <Image source={{ uri: local.uri }} resizeMode="cover" style={style} />;
 }
 
 function PdfIcon() {

@@ -21,15 +21,6 @@ const ESTADO_TAG: Record<Resumen['estado'], { label: string; bg: string; fg: str
   al_dia: { label: 'Al día', bg: COLORS.green, fg: COLORS.onDark },
 };
 
-function AlertIcon() {
-  return (
-    <Svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke={COLORS.onDark} strokeWidth={2} strokeLinecap="round">
-      <Path d="M12 8v5" />
-      <Path d="M12 17h.01" />
-    </Svg>
-  );
-}
-
 export default function Inicio() {
   const { me, token, sesionVencida } = useAuth();
   const router = useRouter();
@@ -113,21 +104,6 @@ export default function Inicio() {
         contentContainerStyle={{ padding: 16, paddingTop: 6, gap: 12 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.textMuted} />}
       >
-        {resumen.estado === 'atrasado' && (
-          <View style={{ backgroundColor: COLORS.redBg, borderWidth: 1, borderColor: '#f0d0c6', borderRadius: 20, padding: 14, flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
-            <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: COLORS.redDark, alignItems: 'center', justifyContent: 'center' }}>
-              <AlertIcon />
-            </View>
-            <View style={{ flex: 1, gap: 8 }}>
-              <View>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.red }}>Estás atrasado con tu cuota</Text>
-                <Text style={{ fontSize: 12, color: COLORS.redText, marginTop: 2, lineHeight: 17 }}>Debés {fmtG(resumen.deuda)}.</Text>
-              </View>
-              <PrimaryButton label="Pagar ahora" variant="dark" onPress={() => router.push('/(app)/pagar' as never)} />
-            </View>
-          </View>
-        )}
-
         <Card dark>
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
             <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', color: COLORS.onDarkMuted }}>{balanceLabel}</Text>

@@ -18,6 +18,6 @@ Cuenta de demostración únicamente; no reutilizar en otros entornos.
 | Campo | Valor |
 |---|---|
 | Usuario | `carlos.benitez` |
-| Contraseña | `Ls6y3bi4a` |
+| Contraseña | `oPufTWqDU` |
 | Uso | App Driver / Expo Development Client |
 | Chofer | Carlos Benítez |

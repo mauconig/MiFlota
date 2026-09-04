@@ -26,11 +26,13 @@ import { ServiceModal } from './components/ServiceModal';
 import { MovementDetailModal } from './components/MovementDetailModal';
 import { QuotaDetailModal } from './components/QuotaDetailModal';
 import { ReportDetailModal } from './components/ReportDetailModal';
-import { TODAY, isoLocal } from './format';
+import { isoLocal } from './format';
 
-const currentMonthStart = isoLocal(new Date(TODAY.getFullYear(), TODAY.getMonth(), 1, 12));
-
-const initialState: UIState = {
+function initialState(): UIState {
+  const today = new Date();
+  const localToday = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 12);
+  const currentMonthStart = isoLocal(new Date(localToday.getFullYear(), localToday.getMonth(), 1, 12));
+  return {
   period: 'mes',
   filter: 'todos',
   sortK: 'net',
@@ -39,7 +41,7 @@ const initialState: UIState = {
   nav: 'resumen',
   toast: '',
   cFrom: currentMonthStart,
-  cTo: isoLocal(TODAY),
+  cTo: isoLocal(localToday),
   movType: 'todos',
   movCat: 'todas',
   alertKind: 'todas',
@@ -50,7 +52,7 @@ const initialState: UIState = {
   alertQ: '',
   pendQ: '',
   movQ: '',
-  movMonth: isoLocal(TODAY).slice(0, 7),
+  movMonth: isoLocal(localToday).slice(0, 7),
   movPage: 1,
   movVehicle: 'todos',
   movExpanded: null,
@@ -71,7 +73,8 @@ const initialState: UIState = {
   confirm: null,
   editCar: null,
   service: null,
-};
+  };
+}
 
 function App() {
   const auth = useAuth();
@@ -83,7 +86,7 @@ function App() {
 }
 
 function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
-  const [state, setState] = useState<UIState>(initialState);
+  const [state, setState] = useState<UIState>(() => initialState());
   const [sesionesOpen, setSesionesOpen] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 

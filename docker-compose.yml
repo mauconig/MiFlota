@@ -15,6 +15,7 @@ services:
       MIFLOTA_DB: /data/miflota.db
       MIFLOTA_TIME_ZONE: ${MIFLOTA_TIME_ZONE:-America/Asuncion}
       MIFLOTA_PUSH_ENABLED: ${MIFLOTA_PUSH_ENABLED:-true}
+      MIFLOTA_TILE_USER_AGENT: "${MIFLOTA_TILE_USER_AGENT:-MiFlota/1.0 (+https://miflota.147-93-180-120.sslip.io/)}"
       LOG_LEVEL: info
       # Solo se usan para crear el primer usuario, cuando la tabla está vacía.
       # Después de eso la contraseña vive hasheada en la base y estas variables

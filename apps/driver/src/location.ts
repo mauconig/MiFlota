@@ -13,6 +13,17 @@ const ATTEMPT_STARTED_KEY = 'miflota_location_attempt_started';
 const ATTEMPT_DEADLINE_KEY = 'miflota_location_attempt_deadline';
 
 type LocationAttempt = { startedAt: number; deadline: number };
+let startInFlight: Promise<LocationSharingStatus> | null = null;
+let acceptInFlight: Promise<boolean> | null = null;
+let foregroundRetrySubscription: Location.LocationSubscription | null = null;
+let foregroundDeadlineTimer: ReturnType<typeof setTimeout> | null = null;
+
+function stopForegroundRetry(): void {
+  foregroundRetrySubscription?.remove();
+  foregroundRetrySubscription = null;
+  if (foregroundDeadlineTimer) clearTimeout(foregroundDeadlineTimer);
+  foregroundDeadlineTimer = null;
+}
 
 function isGoodLocation(location: Location.LocationObject, startedAt: number): boolean {
   const accuracy = location.coords.accuracy;
@@ -54,6 +65,7 @@ async function readAttempt(): Promise<LocationAttempt | null> {
 }
 
 async function finishAttempt(): Promise<void> {
+  stopForegroundRetry();
   await Promise.all([
     SecureStore.deleteItemAsync(ATTEMPT_STARTED_KEY),
     SecureStore.deleteItemAsync(ATTEMPT_DEADLINE_KEY),
@@ -61,13 +73,19 @@ async function finishAttempt(): Promise<void> {
 }
 
 async function acceptLocation(location: Location.LocationObject, attempt: LocationAttempt, token: string): Promise<boolean> {
-  const current = await readAttempt();
-  if (!current || current.startedAt !== attempt.startedAt) return false;
-  if (!isGoodLocation(location, attempt.startedAt)) return false;
-  await sendLocation(token, location);
-  await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => {});
-  await finishAttempt();
-  return true;
+  if (acceptInFlight) return acceptInFlight;
+  const job = (async () => {
+    const current = await readAttempt();
+    if (!current || current.startedAt !== attempt.startedAt) return false;
+    if (!isGoodLocation(location, attempt.startedAt)) return false;
+    await sendLocation(token, location);
+    await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => {});
+    stopForegroundRetry();
+    await finishAttempt();
+    return true;
+  })();
+  acceptInFlight = job.finally(() => { acceptInFlight = null; });
+  return acceptInFlight;
 }
 
 // Android can execute this task while the UI JavaScript tree is not mounted.
@@ -97,22 +115,14 @@ TaskManager.defineTask<{ locations?: Location.LocationObject[] }>(LOCATION_TASK_
   }
 });
 
-/** Starts one acquisition attempt. A successful fix stops the background task. */
-export async function startLocationSharing(): Promise<LocationSharingStatus> {
+async function startLocationSharingOnce(): Promise<LocationSharingStatus> {
   if (!(await Location.hasServicesEnabledAsync())) return 'services-disabled';
-  if (!(await TaskManager.isAvailableAsync().catch(() => false))) return 'unavailable';
 
   let foreground = await Location.getForegroundPermissionsAsync();
   if (foreground.status !== Location.PermissionStatus.GRANTED) {
     foreground = await Location.requestForegroundPermissionsAsync();
   }
   if (foreground.status !== Location.PermissionStatus.GRANTED) return 'permission-required';
-
-  let background = await Location.getBackgroundPermissionsAsync();
-  if (background.status !== Location.PermissionStatus.GRANTED) {
-    background = await Location.requestBackgroundPermissionsAsync();
-  }
-  if (background.status !== Location.PermissionStatus.GRANTED) return 'permission-required';
 
   const token = await SecureStore.getItemAsync(TOKEN_KEY);
   if (!token) return 'error';
@@ -122,37 +132,89 @@ export async function startLocationSharing(): Promise<LocationSharingStatus> {
   const attempt = { startedAt, deadline: startedAt + RETRY_WINDOW_MS };
   await SecureStore.setItemAsync(ATTEMPT_STARTED_KEY, String(attempt.startedAt));
   await SecureStore.setItemAsync(ATTEMPT_DEADLINE_KEY, String(attempt.deadline));
+  foregroundDeadlineTimer = setTimeout(() => {
+    stopForegroundRetry();
+    void readAttempt().then((current) => current?.startedAt === attempt.startedAt ? finishAttempt() : undefined);
+  }, RETRY_WINDOW_MS + 250);
 
-  try {
-    await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-      accuracy: Location.Accuracy.BestForNavigation,
-      timeInterval: 5_000,
-      distanceInterval: 0,
-      deferredUpdatesInterval: 5_000,
-      pausesUpdatesAutomatically: false,
-      showsBackgroundLocationIndicator: true,
-      foregroundService: {
-        notificationTitle: 'MiFlota comparte tu ubicación',
-        notificationBody: 'Se está buscando una ubicación precisa del auto.',
-        notificationColor: '#e8a13a',
-        killServiceOnDestroy: true,
-      },
-    });
+  // La primera lectura no puede depender del permiso "todo el tiempo" ni de
+  // TaskManager: el chofer debe compartir una posición aun si Android solo
+  // concedió ubicación mientras usa la app.
+  const immediate = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation, mayShowUserSettingsDialog: true })
+    .then((location) => acceptLocation(location, attempt, token))
+    .catch(() => false);
 
-    // Ask for an immediate foreground fix too; the task handles retries and
-    // continues if this first request is not yet accurate enough.
-    void Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation, mayShowUserSettingsDialog: true })
-      .then((location) => acceptLocation(location, attempt, token))
-      .catch(() => {});
-    return 'active';
-  } catch {
-    await finishAttempt();
-    return 'error';
+  let background: 'started' | 'permission-required' | 'unavailable' | 'error' = 'unavailable';
+  if (await TaskManager.isAvailableAsync().catch(() => false)) {
+    try {
+      let permission = await Location.getBackgroundPermissionsAsync();
+      if (permission.status !== Location.PermissionStatus.GRANTED) {
+        permission = await Location.requestBackgroundPermissionsAsync();
+      }
+      if (permission.status !== Location.PermissionStatus.GRANTED) {
+        background = 'permission-required';
+      } else if (await readAttempt()) {
+        await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+          accuracy: Location.Accuracy.BestForNavigation,
+          timeInterval: 5_000,
+          distanceInterval: 0,
+          deferredUpdatesInterval: 5_000,
+          pausesUpdatesAutomatically: false,
+          showsBackgroundLocationIndicator: true,
+          foregroundService: {
+            notificationTitle: 'MiFlota comparte tu ubicación',
+            notificationBody: 'Se está buscando una ubicación precisa del auto.',
+            notificationColor: '#e8a13a',
+            killServiceOnDestroy: true,
+          },
+        });
+        background = 'started';
+      }
+    } catch {
+      background = 'error';
+    }
   }
+
+  // Si no se pudo registrar el servicio de fondo (por permiso denegado o por
+  // plataforma), seguimos solicitando lecturas en primer plano hasta el mismo
+  // límite de diez minutos. La primera lectura y los reintentos comparten la
+  // misma aceptación serializada, por lo que nunca se envía dos veces.
+  if (background !== 'started' && await readAttempt()) {
+    try {
+      foregroundRetrySubscription = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 5_000, distanceInterval: 0 },
+        (location) => { void acceptLocation(location, attempt, token); },
+      );
+    } catch {
+      // El resultado se informa abajo; la lectura inmediata todavía puede
+      // completar el intento si el GPS responde dentro del plazo.
+    }
+  }
+
+  // No esperamos indefinidamente al GPS: el servicio sigue procesando lecturas
+  // si la primera todavía no está disponible. Si la aceptó antes de terminar
+  // el pedido de permiso de fondo, no volvemos a mostrar un estado erróneo.
+  const immediateAccepted = await Promise.race([
+    immediate,
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 15_000)),
+  ]);
+  if (immediateAccepted || !(await readAttempt())) return 'active';
+  if (background === 'started') return 'active';
+  if (background === 'permission-required') return 'permission-required';
+  return background === 'error' ? 'error' : 'unavailable';
+}
+
+/** Starts one acquisition attempt. A successful fix stops the background task. */
+export function startLocationSharing(): Promise<LocationSharingStatus> {
+  if (!startInFlight) {
+    startInFlight = startLocationSharingOnce().finally(() => { startInFlight = null; });
+  }
+  return startInFlight;
 }
 
 /** Stops the current acquisition attempt and removes its persisted deadline. */
 export async function stopLocationSharing(): Promise<void> {
   await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => {});
+  stopForegroundRetry();
   await finishAttempt().catch(() => {});
 }

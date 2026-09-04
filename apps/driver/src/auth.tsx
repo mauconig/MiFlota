@@ -100,6 +100,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => sub.remove();
   }, [activarUbicacion, resetTimer, startTimer, token]);
 
+  // Un solo intento por sesión activa. El listener de AppState se ocupa de
+  // los regresos al frente; centralizar acá evita carreras al entrar,
+  // restaurar o desbloquear biometría.
+  useEffect(() => {
+    if (token) void activarUbicacion();
+  }, [token, activarUbicacion]);
+
   /** Guarda timestamp de última actividad cada vez que hay token. */
   useEffect(() => {
     if (!token) return;
@@ -125,7 +132,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const m = await api.getMe(saved);
           setToken(saved);
           setMe(m);
-          void activarUbicacion();
           startTimer();
         } catch {
           await SecureStore.deleteItemAsync(TOKEN_KEY);
@@ -144,7 +150,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (enrolled) await SecureStore.setItemAsync(BIOMETRIC_KEY, '1').catch(() => {});
       setToken(r.token);
       setMe({ driver: r.driver, cuota: r.cuota, kilometraje: r.kilometraje, kilometrajeActualizado: r.kilometrajeActualizado, car: r.car });
-      void activarUbicacion();
       startTimer();
       return null;
     } catch (e) {
@@ -164,7 +169,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(saved);
       setMe(m);
       setBiometriaBloqueada(false);
-      void activarUbicacion();
       startTimer();
       return true;
     } catch {

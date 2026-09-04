@@ -1,4 +1,8 @@
-# Executive Security and QA Summary
+# Executive Security and QA Summary (snapshot histórico)
+
+> Informe cerrado el 13 de agosto de 2026. Sus afirmaciones de funcionalidades
+> ausentes describen ese estado y no el producto vigente. Consultar
+> [docs/current.md](current.md).
 
 Date: 2026-08-13
 
