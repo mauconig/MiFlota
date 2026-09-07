@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef } from 'react';
-import type { Car, CarLocation, Mov, Pago, Reporte, UIState, NewCarForm, NewDriverForm, EditCarForm } from './types';
+import type { Car, CarLocation, Mov, Pago, Reporte, UIState, NewCarForm, NewDriverForm, EditCarForm, DriverCredentialsEdit } from './types';
 import type { DriverCredentials, NuevoCarPayload, NuevoPagoPayload, ReportExportPayload } from './api';
 import type { Aplicacion } from './cobranza';
 import { imputar } from './cobranza';
@@ -255,6 +255,7 @@ export interface ChoferItem {
   tag: string;
   tagBg: string;
   tagFg: string;
+  hasCredentials: boolean;
   open: () => void;
 }
 
@@ -286,6 +287,7 @@ export interface DriverDetailView {
   sinPagos: boolean;
   verVehiculo: () => void;
   editar: () => void;
+  editarUsuario: () => void;
   quitar: () => void;
 }
 
@@ -564,6 +566,11 @@ export interface View {
   hasDriverDetail: boolean;
   driverDetail: DriverDetailView;
   closeDriverDetail: () => void;
+  driverCredentialsEdit: DriverCredentialsEdit | null;
+  setDriverCredentialsEdit: (patch: Partial<DriverCredentialsEdit>) => void;
+  closeDriverCredentialsEdit: () => void;
+  saveDriverCredentialsEdit: () => void;
+  toggleDriverCredentialsPassword: () => void;
 
   carModal: boolean;
   editCarModal: boolean;
@@ -817,6 +824,8 @@ export function useFleetView(
     patchCar: (id: string, patch: Partial<Car>) => void;
     updateCar: (id: string, patch: Partial<Car>) => Promise<Car>;
     previewDriverCredentials: (id: string, driver: string) => Promise<DriverCredentials>;
+    getDriverCredentials: (id: string) => Promise<{ username: string | null; hasPassword: boolean }>;
+    updateDriverCredentials: (id: string, payload: { username: string; password?: string }) => Promise<{ username: string; sesionesCerradas: number }>;
     assignDriver: (id: string, payload: DriverCredentials & { driver: string; cuota: number }) => Promise<Car>;
     addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
     deleteCar: (id: string) => Promise<{ plate: string; movs: number }>;
@@ -1763,6 +1772,76 @@ export function useFleetView(
     };
   })();
 
+  const openDriverCredentialsEdit = (car: Car) => {
+    if (car.driver === 'Sin chofer' || car.driverId == null) {
+      toast('Este vehÃ­culo no tiene un chofer asignado');
+      return;
+    }
+    update({
+      detailCarId: null,
+      driverCredentialsEdit: {
+        carId: car.id,
+        driverName: car.driver,
+        username: '',
+        password: '',
+        passwordRequired: true,
+        loading: true,
+        saving: false,
+        showPassword: false,
+      },
+    });
+    persist
+      .getDriverCredentials(car.id)
+      .then(({ username, hasPassword }) => {
+        update((s) =>
+          s.driverCredentialsEdit && s.driverCredentialsEdit.carId === car.id
+            ? { driverCredentialsEdit: { ...s.driverCredentialsEdit, username: username ?? '', passwordRequired: !username || !hasPassword, loading: false } }
+            : {},
+        );
+      })
+      .catch((e: Error) => {
+        update({ driverCredentialsEdit: null });
+        toast('No se pudieron cargar los datos de acceso: ' + e.message);
+      });
+  };
+
+  const setDriverCredentialsEdit = (patch: Partial<DriverCredentialsEdit>) =>
+    update((s) => (s.driverCredentialsEdit ? { driverCredentialsEdit: { ...s.driverCredentialsEdit, ...patch } } : {}));
+
+  const closeDriverCredentialsEdit = () => update({ driverCredentialsEdit: null });
+
+  const toggleDriverCredentialsPassword = () =>
+    update((s) => (s.driverCredentialsEdit ? { driverCredentialsEdit: { ...s.driverCredentialsEdit, showPassword: !s.driverCredentialsEdit.showPassword } } : {}));
+
+  const saveDriverCredentialsEdit = () => {
+    const f = state.driverCredentialsEdit;
+    if (!f || f.loading || f.saving) return;
+    const username = f.username.trim().toLowerCase();
+    if (!/^[a-z0-9.]{1,40}$/.test(username)) {
+      toast('El usuario solo puede tener letras minúsculas, números y puntos');
+      return;
+    }
+    if (f.passwordRequired && !f.password) {
+      toast('Ingresá una contraseña para crear el acceso del chofer');
+      return;
+    }
+    if (f.password && (f.password.length < 9 || f.password.length > 128)) {
+      toast('La contraseña debe tener entre 9 y 128 caracteres');
+      return;
+    }
+    update({ driverCredentialsEdit: { ...f, username, saving: true } });
+    persist
+      .updateDriverCredentials(f.carId, { username, ...(f.password ? { password: f.password } : {}) })
+      .then(({ username: savedUsername }) => {
+        update({ driverCredentialsEdit: null });
+        toast('Credenciales actualizadas Â· ' + savedUsername);
+      })
+      .catch((e: Error) => {
+        update((s) => (s.driverCredentialsEdit ? { driverCredentialsEdit: { ...s.driverCredentialsEdit, saving: false } } : {}));
+        toast('No se pudieron actualizar las credenciales: ' + e.message);
+      });
+  };
+
   const driverDetail: DriverDetailView = (() => {
     const x = st.detailCarId ? perCar.find((p) => p.c.id === st.detailCarId) : undefined;
     if (!x)
@@ -1792,6 +1871,7 @@ export function useFleetView(
         sinPagos: true,
         verVehiculo: () => {},
         editar: () => {},
+        editarUsuario: () => {},
         quitar: () => {},
       };
     const c = x.c;
@@ -1857,6 +1937,7 @@ export function useFleetView(
           driverCredentials: null,
           driverCredentialsLoading: false,
         }),
+      editarUsuario: () => openDriverCredentialsEdit(c),
       quitar: () => update({ detailCarId: null, confirm: { tipo: 'quitarChofer', carId: c.id } }),
     };
   })();
@@ -2220,6 +2301,7 @@ export function useFleetView(
             tag: ok ? 'Al día' : 'Debe',
             tagBg: ok ? '#eef4f0' : '#fdeeea',
             tagFg: ok ? '#2e7d5b' : '#a8412f',
+            hasCredentials: Boolean(c.driverHasCredentials),
             open: () => update({ detailCarId: c.id }),
           };
         })
@@ -2447,6 +2529,11 @@ export function useFleetView(
     hasDriverDetail: !!st.detailCarId,
     driverDetail,
     closeDriverDetail: () => update({ detailCarId: null }),
+    driverCredentialsEdit: st.driverCredentialsEdit,
+    setDriverCredentialsEdit,
+    closeDriverCredentialsEdit,
+    saveDriverCredentialsEdit,
+    toggleDriverCredentialsPassword,
 
     carModal: st.modal === 'car',
     editCarModal: !!st.editCar,

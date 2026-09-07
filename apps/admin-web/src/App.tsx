@@ -19,6 +19,7 @@ import { Sesiones } from './components/Sesiones';
 import { TallerModal } from './components/TallerModal';
 import { CarModal } from './components/CarModal';
 import { DriverModal } from './components/DriverModal';
+import { DriverCredentialsModal } from './components/DriverCredentialsModal';
 import { PagoModal } from './components/PagoModal';
 import { Toast } from './components/Toast';
 import { EditCarModal } from './components/EditCarModal';
@@ -61,6 +62,7 @@ function initialState(): UIState {
   ndrv: blankDrv(),
   driverCredentials: null,
   driverCredentialsLoading: false,
+  driverCredentialsEdit: null,
   detailId: null,
   reportDetailId: null,
   svcEdit: null,
@@ -136,6 +138,7 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
 
       <DetailDrawer v={v} />
       <DriverDetail v={v} />
+      <DriverCredentialsModal v={v} />
       {sesionesOpen && <Sesiones onClose={() => setSesionesOpen(false)} onSalir={onSalir} />}
       <Confirm v={v} />
       <TallerModal v={v} />

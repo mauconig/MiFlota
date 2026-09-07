@@ -731,6 +731,7 @@ export function carToJson(r: CarRow) {
     year: r.year,
     driver: r.driver,
     driverId: r.driver_id ?? null,
+    driverHasCredentials: Boolean(r.driver_username && r.driver_pass_hash),
     cuota: r.cuota,
     estado: r.estado,
     gpsTag: r.gps_tag,

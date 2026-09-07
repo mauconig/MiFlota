@@ -11,6 +11,8 @@ export interface Car {
   driver: string;
   /** Identidad estable del chofer (id de la fila en `drivers`). Null = sin chofer. */
   driverId?: string | number | null;
+  /** True cuando el chofer tiene usuario y contraseña configurados. */
+  driverHasCredentials: boolean;
   cuota: number;
   estado: Estado;
   /** Identificador del equipo de rastreo instalado. Vacío = sin GPS. */
@@ -160,6 +162,19 @@ export interface DriverCredentialDraft {
   password: string;
 }
 
+/** Estado del modal de administración de credenciales de un chofer. */
+export interface DriverCredentialsEdit {
+  carId: string;
+  driverName: string;
+  username: string;
+  password: string;
+  /** Se fija al cargar y no cambia aunque el usuario edite el formulario. */
+  passwordRequired: boolean;
+  loading: boolean;
+  saving: boolean;
+  showPassword: boolean;
+}
+
 export interface UIState {
   period: Period;
   filter: FleetFilter;
@@ -190,6 +205,7 @@ export interface UIState {
   ndrv: NewDriverForm;
   driverCredentials: DriverCredentialDraft | null;
   driverCredentialsLoading: boolean;
+  driverCredentialsEdit: DriverCredentialsEdit | null;
   detailId: string | null;
   reportDetailId: number | null;
   /** Intervalo de service que se está editando en la ficha, sin guardar todavía.

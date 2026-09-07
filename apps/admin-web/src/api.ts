@@ -148,6 +148,16 @@ export interface DriverCredentials {
   password: string;
 }
 
+export interface DriverCredentialsSummary {
+  username: string | null;
+  hasPassword: boolean;
+}
+
+export interface UpdateDriverCredentialsPayload {
+  username: string;
+  password?: string;
+}
+
 export interface AssignDriverPayload extends DriverCredentials {
   driver: string;
   cuota: number;
@@ -164,6 +174,8 @@ export interface FleetStore {
   patchCar: (id: string, patch: Partial<Car>) => void;
   updateCar: (id: string, patch: Partial<Car>) => Promise<Car>;
   previewDriverCredentials: (id: string, driver: string) => Promise<DriverCredentials>;
+  getDriverCredentials: (id: string) => Promise<DriverCredentialsSummary>;
+  updateDriverCredentials: (id: string, payload: UpdateDriverCredentialsPayload) => Promise<{ username: string; sesionesCerradas: number }>;
   assignDriver: (id: string, payload: AssignDriverPayload) => Promise<Car>;
   addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
   deleteCar: (id: string) => Promise<{ plate: string; movs: number }>;
@@ -294,6 +306,28 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     [],
   );
 
+  const getDriverCredentials = useCallback(
+    (id: string) => req<DriverCredentialsSummary>(`/api/cars/${encodeURIComponent(id)}/chofer-credenciales`),
+    [],
+  );
+
+  const updateDriverCredentials = useCallback(
+    async (id: string, payload: UpdateDriverCredentialsPayload) => {
+      const result = await req<{ username: string; sesionesCerradas: number }>(`/api/cars/${encodeURIComponent(id)}/chofer-credenciales`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
+      // La tarjeta de Choferes muestra este estado sin exponer usuario ni hash.
+      // Se actualiza en memoria para que el aviso desaparezca inmediatamente.
+      setCars((cs) => {
+        const target = cs.find((c) => c.id === id);
+        return cs.map((c) => (target && (c.id === id || (target.driverId != null && c.driverId === target.driverId)) ? { ...c, driverHasCredentials: true } : c));
+      });
+      return result;
+    },
+    [],
+  );
+
   const updateCar = useCallback(async (id: string, patch: Partial<Car>) => {
     const dto: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(patch)) dto[k] = v instanceof Date ? isoDate(v) : v;
@@ -389,6 +423,8 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     patchCar,
     updateCar,
     previewDriverCredentials,
+    getDriverCredentials,
+    updateDriverCredentials,
     assignDriver,
     addCar,
     deleteCar,

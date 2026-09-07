@@ -58,6 +58,11 @@ export function Choferes({ v }: { v: View }) {
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ display: 'block', fontSize: 15, fontWeight: 700 }}>{d.name}</span>
                 <span style={{ display: 'block', fontSize: 11, color: '#6b665c', marginTop: 1 }}>{d.carLbl}</span>
+                {!d.hasCredentials && (
+                  <span style={{ display: 'inline-flex', marginTop: 6, padding: '4px 8px', border: '1px solid #f0d0c6', borderRadius: 10, background: '#fdeeea', color: '#a8412f', fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                    Sin usuario
+                  </span>
+                )}
               </span>
               <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', padding: '5px 9px', borderRadius: 11, background: d.tagBg, color: d.tagFg, flex: 'none' }}>{d.tag}</span>
             </span>

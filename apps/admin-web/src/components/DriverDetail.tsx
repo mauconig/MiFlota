@@ -131,6 +131,9 @@ export function DriverDetail({ v }: { v: View }) {
           <Btn onClick={d.quitar} style={{ ...btnSecondary, color: '#a8412f', borderColor: '#f0d0c6' }} hoverStyle={{ background: '#fdeeea' }}>
             Quitar chofer
           </Btn>
+          <Btn onClick={d.editarUsuario} style={btnSecondary} hoverStyle={btnSecondaryHover}>
+            Editar usuario
+          </Btn>
           <Btn onClick={d.editar} style={btnSecondary} hoverStyle={btnSecondaryHover}>
             Editar datos
           </Btn>

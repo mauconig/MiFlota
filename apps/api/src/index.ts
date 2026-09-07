@@ -264,11 +264,22 @@ app.post<{ Body: { actual?: string; nueva?: string } }>('/api/me/password', asyn
 
 // Toda lectura y escritura de flota lleva el owner en el WHERE: es lo único que
 // impide que un usuario toque los vehículos de otro.
-const selCars = db.prepare('SELECT * FROM cars WHERE owner_id = ? ORDER BY rowid');
+const selCars = db.prepare(`
+  SELECT c.*, d.driver_username, d.driver_pass_hash
+    FROM cars c
+    LEFT JOIN drivers d ON d.id = c.driver_id AND d.owner_id = c.owner_id
+   WHERE c.owner_id = ?
+   ORDER BY c.rowid
+`);
 const selMovs = db.prepare('SELECT * FROM movs WHERE owner_id = ? ORDER BY date DESC, id DESC');
 const selPagos = db.prepare('SELECT * FROM pagos WHERE owner_id = ? ORDER BY fecha DESC, id DESC');
 const selReportes = db.prepare('SELECT * FROM reportes_falla WHERE owner_id = ? ORDER BY fecha DESC, id DESC');
-const selCar = db.prepare('SELECT * FROM cars WHERE id = ? AND owner_id = ?');
+const selCar = db.prepare(`
+  SELECT c.*, d.driver_username, d.driver_pass_hash
+    FROM cars c
+    LEFT JOIN drivers d ON d.id = c.driver_id AND d.owner_id = c.owner_id
+   WHERE c.id = ? AND c.owner_id = ?
+`);
 const selItems = db.prepare('SELECT * FROM gasto_items WHERE mov_id = ? ORDER BY id');
 const selLocations = db.prepare(`
   SELECT l.*
@@ -1225,6 +1236,11 @@ interface AsignarChoferBody {
   password?: string;
 }
 
+interface ActualizarChoferCredencialesBody {
+  username?: string;
+  password?: string;
+}
+
 /** Confirma en una sola escritura tanto la asignación como las credenciales
  * que el dueño acaba de revisar. Así nunca queda un chofer asignado sin poder
  * entrar a la app, ni credenciales activas para un alta cancelada. */
@@ -1278,6 +1294,69 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/chofer-credenciales', async 
   borrarSesionesDeDriver(db, driver.id);
   req.log.info({ car: car.plate, driver: driver.nombre }, 'credenciales de chofer regeneradas');
   return { username, password };
+});
+
+/** Devuelve solo el nombre de usuario actual. La contraseña y su hash nunca
+ * salen de la API: el dueño solo puede reemplazarlos, no recuperarlos. */
+app.get<{ Params: { id: string } }>('/api/cars/:id/chofer-credenciales', async (req, reply) => {
+  const u = quien(req);
+  const car = selCar.get(req.params.id, u.id) as CarRow | undefined;
+  if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
+  if (!car.driver_id) return reply.code(400).send({ error: 'Asigná un chofer antes de administrar sus credenciales' });
+
+  const driver = db.prepare('SELECT id, driver_username, driver_pass_hash FROM drivers WHERE id = ? AND owner_id = ?').get(car.driver_id, u.id) as
+    | { id: number; driver_username: string | null; driver_pass_hash: string | null }
+    | undefined;
+  if (!driver) return reply.code(404).send({ error: 'Chofer inexistente' });
+  return { username: driver.driver_username, hasPassword: Boolean(driver.driver_pass_hash) };
+});
+
+/** Actualiza el usuario y, si viene informado, la contraseña del chofer. El
+ * usuario es global porque la app de chofer inicia sesión sin indicar flota. */
+app.patch<{ Params: { id: string }; Body: ActualizarChoferCredencialesBody }>('/api/cars/:id/chofer-credenciales', async (req, reply) => {
+  const u = quien(req);
+  const car = selCar.get(req.params.id, u.id) as CarRow | undefined;
+  if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
+  if (!car.driver_id) return reply.code(400).send({ error: 'Asigná un chofer antes de administrar sus credenciales' });
+
+  const driver = db.prepare('SELECT id, driver_username, driver_pass_hash FROM drivers WHERE id = ? AND owner_id = ?').get(car.driver_id, u.id) as
+    | { id: number; driver_username: string | null; driver_pass_hash: string | null }
+    | undefined;
+  if (!driver) return reply.code(404).send({ error: 'Chofer inexistente' });
+
+  const username = String(req.body?.username ?? '').trim().toLowerCase();
+  const password = req.body?.password;
+  if (!/^[a-z0-9.]{1,40}$/.test(username)) return reply.code(400).send({ error: 'Usuario de chofer inválido' });
+  if (password !== undefined && (typeof password !== 'string' || password.length < 9 || password.length > 128)) {
+    return reply.code(400).send({ error: 'La contraseña debe tener entre 9 y 128 caracteres' });
+  }
+  if (!driver.driver_username || !driver.driver_pass_hash) {
+    if (password === undefined || password.length === 0) return reply.code(400).send({ error: 'La contraseña es obligatoria para crear el acceso del chofer' });
+  }
+
+  // El hash se calcula antes de escribir, como en el resto de las rutas de
+  // autenticación. La condición NOT EXISTS evita que una carrera pueda pasar
+  // por encima del índice único global de usuarios de chofer.
+  const passHash = password === undefined ? undefined : await hashPassword(password);
+  const sesiones = db.prepare('SELECT COUNT(*) AS n FROM chofer_sessions WHERE driver_id = ?').get(driver.id) as { n: number };
+  const cambio = passHash === undefined
+    ? db.prepare(`
+        UPDATE drivers
+           SET driver_username = ?
+         WHERE id = ?
+           AND NOT EXISTS (SELECT 1 FROM drivers WHERE driver_username = ? AND id <> ?)
+      `).run(username, driver.id, username, driver.id)
+    : db.prepare(`
+        UPDATE drivers
+           SET driver_username = ?, driver_pass_hash = ?
+         WHERE id = ?
+           AND NOT EXISTS (SELECT 1 FROM drivers WHERE driver_username = ? AND id <> ?)
+      `).run(username, passHash, driver.id, username, driver.id);
+
+  if (cambio.changes === 0) return reply.code(409).send({ error: 'Ese usuario ya está en uso' });
+  borrarSesionesDeDriver(db, driver.id);
+  req.log.info({ driver: car.driver, username }, 'credenciales de chofer actualizadas');
+  return { username, sesionesCerradas: sesiones.n };
 });
 
 /** Borra el vehículo y, por la FK en cascada, todos sus movimientos. Es
