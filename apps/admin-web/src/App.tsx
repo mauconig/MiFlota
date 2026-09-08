@@ -161,7 +161,7 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
       <QuotaDetailModal v={v} />
       <ReportDetailModal v={v} />
       <Toast v={v} />
-      <AssistantChat ask={askAssistant} onOpenCar={id => update({ detailId: id })} />
+      {v.sResumen && <AssistantChat ask={askAssistant} onOpenCar={id => update({ detailId: id })} />}
     </div>
   );
 }
