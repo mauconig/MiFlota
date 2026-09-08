@@ -2,7 +2,7 @@ import { entities, metrics, groups } from './assistantQuery.js';
 
 export interface AssistantHistoryItem { role: 'user' | 'assistant'; content: string }
 export interface AssistantFile { name: string; url: string; mimeType: string }
-export interface AssistantReportRequest { format: 'pdf' | 'xlsx'; report: 'gastos' | 'resumen'; period: 'week' | 'month' | 'total'; vehicle?: string; category?: string }
+export interface AssistantReportRequest { format: 'pdf' | 'xlsx'; report: 'gastos' | 'resumen'; period: 'week' | 'month' | 'total' | 'custom'; from?: string; to?: string; vehicle?: string; category?: string }
 export interface AssistantQueryRequest {
   entity: typeof entities[number]; metric?: typeof metrics[number]; groupBy?: typeof groups[number];
   period?: 'semana' | 'mes' | '90dias' | 'total' | 'personalizado'; from?: string; to?: string;
@@ -36,7 +36,7 @@ export const QUERY_TOOL = { type: 'function', function: {
     limit: { type: 'integer', minimum: 1, maximum: 50 }, offset: { type: 'integer', minimum: 0, maximum: 10000 }, order: { type: 'string', enum: ['asc','desc'] }, history: { type: 'boolean', description: 'En ubicaciones: true para historial, false para última posición registrada. No implica ubicación en vivo.' },
   } },
 } };
-const REPORT_TOOL = { type: 'function', function: { name: 'generate_fleet_report', description: 'Exporta un PDF o Excel si el usuario lo solicita. Si es un reporte de una consulta anterior, conserva sus filtros de vehículo y categoría.', parameters: { type: 'object', additionalProperties: false, required: ['format','report','period'], properties: { format: { type: 'string', enum: ['pdf','xlsx'] }, report: { type: 'string', enum: ['gastos','resumen'] }, period: { type: 'string', enum: ['week','month','total'] }, vehicle: { type: 'string' }, category: { type: 'string' } } } } };
+const REPORT_TOOL = { type: 'function', function: { name: 'generate_fleet_report', description: 'Exporta un PDF o Excel si el usuario lo solicita. Si es un reporte de una consulta anterior, conserva sus filtros de período, vehículo y categoría.', parameters: { type: 'object', additionalProperties: false, required: ['format','report','period'], properties: { format: { type: 'string', enum: ['pdf','xlsx'] }, report: { type: 'string', enum: ['gastos','resumen'] }, period: { type: 'string', enum: ['week','month','total','custom'] }, from: { type: 'string', description: 'YYYY-MM-DD requerido con period custom' }, to: { type: 'string', description: 'YYYY-MM-DD requerido con period custom' }, vehicle: { type: 'string' }, category: { type: 'string' } } } } };
 type ToolCall = { id: string; type: 'function'; function: { name: string; arguments: string } };
 type Message = { role: string; content: string | null; tool_calls?: ToolCall[]; tool_call_id?: string; [key: string]: unknown };
 export interface AssistantOptions {
@@ -118,13 +118,20 @@ Tu respuesta final debe ser JSON válido: {"answer":"respuesta breve","queryId":
             queryRequests.push(args as AssistantQueryRequest);
           } else if (call.function.name === 'generate_fleet_report' && options.generateReport) {
             if (!results.length) throw Error('Primero consultá los datos');
-            if (!['pdf','xlsx'].includes(args.format) || !['gastos','resumen'].includes(args.report) || !['week','month','total'].includes(args.period)) throw Error('Reporte inválido');
             const previousQuery = queryRequests.at(-1);
+            const inheritedPeriod = previousQuery?.period === 'personalizado' ? 'custom' : previousQuery?.period === 'semana' ? 'week' : previousQuery?.period === 'mes' ? 'month' : previousQuery?.period === 'total' ? 'total' : undefined;
+            const reportPeriod = args.period ?? inheritedPeriod;
+            if (!['pdf','xlsx'].includes(args.format) || !['gastos','resumen'].includes(args.report) || !['week','month','total','custom'].includes(reportPeriod)) throw Error('Reporte inválido');
+            const reportFrom = typeof args.from === 'string' ? args.from : reportPeriod === 'custom' ? previousQuery?.from : undefined;
+            const reportTo = typeof args.to === 'string' ? args.to : reportPeriod === 'custom' ? previousQuery?.to : undefined;
+            if (reportPeriod === 'custom' && (!reportFrom || !reportTo)) throw Error('El reporte personalizado necesita fechas de inicio y fin');
             const carryExpenseFilters = args.report === 'gastos' && previousQuery && ['gastos', 'movimientos', 'finanzas'].includes(previousQuery.entity);
             const reportRequest: AssistantReportRequest = {
               format: args.format,
               report: args.report,
-              period: args.period,
+              period: reportPeriod,
+              ...(reportFrom ? { from: reportFrom } : {}),
+              ...(reportTo ? { to: reportTo } : {}),
               ...(typeof args.vehicle === 'string' ? { vehicle: args.vehicle } : previousQuery?.vehicle ? { vehicle: previousQuery.vehicle } : {}),
               ...(typeof args.category === 'string' ? { category: args.category } : carryExpenseFilters && previousQuery?.category ? { category: previousQuery.category } : {}),
             };

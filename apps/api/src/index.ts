@@ -305,10 +305,20 @@ function isoOffset(iso: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-function reportRange(period: AssistantReportRequest['period'], to: string): string | null {
+function reportRange(period: Exclude<AssistantReportRequest['period'], 'custom'>, to: string): string | null {
   if (period === 'week') return isoOffset(to, -6);
   if (period === 'month') return `${to.slice(0, 7)}-01`;
   return null;
+}
+
+function validReportDate(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T12:00:00Z`)) && new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) === value;
+}
+
+function assistantReportRange(request: AssistantReportRequest, today: string): { from: string | null; to: string } {
+  if (request.period !== 'custom') return { from: reportRange(request.period, today), to: today };
+  if (!validReportDate(request.from) || !validReportDate(request.to) || request.from > request.to || request.to > today) throw Error('Período personalizado inválido');
+  return { from: request.from, to: request.to };
 }
 
 function reportMoney(value: number): string {
@@ -346,8 +356,7 @@ function reportFileTimestamp(now = new Date()): string {
 }
 
 async function createAssistantReport(ownerId: number, request: AssistantReportRequest): Promise<AssistantFile> {
-  const to = hoyISO();
-  const from = reportRange(request.period, to);
+  const { from, to } = assistantReportRange(request, hoyISO());
   const cars = selCars.all(ownerId) as CarRow[];
   const carById = new Map(cars.map((car) => [car.id, car]));
   const movements = (selMovs.all(ownerId) as MovRow[]).filter((mov) => {

@@ -142,6 +142,19 @@ test('reports inherit the category and vehicle filter from the preceding query',
  ]);
  assert.equal(result.files.length,2);
 });
+test('reports support a custom date range such as the previous month', async () => {
+ const m=model([
+  tool({entity:'gastos',category:'gastos de taller',period:'personalizado',from:'2026-08-01',to:'2026-08-31'}),
+  reportTool({format:'pdf',report:'gastos',period:'custom',from:'2026-08-01',to:'2026-08-31'}),
+  final('Archivo listo'),
+ ]);
+ const generated=[];
+ await answerAssistant('Generame un PDF de los gastos en taller de agosto',[], '2026-09-08', {
+  apiKey:'test', fetch:m.fetch, queryFleet:async r=>query(r),
+  generateReport:async request=>{ generated.push(request); return { name:'agosto.pdf', url:'/files/agosto.pdf', mimeType:'application/pdf' }; },
+ });
+ assert.deepEqual(generated,[{format:'pdf',report:'gastos',period:'custom',from:'2026-08-01',to:'2026-08-31',category:'gastos de taller'}]);
+});
 test('history carries context and model receives error, never fabricated fallback', async () => {
  const m=model([tool({entity:'users'}),tool({entity:'pagos',period:'mes'},'t2'),final()]);
  await answerAssistant('¿Y este mes?',[{role:'user',content:'Cobros anteriores'},{role:'assistant',content:'Septiembre'}],'2026-09-08',{apiKey:'test',fetch:m.fetch,queryFleet:async r=>query(r)});
