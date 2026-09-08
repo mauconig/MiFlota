@@ -28,6 +28,8 @@ import { MovementDetailModal } from './components/MovementDetailModal';
 import { QuotaDetailModal } from './components/QuotaDetailModal';
 import { ReportDetailModal } from './components/ReportDetailModal';
 import { isoLocal } from './format';
+import { AssistantChat, type ChatHistory, type ChatReply } from './components/AssistantChat';
+import { consultarAsistente, SinSesion } from './api';
 
 function initialState(): UIState {
   const today = new Date();
@@ -91,6 +93,10 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
   const [state, setState] = useState<UIState>(() => initialState());
   const [sesionesOpen, setSesionesOpen] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const askAssistant = useCallback(async (question: string, history: ChatHistory[], signal: AbortSignal): Promise<ChatReply> => {
+    try { return await consultarAsistente(question, history, signal); }
+    catch (error) { if (error instanceof SinSesion) onSalir(); throw error; }
+  }, [onSalir]);
 
   const update = (patch: Partial<UIState> | ((s: UIState) => Partial<UIState>)) => {
     setState((s) => ({ ...s, ...(typeof patch === 'function' ? patch(s) : patch) }));
@@ -151,6 +157,7 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
       <QuotaDetailModal v={v} />
       <ReportDetailModal v={v} />
       <Toast v={v} />
+      <AssistantChat ask={askAssistant} onOpenCar={id => update({ detailId: id })} />
     </div>
   );
 }

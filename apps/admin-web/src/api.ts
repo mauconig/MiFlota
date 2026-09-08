@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Car, CarLocation, LocationHistory, Mov, Pago, Reporte, ReportStatus } from './types';
+import type { ChatHistory, ChatReply } from './components/AssistantChat';
+
+export const consultarAsistente = (question: string, history: ChatHistory[], signal: AbortSignal) => req<ChatReply>('/api/assistant/query', {
+  method: 'POST', signal, body: JSON.stringify({ question, history: history.slice(-6), capabilities: { lineCharts: true } }),
+});
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`. Se parsean a mediodía UTC para que
  *  ningún huso horario corra el día al construir el Date. */
