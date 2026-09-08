@@ -15,6 +15,20 @@ export interface ChatHistory { role: 'user' | 'assistant'; content: string }
 interface Exchange { question: string; reply?: ChatReply; error?: string }
 interface Props { ask: (question: string, history: ChatHistory[], signal: AbortSignal) => Promise<ChatReply>; onOpenCar: (id: string) => void }
 
+function AssistantResultTable({ table, onOpenCar, initiallyOpen = true }: { table: NonNullable<ChatReply['table']>; onOpenCar: (id: string) => void; initiallyOpen?: boolean }) {
+  const [sort, setSort] = useState<{ key: string; direction: 1 | -1 }>({ key: table.columns[0]?.key || '', direction: 1 });
+  const rows = [...table.rows].sort((a, b) => {
+    const av = a.cells[sort.key] ?? '';
+    const bv = b.cells[sort.key] ?? '';
+    return av.localeCompare(bv, 'es', { numeric: true, sensitivity: 'base' }) * sort.direction;
+  });
+  const pick = (key: string) => setSort(current => current.key === key ? { key, direction: current.direction === 1 ? -1 : 1 } : { key, direction: 1 });
+  return <details className="ai-table" open={initiallyOpen}>
+    <summary>Ver datos ({table.rows.length})</summary>
+    <div tabIndex={0} role="region" aria-label="Tabla de resultados"><table><thead><tr>{table.columns.map(c => <th key={c.key}><button className="ai-sort-button" type="button" onClick={() => pick(c.key)} aria-label={'Ordenar por ' + c.label} aria-sort={sort.key === c.key ? (sort.direction === 1 ? 'ascending' : 'descending') : 'none'}>{c.label} <span aria-hidden="true">{sort.key === c.key ? (sort.direction === 1 ? '↑' : '↓') : '↕'}</span></button></th>)}<th><span className="ai-sr-only">Acción</span></th></tr></thead><tbody>{rows.map(r => <tr key={r.id}>{table.columns.map(c => <td key={c.key}>{r.cells[c.key] ?? '—'}</td>)}<td>{r.action?.kind === 'car' && r.action.carId && <button onClick={() => onOpenCar(r.action!.carId!)}>Ver vehículo</button>}</td></tr>)}</tbody></table></div>
+  </details>;
+}
+
 function Chart({ chart }: { chart: NonNullable<ChatReply['chart']> }) {
   const items = chart.items.filter(i => Number.isFinite(i.value));
   if (items.length < 2) return null;
@@ -106,7 +120,7 @@ export function AssistantChat({ ask, onOpenCar }: Props) {
             {exchange.reply.notice && <p className="ai-notice">{exchange.reply.notice}</p>}
             {!!exchange.reply.cards?.length && <div className="ai-metrics">{exchange.reply.cards.map((c,n) => <div key={n}><span>{c.title}</span><strong>{c.value}</strong>{c.subtitle && <small>{c.subtitle}</small>}</div>)}</div>}
             {exchange.reply.chart && <Chart chart={exchange.reply.chart} />}
-            {exchange.reply.table && <details className="ai-table" open={!exchange.reply.chart}><summary>Ver datos ({exchange.reply.table.rows.length})</summary><div tabIndex={0} role="region" aria-label="Tabla de resultados"><table><thead><tr>{exchange.reply.table.columns.map(c => <th key={c.key}>{c.label}</th>)}<th><span className="ai-sr-only">Acción</span></th></tr></thead><tbody>{exchange.reply.table.rows.map(r => <tr key={r.id}>{exchange.reply!.table!.columns.map(c => <td key={c.key}>{r.cells[c.key] ?? '—'}</td>)}<td>{r.action?.kind === 'car' && r.action.carId && <button onClick={() => { close(); onOpenCar(r.action!.carId!); }}>Ver vehículo</button>}</td></tr>)}</tbody></table></div></details>}
+            {exchange.reply.table && <AssistantResultTable table={exchange.reply.table} initiallyOpen={!exchange.reply.chart} onOpenCar={id => { close(); onOpenCar(id); }} />}
             {exchange.reply.files?.filter(f => f.url.startsWith('/api/assistant/files/')).map(f => <a key={f.url} href={f.url} target="_blank" rel="noreferrer">{f.name}</a>)}
             <small className="ai-date">Datos al {exchange.reply.asOf}</small>
             {index === exchanges.length - 1 && !!exchange.reply.followUps?.length && <div className="ai-followups">{exchange.reply.followUps.map(f => <button key={f.question} disabled={busy} onClick={() => void submit(f.question)}>{f.label}</button>)}</div>}

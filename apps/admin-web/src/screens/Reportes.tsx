@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import type { CSSProperties } from 'react';
 import type { View } from '../useFleetView';
 import { Btn } from '../components/Btn';
 import { ChipRow } from '../components/ChipRow';
@@ -5,8 +7,22 @@ import { SearchBar } from '../components/SearchBar';
 import { Screen, ScrollArea, Vacio } from '../components/Screen';
 import { card, sectionTitle } from '../styles';
 import { fmtShort } from '../format';
+import { SortableHeader, compareSortableRows, type SortState } from '../components/SortableHeader';
+
+const movementHeader: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 12,
+  padding: '8px 0',
+  borderBottom: '1px solid #f0ebe0',
+  minWidth: 700,
+};
 
 export function Reportes({ v }: { v: View }) {
+  const [sort, setSort] = useState<SortState>({ key: 'date', direction: -1 });
+  const onSort = (key: string) => setSort((current) => current.key === key ? { key, direction: current.direction === 1 ? -1 : 1 } : { key, direction: 1 });
+  const movimientos = [...v.movRows].sort((a, b) => compareSortableRows(a, b, sort));
   return (
     <Screen label="Reportes" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(300px, 38%)', gap: 18, minHeight: 0 }}>
       <div style={{ ...card, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -22,19 +38,27 @@ export function Reportes({ v }: { v: View }) {
           <span style={{ width: 1, height: 20, background: '#ece4d6', margin: '0 4px' }} />
           <ChipRow chips={v.movCatChips} wrap />
         </div>
-        <ScrollArea style={{ display: 'flex', flexDirection: 'column', padding: '4px 20px' }}>
+        <ScrollArea style={{ display: 'flex', flexDirection: 'column', padding: '4px 20px', overflowX: 'auto' }}>
+          <div style={movementHeader}>
+            <span style={{ width: 26, flex: 'none' }} />
+            <SortableHeader label="Fecha" sortKey="date" state={sort} onSort={onSort} width={52} />
+            <SortableHeader label="Tipo" sortKey="type" state={sort} onSort={onSort} width={34} />
+            <SortableHeader label="Detalle" sortKey="description" state={sort} onSort={onSort} grow />
+            <SortableHeader label="Asociado" sortKey="sub" state={sort} onSort={onSort} width={220} />
+            <SortableHeader label="Monto" sortKey="amount" state={sort} onSort={onSort} width={96} align="right" />
+          </div>
           {!v.movRows.length && <Vacio titulo="Sin movimientos con estos filtros" detalle="Los pagos efectivos y los gastos registrados del período van a aparecer acá." />}
-          {v.movRows.map((m, i) => (
+          {movimientos.map((m, i) => (
             <div key={i} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '11px 0', borderBottom: '1px solid #f4efe4' }}>
-              <span style={{ width: 26, flex: 'none', fontSize: 12, color: '#a9a293', textAlign: 'right' }}>{m.pos}</span>
+              <span style={{ width: 26, flex: 'none', fontSize: 12, color: '#a9a293', textAlign: 'right' }}>{i + 1}</span>
               <span style={{ width: 52, flex: 'none', fontSize: 12, color: '#6b665c' }}>{m.dateLbl}</span>
               <span style={{ width: 34, height: 34, borderRadius: 11, background: m.iconBg, color: m.iconFg, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 15, fontWeight: 700 }}>{m.sign}</span>
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>{m.desc}</span>
-                <span style={{ display: 'block', fontSize: 11, color: '#6b665c', marginTop: 1 }}>{m.sub}</span>
                 {!!m.items?.length && <span style={{ display: 'block', marginTop: 7, padding: '7px 9px', background: '#faf7f0', borderRadius: 9, fontSize: 11, color: '#6b665c' }}>{m.items.map((item, j) => <span key={j} style={{ display: 'block' }}>{item.cantidad} × {item.nombre} · {fmtShort(item.subtotal)}</span>)}{!!m.manoObra && <span style={{ display: 'block', marginTop: 3, fontWeight: 600 }}>Mano de obra · {fmtShort(m.manoObra)}</span>}</span>}
               </span>
-              <span style={{ flex: 'none', fontSize: 13, fontWeight: 700, color: m.amtFg }}>{m.amt}</span>
+              <span style={{ width: 220, flex: 'none', minWidth: 0, fontSize: 11, color: '#6b665c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.sub}</span>
+              <span style={{ width: 96, flex: 'none', textAlign: 'right', fontSize: 13, fontWeight: 700, color: m.amtFg }}>{m.amt}</span>
             </div>
           ))}
         </ScrollArea>

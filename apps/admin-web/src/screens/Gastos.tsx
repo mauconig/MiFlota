@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { View } from '../useFleetView';
 import { Btn } from '../components/Btn';
@@ -6,6 +7,7 @@ import { SearchBar } from '../components/SearchBar';
 import { Screen, ScrollArea, Vacio } from '../components/Screen';
 import { card, sectionTitle } from '../styles';
 import { CATCOLORS } from '../data';
+import { SortableHeader, compareSortableRows, type SortState } from '../components/SortableHeader';
 
 const th: CSSProperties = {
   padding: '8px 20px',
@@ -35,6 +37,9 @@ const row: CSSProperties = {
 
 export function Gastos({ v }: { v: View }) {
   const filtrados = Boolean(v.gastosQ.trim() || v.gastosCat !== 'todas');
+  const [sort, setSort] = useState<SortState>({ key: 'date', direction: -1 });
+  const onSort = (key: string) => setSort((current) => current.key === key ? { key, direction: current.direction === 1 ? -1 : 1 } : { key, direction: 1 });
+  const gastos = [...v.gastosRows].sort((a, b) => compareSortableRows(a, b, sort));
   return (
     <Screen label="Gastos" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(300px, 38%)', gap: 18, minHeight: 0 }}>
       <div style={{ ...card, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -57,15 +62,15 @@ export function Gastos({ v }: { v: View }) {
 
         <ScrollArea style={{ overflowX: 'auto', padding: '0 20px' }}>
           <div style={th}>
-            <span style={{ width: 74, flex: 'none', textAlign: 'center' }}>Fecha</span>
-            <span style={{ width: 178, flex: 'none', textAlign: 'center' }}>Vehículo</span>
-            <span style={{ width: 174, flex: 'none', textAlign: 'center' }}>Chofer</span>
-            <span style={{ flex: 1, minWidth: 210 }}>Detalle</span>
-            <span style={{ width: 116, flex: 'none', textAlign: 'center' }}>Categoría</span>
-            <span style={{ width: 112, flex: 'none', textAlign: 'center' }}>Monto</span>
+            <SortableHeader label="Fecha" sortKey="date" state={sort} onSort={onSort} width={74} align="left" />
+            <SortableHeader label="Vehículo" sortKey="vehicle" state={sort} onSort={onSort} width={178} align="left" />
+            <SortableHeader label="Chofer" sortKey="driver" state={sort} onSort={onSort} width={174} align="left" />
+            <SortableHeader label="Detalle" sortKey="description" state={sort} onSort={onSort} grow />
+            <SortableHeader label="Categoría" sortKey="category" state={sort} onSort={onSort} width={116} align="left" />
+            <SortableHeader label="Monto" sortKey="amount" state={sort} onSort={onSort} width={112} align="right" />
           </div>
           {!v.gastosRows.length && <Vacio titulo={filtrados ? 'Ningún gasto coincide' : 'No hay gastos en el período'} detalle={filtrados ? 'Probá con otra búsqueda o categoría.' : 'Los gastos registrados de la flota van a aparecer acá.'} />}
-          {v.gastosRows.map((m) => (
+          {gastos.map((m) => (
             <div
               key={m.id}
               role="button"

@@ -303,6 +303,7 @@ export interface MovRow {
   amtFg: string;
   items?: { nombre: string; cantidad: number; costoUnitario: number; subtotal: number }[];
   manoObra?: number;
+  sort?: Record<string, string | number>;
 }
 
 export interface LedgerRow {
@@ -321,6 +322,7 @@ export interface LedgerRow {
   comprobante: string;
   items: { nombre: string; cantidad: number; costoUnitario: number; subtotal: number }[];
   manoObra: number;
+  sort?: Record<string, string | number>;
   open?: () => void;
 }
 
@@ -2231,7 +2233,7 @@ export function useFleetView(
         tag: inc ? 'Ingreso' : 'Egreso',
         tagBg: inc ? '#eef4f0' : '#fdeeea',
         tagFg: inc ? '#2e7d5b' : '#a8412f',
-        sort: { driver: m.driver, vehicle: m.vehicle, note: inc ? m.note : m.category + ' ' + m.desc, date: m.date.getTime(), type: inc ? 'Ingreso' : 'Egreso', amount: m.amount },
+        sort: { driver: m.driver, vehicle: m.vehicle, note: inc ? (m.note || 'Pago recibido') : m.category + ' ' + m.desc, date: m.date.getTime(), type: inc ? 'Ingreso' : 'Egreso', amount: m.amount },
         open: () => update({ movementDetailId: m.id, quotaDetailId: null }),
       };
     }),
@@ -2386,6 +2388,13 @@ export function useFleetView(
         amtFg: inc ? '#2e7d5b' : '#c0553f',
         items: m.items.length ? m.items : undefined,
         manoObra: m.manoObra || undefined,
+        sort: {
+          date: m.date.getTime(),
+          type: inc ? 'Ingreso' : 'Gasto',
+          description: m.desc,
+          sub: inc ? m.vehicle + ' ' + m.driver : m.vehicle + ' ' + m.category,
+          amount: m.amount,
+        },
       };
     }),
     movQ: st.movQ,
@@ -2446,6 +2455,7 @@ export function useFleetView(
       comprobante: m.comprobante,
       items: m.items,
       manoObra: m.manoObra,
+      sort: { date: m.date.getTime(), vehicle: m.vehicle, driver: m.driver, description: m.desc, category: m.category, amount: m.amount },
       open: () => update({ movementDetailId: m.id, quotaDetailId: null }),
     })),
     gastosTotalRows: gastosMovements.length,
