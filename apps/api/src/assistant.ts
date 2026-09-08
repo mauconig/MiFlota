@@ -48,6 +48,25 @@ export interface AssistantOptions {
 
 const display = (n: number, unit: string) => unit === 'PYG' ? 'Gs. ' + new Intl.NumberFormat('es-PY').format(n) : String(n);
 const metricLabels: Record<NonNullable<AssistantQueryRequest['metric']>, string> = { cantidad: 'Cantidad', facturado: 'Facturado', cobrado: 'Cobrado', gastos: 'Gastos', ganancia: 'Ganancia', deuda: 'Deuda pendiente' };
+const assistantNorm = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+function normalizeQueryArgs(value: unknown): AssistantQueryRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Argumentos de consulta inválidos');
+  const args = { ...(value as Record<string, unknown>) };
+  // Ling occasionally interprets "taller" as a vehicle filter. In expense
+  // queries that word is an expense category, so repair the argument before
+  // it reaches the strict, parameterized query layer.
+  if (args.entity === 'gastos' && args.category === undefined && typeof args.vehicle === 'string' && assistantNorm(args.vehicle) === 'taller') {
+    args.category = 'Taller';
+    delete args.vehicle;
+  }
+  // For "de agosto" Ling can provide only the last day of a custom month.
+  // Complete that unambiguous calendar-month range for the query and report.
+  if (args.period === 'personalizado' && typeof args.to === 'string' && args.from === undefined && /^\d{4}-\d{2}-\d{2}$/.test(args.to)) {
+    args.from = `${args.to.slice(0, 7)}-01`;
+  }
+  return args as unknown as AssistantQueryRequest;
+}
 
 export function visualsFromQuery(q: AssistantQueryResult, lineCharts = false): Pick<AssistantReply,'cards'|'chart'|'table'|'notice'> {
   const period = `${q.from ?? 'Inicio del historial'} al ${q.to}`;
@@ -112,15 +131,16 @@ Tu respuesta final debe ser JSON válido: {"answer":"respuesta breve","queryId":
           if (call.function.arguments.length > 4000) throw Error('Argumentos demasiado extensos');
           const args = JSON.parse(call.function.arguments);
           if (call.function.name === 'query_fleet_data') {
-            const result = await options.queryFleet(args);
+            const queryRequest = normalizeQueryArgs(args);
+            const result = await options.queryFleet(queryRequest);
             output = { ok: true, queryId: results.length, ...result };
             results.push(result);
-            queryRequests.push(args as AssistantQueryRequest);
+            queryRequests.push(queryRequest);
           } else if (call.function.name === 'generate_fleet_report' && options.generateReport) {
             if (!results.length) throw Error('Primero consultá los datos');
             const previousQuery = queryRequests.at(-1);
             const inheritedPeriod = previousQuery?.period === 'personalizado' ? 'custom' : previousQuery?.period === 'semana' ? 'week' : previousQuery?.period === 'mes' ? 'month' : previousQuery?.period === 'total' ? 'total' : undefined;
-            const reportPeriod = args.period ?? inheritedPeriod;
+            const reportPeriod = args.period === 'personalizado' ? 'custom' : args.period ?? inheritedPeriod;
             if (!['pdf','xlsx'].includes(args.format) || !['gastos','resumen'].includes(args.report) || !['week','month','total','custom'].includes(reportPeriod)) throw Error('Reporte inválido');
             const reportFrom = typeof args.from === 'string' ? args.from : reportPeriod === 'custom' ? previousQuery?.from : undefined;
             const reportTo = typeof args.to === 'string' ? args.to : reportPeriod === 'custom' ? previousQuery?.to : undefined;

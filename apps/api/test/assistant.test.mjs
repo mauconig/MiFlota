@@ -155,6 +155,20 @@ test('reports support a custom date range such as the previous month', async () 
  });
  assert.deepEqual(generated,[{format:'pdf',report:'gastos',period:'custom',from:'2026-08-01',to:'2026-08-31',category:'gastos de taller'}]);
 });
+test('repairs natural workshop wording when Ling confuses it with a vehicle', async () => {
+ const m=model([
+  tool({entity:'gastos',period:'personalizado',to:'2026-08-31',vehicle:'taller'}),
+  reportTool({format:'pdf',report:'gastos',period:'personalizado'}),
+  final('Archivo listo'),
+ ]);
+ const queried=[]; const generated=[];
+ await answerAssistant('Generame un PDF de los gastos en taller de agosto',[], '2026-09-08', {
+  apiKey:'test', fetch:m.fetch, queryFleet:async request=>{ queried.push(request); return query(request); },
+  generateReport:async request=>{ generated.push(request); return { name:'agosto.pdf', url:'/files/agosto.pdf', mimeType:'application/pdf' }; },
+ });
+ assert.deepEqual(queried,[{entity:'gastos',period:'personalizado',to:'2026-08-31',category:'Taller',from:'2026-08-01'}]);
+ assert.deepEqual(generated,[{format:'pdf',report:'gastos',period:'custom',from:'2026-08-01',to:'2026-08-31',category:'Taller'}]);
+});
 test('history carries context and model receives error, never fabricated fallback', async () => {
  const m=model([tool({entity:'users'}),tool({entity:'pagos',period:'mes'},'t2'),final()]);
  await answerAssistant('¿Y este mes?',[{role:'user',content:'Cobros anteriores'},{role:'assistant',content:'Septiembre'}],'2026-09-08',{apiKey:'test',fetch:m.fetch,queryFleet:async r=>query(r)});
