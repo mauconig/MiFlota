@@ -108,6 +108,7 @@ test('invalid fields, dates, metrics and SQL rejected; empty matches never fall 
 });
 
 function tool(args,id='t') { return {role:'assistant',content:null,tool_calls:[{id,type:'function',function:{name:'query_fleet_data',arguments:JSON.stringify(args)}}]}; }
+function reportTool(args,id='r') { return {role:'assistant',content:null,tool_calls:[{id,type:'function',function:{name:'generate_fleet_report',arguments:JSON.stringify(args)}}]}; }
 function final(answer='Respuesta',queryId=0) {return {role:'assistant',content:JSON.stringify({answer,queryId,followUps:[]})};}
 function model(messages) {
  const calls=[];
@@ -119,6 +120,25 @@ test('query-first agent grounds response and uses selected query for visuals', a
  assert.equal(m.calls[0].tool_choice.function.name,'query_fleet_data');
  assert.equal(result.chart.kind,'bars');assert.match(result.chart.title,/modelo/);
  assert.doesNotMatch(JSON.stringify(m.calls),/PRIVATE_HASH|SECRET/);
+});
+test('reports inherit the category and vehicle filter from the preceding query', async () => {
+ const m=model([
+  tool({entity:'gastos',category:'Taller',vehicle:'HFV416',period:'mes'}),
+  reportTool({format:'pdf',report:'gastos',period:'month'}),
+  reportTool({format:'xlsx',report:'gastos',period:'month'}),
+  final('Archivos listos'),
+ ]);
+ const generated=[];
+ const result=await answerAssistant('Hacé un reporte de eso en PDF y Excel',[], '2026-09-08', {
+  apiKey:'test', fetch:m.fetch, queryFleet:async r=>query(r),
+  generateReport:async request=>{ generated.push(request); return { name:`${request.format}.file`, url:`/files/${request.format}`, mimeType:'application/octet-stream' }; },
+ });
+ assert.equal(generated.length,2);
+ assert.deepEqual(generated.map(r=>({format:r.format,period:r.period,report:r.report,category:r.category,vehicle:r.vehicle})),[
+  {format:'pdf',period:'month',report:'gastos',category:'Taller',vehicle:'HFV416'},
+  {format:'xlsx',period:'month',report:'gastos',category:'Taller',vehicle:'HFV416'},
+ ]);
+ assert.equal(result.files.length,2);
 });
 test('history carries context and model receives error, never fabricated fallback', async () => {
  const m=model([tool({entity:'users'}),tool({entity:'pagos',period:'mes'},'t2'),final()]);

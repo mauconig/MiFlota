@@ -318,6 +318,8 @@ function reportMoney(value: number): string {
   return 'Gs. ' + new Intl.NumberFormat('es-PY').format(Math.round(value));
 }
 
+const reportFilterNorm = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
 /** Nombre legible y único para las descargas. Se usa la hora de Paraguay
  * aunque el proceso de la API esté corriendo en UTC en la VPS. */
 function reportFileTimestamp(now = new Date()): string {
@@ -346,7 +348,7 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
     if (mov.type !== 'egreso' || mov.date > to || (from && mov.date < from)) return false;
     const car = carById.get(mov.car_id);
     if (request.vehicle && !car?.plate.toUpperCase().includes(request.vehicle.toUpperCase())) return false;
-    if (request.category && (mov.cat ?? 'Otro').toLowerCase() !== request.category.toLowerCase()) return false;
+    if (request.category && !reportFilterNorm(mov.cat ?? 'Otro').includes(reportFilterNorm(request.category))) return false;
     return true;
   });
   const rows = movements.map((mov) => {

@@ -36,7 +36,7 @@ export const QUERY_TOOL = { type: 'function', function: {
     limit: { type: 'integer', minimum: 1, maximum: 50 }, offset: { type: 'integer', minimum: 0, maximum: 10000 }, order: { type: 'string', enum: ['asc','desc'] }, history: { type: 'boolean', description: 'En ubicaciones: true para historial, false para última posición registrada. No implica ubicación en vivo.' },
   } },
 } };
-const REPORT_TOOL = { type: 'function', function: { name: 'generate_fleet_report', description: 'Exporta un PDF o Excel si el usuario lo solicita.', parameters: { type: 'object', additionalProperties: false, required: ['format','report','period'], properties: { format: { type: 'string', enum: ['pdf','xlsx'] }, report: { type: 'string', enum: ['gastos','resumen'] }, period: { type: 'string', enum: ['week','month','total'] }, vehicle: { type: 'string' }, category: { type: 'string' } } } } };
+const REPORT_TOOL = { type: 'function', function: { name: 'generate_fleet_report', description: 'Exporta un PDF o Excel si el usuario lo solicita. Si es un reporte de una consulta anterior, conserva sus filtros de vehículo y categoría.', parameters: { type: 'object', additionalProperties: false, required: ['format','report','period'], properties: { format: { type: 'string', enum: ['pdf','xlsx'] }, report: { type: 'string', enum: ['gastos','resumen'] }, period: { type: 'string', enum: ['week','month','total'] }, vehicle: { type: 'string' }, category: { type: 'string' } } } } };
 type ToolCall = { id: string; type: 'function'; function: { name: string; arguments: string } };
 type Message = { role: string; content: string | null; tool_calls?: ToolCall[]; tool_call_id?: string; [key: string]: unknown };
 export interface AssistantOptions {
@@ -85,7 +85,9 @@ Las herramientas están aisladas a la flota de la sesión. No podés consultar o
 Elegí filtros, agrupación y métrica según la pregunta. Si se pide comparar cantidades por modelo, usá vehiculos, cantidad, modelo. Para series temporales usá fecha y período. Para identidad o listado usá ninguno. Para preguntas sin fecha usá total y explicá el período. Mostrá gráfico cuando la agrupación numérica sea útil; el servidor lo construye de los resultados, no generes datos de gráficos.
 Si una herramienta informa un error corregí los argumentos; si necesita precisar un chofer, se solicitará al usuario. Respetá notas y totales: total es completo, rows puede estar limitado. No confundas cantidad de cuotas con cantidad de choferes. Si necesitás más datos usá offset. Para comparar períodos podés hacer varias consultas. Solo exportá si lo pide el usuario.
 Tu respuesta final debe ser JSON válido: {"answer":"respuesta breve","queryId":0,"followUps":[{"label":"texto corto","question":"pregunta completa"}]}. queryId es el índice de la consulta exitosa más relevante para la tabla/gráfico de esta respuesta. Resumí el hallazgo en dos o tres frases: la interfaz ya muestra las filas y el gráfico, por eso no enumeres todos los resultados dentro de answer. No incluyas tablas Markdown, HTML ni números inventados. Usá entre cero y tres sugerencias. Para resultados vacíos explicá que no hay registros, sin sugerir que hay importes conocidos. Nunca afirmes éxito de una operación que falló.` }, ...history.slice(-6).map(h => ({ role: h.role, content: h.content.slice(0,1200) })), { role: 'user', content: question }];
+  messages.splice(1, 0, { role: 'system', content: 'Al exportar un reporte de una consulta anterior, conserva los filtros de esa consulta, incluyendo category y vehicle cuando existan. "Reporte de eso" debe exportar exactamente el subconjunto consultado, no todos los gastos del periodo.' });
   const results: AssistantQueryResult[] = [];
+  const queryRequests: AssistantQueryRequest[] = [];
   const files: AssistantFile[] = [];
   const tools = options.generateReport ? [QUERY_TOOL, REPORT_TOOL] : [QUERY_TOOL];
   let correctedFinal = false;
@@ -113,10 +115,20 @@ Tu respuesta final debe ser JSON válido: {"answer":"respuesta breve","queryId":
             const result = await options.queryFleet(args);
             output = { ok: true, queryId: results.length, ...result };
             results.push(result);
+            queryRequests.push(args as AssistantQueryRequest);
           } else if (call.function.name === 'generate_fleet_report' && options.generateReport) {
             if (!results.length) throw Error('Primero consultá los datos');
             if (!['pdf','xlsx'].includes(args.format) || !['gastos','resumen'].includes(args.report) || !['week','month','total'].includes(args.period)) throw Error('Reporte inválido');
-            const file = await options.generateReport(args);
+            const previousQuery = queryRequests.at(-1);
+            const carryExpenseFilters = args.report === 'gastos' && previousQuery && ['gastos', 'movimientos', 'finanzas'].includes(previousQuery.entity);
+            const reportRequest: AssistantReportRequest = {
+              format: args.format,
+              report: args.report,
+              period: args.period,
+              ...(typeof args.vehicle === 'string' ? { vehicle: args.vehicle } : previousQuery?.vehicle ? { vehicle: previousQuery.vehicle } : {}),
+              ...(typeof args.category === 'string' ? { category: args.category } : carryExpenseFilters && previousQuery?.category ? { category: previousQuery.category } : {}),
+            };
+            const file = await options.generateReport(reportRequest);
             files.push(file); output = { ok: true, file };
           } else throw Error('Herramienta no permitida');
         } catch (e) {
