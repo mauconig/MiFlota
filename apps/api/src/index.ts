@@ -882,7 +882,8 @@ app.post<{ Body: AssistantQueryBody }>('/api/assistant/query', async (req, reply
       queryFleet: (request) => Promise.resolve(queryFleetData(db, u.id, request)),
     });
   } catch (error) {
-    req.log.warn({ error }, 'falló la consulta a OpenRouter');
+    const errorDetails = error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : { message: String(error) };
+    req.log.warn({ error: errorDetails }, 'falló la consulta a OpenRouter');
     return reply.code(controller.signal.aborted ? 504 : 502).send({ error: 'No pude completar la consulta. Volvé a intentar en un momento.' });
   } finally {
     clearTimeout(timeout);
