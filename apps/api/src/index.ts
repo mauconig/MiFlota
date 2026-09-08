@@ -347,7 +347,7 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
   const movements = (selMovs.all(ownerId) as MovRow[]).filter((mov) => {
     if (mov.type !== 'egreso' || mov.date > to || (from && mov.date < from)) return false;
     const car = carById.get(mov.car_id);
-    if (request.vehicle && !car?.plate.toUpperCase().includes(request.vehicle.toUpperCase())) return false;
+    if (request.vehicle && (!car || !reportFilterNorm(`${car.id} ${car.plate}`).includes(reportFilterNorm(request.vehicle)))) return false;
     if (request.category && !reportFilterNorm(mov.cat ?? 'Otro').includes(reportFilterNorm(request.category))) return false;
     return true;
   });
