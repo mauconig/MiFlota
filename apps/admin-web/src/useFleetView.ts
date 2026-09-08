@@ -543,6 +543,7 @@ export interface View {
   gastosCat: string;
   setGastosQ: (e: React.ChangeEvent<HTMLInputElement>) => void;
   gastosCatChips: Chip[];
+  gastosCats: CatItem[];
   gastosRows: LedgerRow[];
   gastosTotalRows: number;
   gastosTotal: string;
@@ -1433,6 +1434,12 @@ export function useFleetView(
   // filtros de Reportes.
   const gastosMovements = realMovements.filter((m) => m.type === 'egreso' && m.date >= r.start && m.date <= r.end && (st.gastosCat === 'todas' || m.category === st.gastosCat) && matches(st.gastosQ, m.desc, m.category, m.vehicle, m.driver, m.note, m.medio));
   const gastosTotalAmount = gastosMovements.reduce((sum, m) => sum + m.amount, 0);
+  const gastosByCat = gastosMovements.reduce<Record<string, number>>((byCat, m) => {
+    byCat[m.category] = (byCat[m.category] || 0) + m.amount;
+    return byCat;
+  }, {});
+  const gastosCatMax = Math.max(...CATS.map((category) => gastosByCat[category] || 0), 1);
+  const gastosCatTotal = gastosTotalAmount || 1;
 
   const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   const monthDate = (key: string) => new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1, 12);
@@ -2419,6 +2426,10 @@ export function useFleetView(
       ...CH(st.gastosCat === k),
       pick: () => update({ gastosCat: k }),
     })),
+    gastosCats: CATS.map((label) => {
+      const amount = gastosByCat[label] || 0;
+      return { label, amt: fmtShort(amount, st.hide), color: CATCOLORS[label], pct: Math.round((amount / gastosCatMax) * 100) + '%', share: Math.round((amount / gastosCatTotal) * 100) + '%' };
+    }),
     gastosRows: gastosMovements.map((m) => ({
       id: m.id,
       dateLbl: dLbl(m.date),

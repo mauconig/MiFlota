@@ -46,15 +46,31 @@ export function AssistantChat({ ask, onOpenCar }: Props) {
   const [draft, setDraft] = useState('');
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
   const [busy, setBusy] = useState(false);
+  const [launcherVisible, setLauncherVisible] = useState(true);
   const busyRef = useRef(false);
   const controller = useRef<AbortController | null>(null);
   const launcher = useRef<HTMLButtonElement>(null);
+  const lastScrollTop = useRef(0);
   const input = useRef<HTMLTextAreaElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => () => controller.current?.abort(), []);
   useEffect(() => { if (open) input.current?.focus(); }, [open]);
   useEffect(() => { if (open) bottom.current?.scrollIntoView({ block: 'nearest' }); }, [open, exchanges, busy]);
-  const close = () => { setOpen(false); requestAnimationFrame(() => launcher.current?.focus()); };
+  useEffect(() => {
+    const scrollContainer = launcher.current?.closest('main');
+    if (!scrollContainer) return;
+    lastScrollTop.current = scrollContainer.scrollTop;
+    const onScroll = () => {
+      const current = scrollContainer.scrollTop;
+      const delta = current - lastScrollTop.current;
+      if (Math.abs(delta) < 2) return;
+      lastScrollTop.current = current;
+      setLauncherVisible(current <= 8 || delta < 0);
+    };
+    scrollContainer.addEventListener('scroll', onScroll, { passive: true });
+    return () => scrollContainer.removeEventListener('scroll', onScroll);
+  }, []);
+  const close = () => { setOpen(false); requestAnimationFrame(() => { if (launcherVisible) launcher.current?.focus(); }); };
   const submit = async (question: string, retry = false) => {
     question = question.trim();
     if (!question || question.length > 600 || busyRef.current) return;
@@ -76,7 +92,7 @@ export function AssistantChat({ ask, onOpenCar }: Props) {
     }
   };
   return <>
-    <button ref={launcher} className="ai-launcher" onClick={() => setOpen(v => !v)} aria-label={open ? 'Minimizar asistente MiFlota' : 'Abrir asistente MiFlota'} aria-expanded={open} aria-controls="miflota-chat">
+    <button ref={launcher} className={'ai-launcher' + (launcherVisible ? '' : ' ai-launcher-hidden')} onClick={() => setOpen(v => !v)} aria-label={open ? 'Minimizar asistente MiFlota' : 'Abrir asistente MiFlota'} aria-expanded={open} aria-controls="miflota-chat">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M20 11.5a8 8 0 0 1-8 8H5l-4 3 1.5-6A8 8 0 1 1 20 11.5Z" /><path d="M7 11h8M7 7h5" /></svg>
       <span>MiFlota IA</span>{busy && <span className="ai-dot" />}
     </button>
