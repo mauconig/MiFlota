@@ -121,7 +121,7 @@ export interface Reporte {
   fecha: string;
 }
 
-export type Nav = 'resumen' | 'flota' | 'movimientos' | 'choferes' | 'alertas' | 'reportes' | 'cobros';
+export type Nav = 'resumen' | 'flota' | 'movimientos' | 'choferes' | 'alertas' | 'reportes' | 'cobros' | 'gastos';
 export type Period = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
 export type FleetFilter = 'todos' | 'activo' | 'taller' | 'baja';
 export type MovType = 'todos' | 'ingreso' | 'egreso';
@@ -196,6 +196,9 @@ export interface UIState {
   alertQ: string;
   pendQ: string;
   movQ: string;
+  /** Búsqueda y categoría de la pantalla exclusiva de gastos. */
+  gastosQ: string;
+  gastosCat: string;
   movMonth: string;
   movPage: number;
   movVehicle: string;

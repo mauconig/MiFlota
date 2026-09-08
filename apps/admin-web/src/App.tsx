@@ -12,6 +12,7 @@ import { Choferes } from './screens/Choferes';
 import { Alertas } from './screens/Alertas';
 import { Reportes } from './screens/Reportes';
 import { Cobros } from './screens/Cobros';
+import { Gastos } from './screens/Gastos';
 import { DetailDrawer } from './components/DetailDrawer';
 import { DriverDetail } from './components/DriverDetail';
 import { Confirm } from './components/Confirm';
@@ -55,6 +56,8 @@ function initialState(): UIState {
   alertQ: '',
   pendQ: '',
   movQ: '',
+  gastosQ: '',
+  gastosCat: 'todas',
   movMonth: isoLocal(localToday).slice(0, 7),
   movPage: 1,
   movVehicle: 'todos',
@@ -140,6 +143,7 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
         {v.sAlertas && <Alertas v={v} />}
         {v.sReportes && <Reportes v={v} />}
         {v.sCobros && <Cobros v={v} />}
+        {v.sGastos && <Gastos v={v} />}
       </main>
 
       <DetailDrawer v={v} />

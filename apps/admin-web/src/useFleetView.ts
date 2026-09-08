@@ -321,6 +321,7 @@ export interface LedgerRow {
   comprobante: string;
   items: { nombre: string; cantidad: number; costoUnitario: number; subtotal: number }[];
   manoObra: number;
+  open?: () => void;
 }
 
 export interface MovementMonth {
@@ -439,6 +440,7 @@ export interface View {
   sAlertas: boolean;
   sReportes: boolean;
   sCobros: boolean;
+  sGastos: boolean;
   sMovimientos: boolean;
   navItems: NavItem[];
   periodChips: Chip[];
@@ -456,6 +458,7 @@ export interface View {
   goAlertas: () => void;
   goReportes: () => void;
   goCobros: () => void;
+  goGastos: () => void;
   goMovimientos: (carId?: string) => void;
 
   fleetFilters: Chip[];
@@ -534,6 +537,17 @@ export interface View {
   movementPrevPage: () => void;
   movementNextPage: () => void;
   movementOpenRow: (id: string) => void;
+
+  gastosSub: string;
+  gastosQ: string;
+  gastosCat: string;
+  setGastosQ: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  gastosCatChips: Chip[];
+  gastosRows: LedgerRow[];
+  gastosTotalRows: number;
+  gastosTotal: string;
+  exportarGastos: () => void;
+  exportarGastosPdf: () => void;
 
   movementDetail: MovementDetailView | null;
   quotaDetail: QuotaDetailView | null;
@@ -1414,6 +1428,12 @@ export function useFleetView(
   const reportInclude: ReportExportPayload['include'] = st.movType === 'ingreso' ? 'ingresos' : st.movType === 'egreso' ? 'gastos' : 'ambos';
   const reportCategories: ReportExportPayload['categories'] = st.movCat === 'todas' ? 'todas' : [st.movCat];
 
+  // La pantalla de Gastos es una vista dedicada de los egresos reales del
+  // período. Mantiene su propia búsqueda y categoría para no alterar los
+  // filtros de Reportes.
+  const gastosMovements = realMovements.filter((m) => m.type === 'egreso' && m.date >= r.start && m.date <= r.end && (st.gastosCat === 'todas' || m.category === st.gastosCat) && matches(st.gastosQ, m.desc, m.category, m.vehicle, m.driver, m.note, m.medio));
+  const gastosTotalAmount = gastosMovements.reduce((sum, m) => sum + m.amount, 0);
+
   const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   const monthDate = (key: string) => new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1, 12);
   const monthLabel = (key: string) => {
@@ -1537,6 +1557,7 @@ export function useFleetView(
     movimientos: ['Movimientos', 'Libro de caja'],
     reportes: ['Reportes', 'Resumen financiero'],
     cobros: st.cobrosTab === 'pagos' ? ['Movimientos', 'Libro de caja'] : ['Cobros', 'Ingresos'],
+    gastos: ['Gastos', 'Egresos'],
   };
   const SUBS: Record<string, string> = {
     resumen: active.length + ' vehículos activos · ' + (cars.length - active.length) + ' fuera de servicio · datos al ' + dLbl(TODAY),
@@ -1548,6 +1569,7 @@ export function useFleetView(
     cobros: st.cobrosTab === 'pagos'
       ? realMovements.filter(inR).length + (realMovements.filter(inR).length === 1 ? ' movimiento registrado' : ' movimientos registrados') + ' en ' + r.short
       : 'Cobrado ' + fmt(tot.ing, st.hide) + ' de ' + fmt(tot.fact, st.hide) + ' facturado en ' + r.short + (pendTotal ? ' · deben ' + fmt(pendTotal, st.hide) : ''),
+    gastos: gastosMovements.length + (gastosMovements.length === 1 ? ' gasto registrado' : ' gastos registrados') + ' · ' + fmt(gastosTotalAmount, st.hide) + ' en ' + r.short,
   };
 
   const openEditCar = () => {
@@ -2000,6 +2022,7 @@ export function useFleetView(
     sMovimientos: false,
     sReportes: nav === 'reportes',
     sCobros: nav === 'cobros',
+    sGastos: nav === 'gastos',
     navItems: (
       [
         ['resumen', 'Resumen', 'm3 10 9-7 9 7v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z', ''],
@@ -2007,6 +2030,7 @@ export function useFleetView(
         ['choferes', 'Choferes', 'M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8M4 21c0-4 3.6-6 8-6s8 2 8 6', String(active.filter((c) => c.driver !== 'Sin chofer').length)],
         ['alertas', 'Alertas', 'M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01', String(alertList.length)],
         ['cobros', 'Cobros', 'M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4', String(pendMovs.length)],
+        ['gastos', 'Gastos', 'M5 4h14v16H5zM8 8h8M8 12h5M8 16h8', String(gastosMovements.length)],
         ['reportes', 'Reportes', 'M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7ZM14 2v4a2 2 0 0 0 2 2h4M16 13H8M16 17H8', ''],
       ] as [UIState['nav'], string, string, string][]
     ).map(([k, label, icon, badge]) => ({
@@ -2052,6 +2076,7 @@ export function useFleetView(
     },
     goReportes: () => go('reportes'),
     goCobros: () => go('cobros'),
+    goGastos: () => go('gastos'),
 
     fleetFilters: (
       [
@@ -2382,6 +2407,56 @@ export function useFleetView(
         const result = await persist.exportReport({ period: periodPayload, include: reportInclude, carIds: 'todos', categories: reportCategories, search: st.movQ.trim() || undefined, format: 'pdf' });
         const a = document.createElement('a'); a.href = result.file.url; a.download = result.file.name; a.click();
         toast('PDF descargado · ' + result.counts.total + ' movimientos');
+      } catch (e) { toast('No se pudo exportar: ' + (e as Error).message); }
+    },
+
+    gastosSub: gastosMovements.length + (gastosMovements.length === 1 ? ' gasto' : ' gastos') + ' · ' + fmt(gastosTotalAmount, st.hide) + (st.gastosQ.trim() || st.gastosCat !== 'todas' ? ' con los filtros aplicados' : ''),
+    gastosQ: st.gastosQ,
+    gastosCat: st.gastosCat,
+    setGastosQ: (e) => update({ gastosQ: e.target.value }),
+    gastosCatChips: [['todas', 'Todas'], ...CATS.map((c) => [c, c] as [string, string])].map(([k, label]) => ({
+      label,
+      ...CH(st.gastosCat === k),
+      pick: () => update({ gastosCat: k }),
+    })),
+    gastosRows: gastosMovements.map((m) => ({
+      id: m.id,
+      dateLbl: dLbl(m.date),
+      type: 'egreso' as const,
+      typeLbl: 'Gasto',
+      vehicle: m.vehicle,
+      driver: m.driver,
+      desc: m.desc,
+      category: m.category,
+      note: m.note,
+      medio: m.medio,
+      amount: '−' + fmtShort(m.amount, st.hide),
+      amountFg: COLORS.neg,
+      comprobante: m.comprobante,
+      items: m.items,
+      manoObra: m.manoObra,
+      open: () => update({ movementDetailId: m.id, quotaDetailId: null }),
+    })),
+    gastosTotalRows: gastosMovements.length,
+    gastosTotal: fmt(gastosTotalAmount, st.hide),
+    exportarGastos: async () => {
+      if (!gastosMovements.length) return toast('No hay gastos para exportar con estos filtros');
+      const periodPayload = { type: st.period, ...(st.period === 'custom' ? { from: st.cFrom, to: st.cTo } : { to: isoLocal(TODAY) }) } as ReportExportPayload['period'];
+      const categories: ReportExportPayload['categories'] = st.gastosCat === 'todas' ? 'todas' : [st.gastosCat];
+      try {
+        const result = await persist.exportReport({ period: periodPayload, include: 'gastos', carIds: 'todos', categories, search: st.gastosQ.trim() || undefined, format: 'xlsx' });
+        const a = document.createElement('a'); a.href = result.file.url; a.download = result.file.name; a.click();
+        toast('Excel descargado · ' + result.counts.gastos + ' gastos');
+      } catch (e) { toast('No se pudo exportar: ' + (e as Error).message); }
+    },
+    exportarGastosPdf: async () => {
+      if (!gastosMovements.length) return toast('No hay gastos para exportar con estos filtros');
+      const periodPayload = { type: st.period, ...(st.period === 'custom' ? { from: st.cFrom, to: st.cTo } : { to: isoLocal(TODAY) }) } as ReportExportPayload['period'];
+      const categories: ReportExportPayload['categories'] = st.gastosCat === 'todas' ? 'todas' : [st.gastosCat];
+      try {
+        const result = await persist.exportReport({ period: periodPayload, include: 'gastos', carIds: 'todos', categories, search: st.gastosQ.trim() || undefined, format: 'pdf' });
+        const a = document.createElement('a'); a.href = result.file.url; a.download = result.file.name; a.click();
+        toast('PDF descargado · ' + result.counts.gastos + ' gastos');
       } catch (e) { toast('No se pudo exportar: ' + (e as Error).message); }
     },
 
