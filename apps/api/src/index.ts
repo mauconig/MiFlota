@@ -319,6 +319,12 @@ function reportMoney(value: number): string {
 }
 
 const reportFilterNorm = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const reportCategoryMatches = (value: string, filter: string) => {
+  const candidate = reportFilterNorm(value).replace(/[^a-z0-9]/g, '');
+  const raw = reportFilterNorm(filter).replace(/[^a-z0-9]/g, '');
+  const needle = raw.replace(/^gastos?(?:de)?/, '') || raw;
+  return !!needle && (candidate.includes(needle) || needle.includes(candidate));
+};
 
 /** Nombre legible y único para las descargas. Se usa la hora de Paraguay
  * aunque el proceso de la API esté corriendo en UTC en la VPS. */
@@ -348,7 +354,7 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
     if (mov.type !== 'egreso' || mov.date > to || (from && mov.date < from)) return false;
     const car = carById.get(mov.car_id);
     if (request.vehicle && (!car || !reportFilterNorm(`${car.id} ${car.plate}`).includes(reportFilterNorm(request.vehicle)))) return false;
-    if (request.category && !reportFilterNorm(mov.cat ?? 'Otro').includes(reportFilterNorm(request.category))) return false;
+    if (request.category && !reportCategoryMatches(mov.cat ?? 'Otro', request.category)) return false;
     return true;
   });
   const rows = movements.map((mov) => {

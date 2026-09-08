@@ -8,6 +8,16 @@ export const entities = ['finanzas', 'vehiculos', 'choferes', 'cuotas', 'pagos',
 export const metrics = ['facturado', 'cobrado', 'gastos', 'ganancia', 'deuda', 'cantidad'] as const;
 export const groups = ['auto', 'modelo', 'chofer', 'categoria', 'fecha', 'estado', 'ninguno'] as const;
 const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const categoryNeedle = (s: string) => {
+  const raw = norm(s);
+  const withoutExpensePrefix = raw.replace(/^gastos?(?:de)?/, '');
+  return withoutExpensePrefix.length >= 3 ? withoutExpensePrefix : raw;
+};
+const categoryMatches = (value: string, filter: string) => {
+  const candidate = norm(value);
+  const needle = categoryNeedle(filter);
+  return !!needle && (candidate.includes(needle) || needle.includes(candidate));
+};
 const money = (v: number) => 'Gs. ' + new Intl.NumberFormat('es-PY').format(v);
 const validDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && Number.isFinite(Date.parse(s)) && new Date(s).toISOString().slice(0, 10) === s;
 const dayOf = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Asuncion', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(s));
@@ -65,7 +75,7 @@ export function queryFleetData(db: Database.Database, ownerId: number, r: Assist
   };
   const atoms: Atom[] = [];
   const add = (a: Atom) => {
-    if (!matchesCar(a.carId) || !matchesDriver(a.driver ?? 'Sin chofer') || r.category && !norm(a.category ?? '').includes(norm(r.category)) || r.status && norm(a.status ?? '') !== norm(r.status)) return;
+    if (!matchesCar(a.carId) || !matchesDriver(a.driver ?? 'Sin chofer') || r.category && !categoryMatches(a.category ?? '', r.category) || r.status && norm(a.status ?? '') !== norm(r.status)) return;
     atoms.push({ ...a, model: a.carId ? byId.get(a.carId)?.model : a.model });
   };
   const vehicleEntities = ['vehiculos', 'mantenimiento', 'seguros', 'gps'];

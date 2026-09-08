@@ -81,6 +81,8 @@ test('cash, adjustments, billed amount, expenses and net are distinct', () => {
  assert.equal(query({entity:'finanzas',metric:'facturado',period:'mes'}).total,100);
  assert.equal(query({entity:'pagos',metric:'cantidad',groupBy:'fecha'}).total,2);
  const expense=query({entity:'gastos',category:'Taller',driver:'Oscar Ledezma'});
+ const expenseFromNaturalPhrase=query({entity:'gastos',category:'gastos de taller',driver:'Oscar Ledezma'});
+ assert.equal(expenseFromNaturalPhrase.total,expense.total);
  assert.match(expense.rows[0].details.Repuestos,/Aceite/);
  assert.equal(expense.rows[0].details['Mano de obra'],'Gs. 20');
 });
