@@ -10,6 +10,7 @@ import { KilometrajeSheet } from './KilometrajeSheet';
 import { ChoferSheet } from './ChoferSheet';
 import { RegistroChoiceSheet } from './RegistroChoiceSheet';
 import { Dashboard } from '../screens/Dashboard';
+import { DashboardDetail } from '../screens/DashboardDetail';
 import { Flota } from '../screens/Flota';
 import { Detalle } from '../screens/Detalle';
 import { NuevoVehiculo } from '../screens/NuevoVehiculo';
@@ -65,6 +66,7 @@ export function Shell({ v, nombre, usuario, onLogout, onRefresh, refreshing, syn
             contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }}
           >
             {v.screen === 'dashboard' && <Dashboard v={v} />}
+            {v.screen === 'dashboardDetail' && <DashboardDetail v={v} />}
             {v.screen === 'flota' && <Flota v={v} />}
             {v.screen === 'gastos' && <Gastos v={v} />}
             {v.screen === 'mas' && <Mas v={v} />}

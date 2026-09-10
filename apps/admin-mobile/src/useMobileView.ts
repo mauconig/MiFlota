@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { BackHandler, Keyboard, Linking } from 'react-native';
-import type { AdminNotificationRoute, Car, Mov, Pago, Reporte, MobileState, Screen, RegistrarTab, FleetFilter, PickedFile, CarLocation, ReportCategorySelection, ReportInclude, ReportSelection, ReportStep } from './types';
+import type { AdminNotificationRoute, Car, Mov, Pago, Reporte, MobileState, Screen, DashboardDetailKind, RegistrarTab, FleetFilter, PickedFile, CarLocation, ReportCategorySelection, ReportInclude, ReportSelection, ReportStep } from './types';
 import { imputar, type Aplicacion } from './cobranza';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, daysBetween, durLbl, dLbl, dLblFull, fmt, fmtShort, initials, statusColor, numFromInput, miles, isoLocal } from './format';
@@ -10,6 +10,7 @@ import { dateTextFromIso, maskDateInput, validateDateRange } from './dateRange';
 
 const UMBRAL_VERDE = 2500000;
 const SVC_AVISO_DIAS = 15;
+const SECTION_COLORS = ['#4a7fb5', '#8a6bb1', '#e8a13a', '#2e9c86', '#c0553f', '#b3aa99'] as const;
 /** Tope de meses entre renovaciones de la póliza. Coincide con el del servidor. */
 const SEG_CADA_MAX = 120;
 const MESES_ABR = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -219,6 +220,7 @@ export function initialMobileState(): MobileState {
     screen: 'dashboard',
     backTo: 'dashboard',
     carId: null,
+    dashboardDetail: null,
     period: 'mes',
     dashboardSectionId: null,
     cFrom: isoLocal(inicioMes(TODAY)),
@@ -477,6 +479,25 @@ interface ChoferView {
   open: () => void;
 }
 
+interface DashboardDetailRow {
+  id: string;
+  label: string;
+  sub: string;
+  amount: string;
+  amountColor: string;
+  width: number;
+  onPress?: () => void;
+}
+
+interface DashboardDetailValue {
+  id: string;
+  label: string;
+  sub: string;
+  n: number;
+  color: string;
+  onPress?: () => void;
+}
+
 export interface MobileView {
   screen: Screen;
   isTab: boolean;
@@ -504,11 +525,13 @@ export interface MobileView {
   goRegistrarGasto: (carId?: string) => void;
   goRegistrarService: (carId?: string) => void;
   goPerfil: () => void;
+  openDashboardDetail: (kind: DashboardDetailKind) => void;
 
   hide: boolean;
 
   period: {
     label: string;
+    compactLabel: string;
     short: string;
     days: string;
     chips: Chip[];
@@ -539,13 +562,25 @@ export interface MobileView {
     areaPoints: string;
     trendPts: { lbl: string; x: string; y: string }[];
     lastPt: { x: string; y: string };
-    donut: { cat: string; color: string; dash: string; off: string; pctTxt: string }[];
+    donut: { label: string; color: string; dash: string; off: string; pctTxt: string }[];
     donutTotal: string;
-    bars: { plate: string; w: number; color: string; short: string }[];
+    barMode: 'vehicle' | 'section';
+    bars: { label: string; w: number; color: string; short: string }[];
     health: string;
     healthLbl: string;
     healthSub: string;
   };
+
+  dashboardDetail: {
+    kind: DashboardDetailKind;
+    title: string;
+    subtitle: string;
+    periodLabel: string;
+    sectionLabel: string;
+    total: string;
+    rows: DashboardDetailRow[];
+    emptyLabel: string;
+  } | null;
 
   flota: { filters: Chip[]; sectionFilters: Chip[]; cars: CarCardView[]; sections: import('./api').FleetSection[]; addSection: (name: string) => Promise<void>; renameSection: (id: number, name: string) => Promise<void>; deleteSection: (id: number) => Promise<void>; moveSection: (id: number, direction: -1 | 1) => Promise<void> };
 
@@ -809,7 +844,7 @@ export function useMobileView(
   // por pantalla, igual que hacía `history.back()` en la versión web. Los
   // sheets no entran en la pila a propósito: solo se cierran con la X o
   // tocando afuera, para no complicarla con entradas que no son pantallas.
-  const stackRef = useRef<{ screen: Screen; backTo: Screen; carId: string | null }[]>([]);
+  const stackRef = useRef<{ screen: Screen; backTo: Screen; carId: string | null; dashboardDetail: DashboardDetailKind | null }[]>([]);
 
   // Si queda un input enfocado cuando se cambia de pantalla, el teclado se
   // cierra recién cuando el sistema nota que el campo se desmontó — ese
@@ -818,14 +853,14 @@ export function useMobileView(
   // de cualquier navegación saca la carrera de encima.
   const push = (screen: Screen, patch: Partial<MobileState> = {}) => {
     Keyboard.dismiss();
-    stackRef.current.push({ screen: state.screen, backTo: state.backTo, carId: state.carId });
+    stackRef.current.push({ screen: state.screen, backTo: state.backTo, carId: state.carId, dashboardDetail: state.dashboardDetail });
     const backTo = state.screen;
     update({ screen, backTo, ...patch });
   };
   const replaceTab = (screen: Screen) => {
     Keyboard.dismiss();
     stackRef.current = [];
-    update({ screen, backTo: screen, carId: null, ...(screen === 'gastos' ? { gastosStep: 'period', periodError: '' } : {}) });
+    update({ screen, backTo: screen, carId: null, dashboardDetail: null, ...(screen === 'gastos' ? { gastosStep: 'period', periodError: '' } : {}) });
   };
   const back = () => {
     Keyboard.dismiss();
@@ -862,7 +897,7 @@ export function useMobileView(
       }
     }
     const prev = stackRef.current.pop();
-    update(prev ?? { screen: 'dashboard', backTo: 'dashboard', carId: null });
+    update(prev ?? { screen: 'dashboard', backTo: 'dashboard', carId: null, dashboardDetail: null });
   };
 
   const openNotification = (route: AdminNotificationRoute) => {
@@ -879,6 +914,7 @@ export function useMobileView(
       movementDetailId: null,
       quotaDetailId: null,
       reportDetailId: null,
+      dashboardDetail: null,
     };
     if (route.kind === 'alerts') {
       update({ ...common, screen: 'alertas', carId: null });
@@ -1018,7 +1054,25 @@ export function useMobileView(
   const perCarNet = (c: Car) => stats(movs, aplicaciones, (m) => m.carId === c.id && inR(m), (a) => a.carId === c.id && inRA(a), pagos, (p) => p.carId === c.id && inRP(p)).net;
   const sorted = active.map((c) => ({ c, n: perCarNet(c) })).sort((a, b) => b.n - a.n);
   const dashboardSorted = sorted.filter((x) => state.dashboardSectionId == null || x.c.sectionId === state.dashboardSectionId);
-  const maxAbs = Math.max(...dashboardSorted.map((x) => Math.abs(x.n)), 1);
+  // When the dashboard is on “Todas”, the charts compare sections instead of
+  // individual vehicles. The section order is the manual order persisted in
+  // the account; unassigned vehicles are kept in a final automatic bucket.
+  const knownSectionIds = new Set(persist.sections.map((section) => section.id));
+  const sectionExpenseTotals = new Map<number | null, number>();
+  if (state.dashboardSectionId == null) {
+    movs.forEach((m) => {
+      if (m.type !== 'egreso' || !inR(m)) return;
+      const rawSectionId = carDe.get(m.carId)?.sectionId ?? null;
+      const sectionId = rawSectionId != null && knownSectionIds.has(rawSectionId) ? rawSectionId : null;
+      sectionExpenseTotals.set(sectionId, (sectionExpenseTotals.get(sectionId) ?? 0) + m.amount);
+    });
+  }
+  const sectionNetTotals = new Map<number | null, number>();
+  sorted.forEach((x) => {
+    const rawSectionId = x.c.sectionId ?? null;
+    const sectionId = rawSectionId != null && knownSectionIds.has(rawSectionId) ? rawSectionId : null;
+    sectionNetTotals.set(sectionId, (sectionNetTotals.get(sectionId) ?? 0) + x.n);
+  });
 
   const deudaPorChofer = new Map<string, number>();
   cuotas.forEach((m) => {
@@ -1093,17 +1147,93 @@ export function useMobileView(
   };
 
   // ---- dashboard -------------------------------------------------------
-  const donutCats = CATS.map((cat) => ({ cat, v: tot.byCat[cat] || 0 }))
+  const sectionDonut = persist.sections
+    .map((section, index) => ({ label: section.name, v: sectionExpenseTotals.get(section.id) ?? 0, color: SECTION_COLORS[index % SECTION_COLORS.length] }))
+    .filter((x) => x.v > 0);
+  const unassignedExpense = sectionExpenseTotals.get(null) ?? 0;
+  if (unassignedExpense > 0) sectionDonut.push({ label: 'Sin sección', v: unassignedExpense, color: SECTION_COLORS[persist.sections.length % SECTION_COLORS.length] });
+  const categoryDonut = CATS.map((cat) => ({ label: cat, v: tot.byCat[cat] || 0, color: CATCOLORS[cat] }))
     .filter((x) => x.v > 0)
     .sort((a, b) => b.v - a.v);
+  const donutSource = state.dashboardSectionId == null ? sectionDonut : categoryDonut;
+  const donutTotalValue = donutSource.reduce((total, item) => total + item.v, 0);
   let acc = 0;
-  const donut = donutCats.map((x) => {
-    const pct = (x.v / (tot.egr || 1)) * 100;
-    const seg = { cat: x.cat, color: CATCOLORS[x.cat], dash: pct.toFixed(2) + ' ' + (100 - pct).toFixed(2), off: String(-acc.toFixed(2)), pctTxt: Math.round(pct) + '%' };
+  const donut = donutSource.map((x) => {
+    const pct = (x.v / (donutTotalValue || 1)) * 100;
+    const seg = { label: x.label, color: x.color, dash: pct.toFixed(2) + ' ' + (100 - pct).toFixed(2), off: String(-acc.toFixed(2)), pctTxt: Math.round(pct) + '%' };
     acc += pct;
     return seg;
   });
-  const bars = dashboardSorted.map((x) => ({ plate: x.c.plate, w: Math.max(4, Math.round((Math.abs(x.n) / maxAbs) * 100)), color: statusColor(x.n, UMBRAL_VERDE), short: fmtShort(x.n) }));
+  const sectionBars = persist.sections.flatMap((section) => {
+    const totals = sectionNetTotals.get(section.id);
+    return totals === undefined ? [] : [{ label: section.name, n: totals }];
+  }).sort((a, b) => b.n - a.n);
+  const unassignedNet = sectionNetTotals.get(null);
+  if (unassignedNet !== undefined) sectionBars.push({ label: 'Sin sección', n: unassignedNet });
+  const barMode = state.dashboardSectionId == null ? 'section' as const : 'vehicle' as const;
+  const barSource = barMode === 'section' ? sectionBars : dashboardSorted.map((x) => ({ label: x.c.plate, n: x.n }));
+  const maxAbs = Math.max(...barSource.map((x) => Math.abs(x.n)), 1);
+  const bars = barSource.map((x) => ({ label: x.label, w: Math.max(4, Math.round((Math.abs(x.n) / maxAbs) * 100)), color: statusColor(x.n, UMBRAL_VERDE), short: fmtShort(x.n) }));
+
+  const dashboardSectionLabel = state.dashboardSectionId == null
+    ? 'Todas'
+    : persist.sections.find((section) => section.id === state.dashboardSectionId)?.name ?? 'Sección';
+  const collectedByCar = new Map<string, number>();
+  let collectedWithoutCar = 0;
+  pagos.forEach((p) => {
+    if (p.tipo !== 'pago' || !inRPSection(p)) return;
+    const c = p.carId ? carDe.get(p.carId) : undefined;
+    if (c) collectedByCar.set(c.id, (collectedByCar.get(c.id) ?? 0) + p.monto);
+    else collectedWithoutCar += p.monto;
+  });
+  const expensesByCar = new Map<string, number>();
+  let expensesWithoutCar = 0;
+  movs.forEach((m) => {
+    if (m.type !== 'egreso' || !inRSection(m)) return;
+    const c = carDe.get(m.carId);
+    if (c) expensesByCar.set(c.id, (expensesByCar.get(c.id) ?? 0) + m.amount);
+    else expensesWithoutCar += m.amount;
+  });
+  const detailRows = (values: DashboardDetailValue[]): DashboardDetailRow[] => {
+    const max = Math.max(...values.map((value) => Math.abs(value.n)), 1);
+    return values.map((value) => ({
+      id: value.id,
+      label: value.label,
+      sub: value.sub,
+      amount: fmt(value.n),
+      amountColor: value.color,
+      width: Math.max(4, Math.round((Math.abs(value.n) / max) * 100)),
+      onPress: value.onPress,
+    }));
+  };
+  const collectedRows: DashboardDetailValue[] = cars
+    .filter((c) => sectionMatches(c.id))
+    .map((c) => ({ id: c.id, label: c.plate, sub: c.model + ' · ' + c.driver, n: collectedByCar.get(c.id) ?? 0, color: COLORS.pos, onPress: () => push('detalle', { carId: c.id }) }))
+    .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
+  if (collectedWithoutCar > 0 && state.dashboardSectionId == null) collectedRows.push({ id: 'none', label: 'Sin vehículo', sub: 'Pagos sin auto asociado', n: collectedWithoutCar, color: COLORS.pos, onPress: undefined });
+  const expenseRows: DashboardDetailValue[] = cars
+    .filter((c) => sectionMatches(c.id))
+    .map((c) => ({ id: c.id, label: c.plate, sub: c.model + ' · ' + c.driver, n: expensesByCar.get(c.id) ?? 0, color: COLORS.neg, onPress: () => push('detalle', { carId: c.id }) }))
+    .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
+  if (expensesWithoutCar > 0) expenseRows.push({ id: 'none', label: 'Sin vehículo', sub: 'Gastos sin auto asociado', n: expensesWithoutCar, color: COLORS.neg });
+  const earningsRows: DashboardDetailValue[] = barMode === 'section'
+    ? sectionBars.map((section) => ({ id: 'section:' + section.label, label: section.label, sub: 'Ganancia neta del período', n: section.n, color: statusColor(section.n, UMBRAL_VERDE) }))
+    : dashboardSorted.map((x) => ({ id: x.c.id, label: x.c.plate, sub: x.c.model + ' · ' + x.c.driver, n: x.n, color: statusColor(x.n, UMBRAL_VERDE), onPress: () => push('detalle', { carId: x.c.id }) }));
+  const breakdownRows: DashboardDetailValue[] = (state.dashboardSectionId == null ? sectionDonut : categoryDonut).map((item) => ({
+    id: item.label,
+    label: item.label,
+    sub: state.dashboardSectionId == null ? 'Gastos de la sección' : 'Gastos de la categoría',
+    n: item.v,
+    color: item.color,
+  }));
+  const dashboardDetail = state.dashboardDetail == null ? null : (() => {
+    const kind = state.dashboardDetail;
+    const rows = kind === 'collected' ? detailRows(collectedRows) : kind === 'expenses' ? detailRows(expenseRows) : kind === 'breakdown' ? detailRows(breakdownRows) : detailRows(earningsRows);
+    const title = kind === 'collected' ? 'Cobrado' : kind === 'expenses' ? 'Gastos' : kind === 'breakdown' ? 'Detalle de gastos' : 'Ganancia';
+    const subtitle = kind === 'collected' ? 'Ingresos recibidos por vehículo' : kind === 'expenses' ? 'Gastos registrados por vehículo' : kind === 'breakdown' ? (state.dashboardSectionId == null ? 'Gastos por sección' : 'Gastos por categoría') : (barMode === 'section' ? 'Ganancia por sección' : 'Ganancia por vehículo');
+    const total = kind === 'collected' ? tot.ing : kind === 'expenses' ? tot.egr : kind === 'breakdown' ? donutTotalValue : earningsRows.reduce((sum, row) => sum + row.n, 0);
+    return { kind, title, subtitle, periodLabel: r.label, sectionLabel: dashboardSectionLabel, total: fmt(total), rows, emptyLabel: kind === 'collected' ? 'No hay cobros en este período' : kind === 'expenses' || kind === 'breakdown' ? 'No hay gastos en este período' : 'No hay ganancias para mostrar' };
+  })();
 
   const baseMonth = new Date(TODAY.getFullYear(), TODAY.getMonth(), 1);
   const monthNets: number[] = [];
@@ -2099,6 +2229,7 @@ export function useMobileView(
   const goReportes = () => push('reportes', { reportesStep: 'period', reportesInclude: 'ambos', reportesCarIds: 'todos', reportesCategories: 'todas', reportesExportando: false, reportesError: '', periodError: '' });
 
   const headerByScreen: Record<string, [string, string]> = {
+    dashboardDetail: ['Detalle', ''],
     dashboard: ['MiFlota', 'Actualizado · ' + r.label],
     flota: ['Vehículos', active.length + ' activos · ' + (cars.length - active.length) + ' de baja'],
     ranking: ['Ganancia por vehículo', 'Comparación del período'],
@@ -2112,6 +2243,7 @@ export function useMobileView(
   };
 
   Object.assign(headerByScreen, {
+    dashboardDetail: [dashboardDetail?.title ?? 'Detalle', dashboardDetail?.subtitle ?? ''],
     dashboard: ['Inicio', 'Actualizado · ' + r.label],
     gastos: ['Gastos', ''],
     mas: ['Más', 'Accesos y configuración'],
@@ -2121,7 +2253,7 @@ export function useMobileView(
   });
 
   const isTab = ['dashboard', 'flota', 'gastos', 'mas'].includes(state.screen);
-  const isSub = ['detalle', 'nuevoVehiculo', 'registrar', 'reportes', 'alertas', 'choferes', 'secciones', 'perfil'].includes(state.screen);
+  const isSub = ['dashboardDetail', 'detalle', 'nuevoVehiculo', 'registrar', 'reportes', 'alertas', 'choferes', 'secciones', 'perfil'].includes(state.screen);
   const isAssistant = state.screen === 'assistant';
 
   return {
@@ -2141,7 +2273,7 @@ export function useMobileView(
     navChoferes: () => push('choferes'),
     openNotification,
     tabActive: {
-      dash: state.screen === 'dashboard',
+      dash: state.screen === 'dashboard' || state.screen === 'dashboardDetail',
       flota: state.screen === 'flota' || state.screen === 'detalle' || state.screen === 'nuevoVehiculo',
       gastos: state.screen === 'gastos',
       mas: ['mas', 'alertas', 'choferes', 'secciones', 'reportes', 'perfil'].includes(state.screen),
@@ -2171,10 +2303,16 @@ export function useMobileView(
     goRegistrarGasto,
     goRegistrarService,
     goPerfil: () => push('perfil', { perfil: { actual: '', nueva: '', repetir: '', guardando: false } }),
+    openDashboardDetail: (kind) => push('dashboardDetail', { dashboardDetail: kind }),
     hide: false,
 
     period: {
       label: r.label,
+      compactLabel: state.period === 'custom'
+        ? 'Personalizado'
+        : state.period === 'mes' || state.period === 'jul'
+          ? capitalizar(MESES_LARGO[r.start.getMonth()]) + ' ' + r.start.getFullYear()
+          : r.label,
       short: r.short,
       days: days + ' d',
       chips: periodOpts.map(([k, label]) => ({ label, ...chipStyle(state.period === k), pick: () => selectPeriodPreset(k) })),
@@ -2207,11 +2345,14 @@ export function useMobileView(
       lastPt: trendPts[5],
       donut,
       donutTotal: fmtShort(tot.egr),
+      barMode,
       bars,
       health: String(health),
       healthLbl,
       healthSub: nAlertCars + ' autos con mantenimiento pendiente · ' + nLossCars + ' en pérdida',
     },
+
+    dashboardDetail,
 
     flota: {
       filters: FILT.map(([k, label]) => ({ label, ...chipStyle(state.fleetFilter === k), pick: () => update({ fleetFilter: k }) })),

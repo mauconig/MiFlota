@@ -111,7 +111,8 @@ export interface LocationHistory extends CarLocation {
 // un frame de teléfono, no un dashboard de pestañas siempre montadas como
 // admin-web, así que este estado no se parece al `UIState` de ahí.
 
-export type Screen = 'dashboard' | 'flota' | 'gastos' | 'mas' | 'secciones' | 'alertas' | 'choferes' | 'detalle' | 'nuevoVehiculo' | 'registrar' | 'reportes' | 'ranking' | 'assistant' | 'perfil';
+export type Screen = 'dashboard' | 'dashboardDetail' | 'flota' | 'gastos' | 'mas' | 'secciones' | 'alertas' | 'choferes' | 'detalle' | 'nuevoVehiculo' | 'registrar' | 'reportes' | 'ranking' | 'assistant' | 'perfil';
+export type DashboardDetailKind = 'collected' | 'expenses' | 'breakdown' | 'earnings';
 export type AdminNotificationRoute = { kind: 'alerts' } | { kind: 'payment'; carId: string; paymentId: number } | { kind: 'report'; carId: string; reportId: number };
 export type Period = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
 export type RegistrarTab = 'cobro' | 'gasto';
@@ -232,6 +233,7 @@ export interface MobileState {
   screen: Screen;
   backTo: Screen;
   carId: string | null;
+  dashboardDetail: DashboardDetailKind | null;
   period: Period;
   dashboardSectionId: number | null;
   cFrom: string;

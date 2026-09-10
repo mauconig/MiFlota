@@ -28,9 +28,9 @@ export function Dashboard({ v }: { v: MobileView }) {
   const summaryAmountSize = summaryAmountLength > 13 ? 17 : 20;
   const [page, setPage] = useState(0);
   const [sectionOpen, setSectionOpen] = useState(false);
-  const resetKey = useMemo(() => d.bars.map((bar) => bar.plate).join('|'), [d.bars]);
-  const pageCount = Math.max(1, Math.ceil(d.bars.length / PAGE_SIZE));
-  const visibleBars = d.bars.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const resetKey = useMemo(() => d.barMode + ':' + d.bars.map((bar) => bar.label).join('|'), [d.barMode, d.bars]);
+  const pageCount = d.barMode === 'section' ? 1 : Math.max(1, Math.ceil(d.bars.length / PAGE_SIZE));
+  const visibleBars = d.barMode === 'section' ? d.bars : d.bars.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   useEffect(() => {
     setPage(0);
@@ -51,22 +51,22 @@ export function Dashboard({ v }: { v: MobileView }) {
         <Sparkline d={d} />
       </View>
 
-      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, paddingVertical: 2 }}>
-        <Pressable onPress={v.period.openSheet} style={{ flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#e6ded0', borderRadius: 24, paddingVertical: 9, paddingHorizontal: 18 }}>
+      <View style={{ width: '100%', flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 2 }}>
+        <Pressable onPress={v.period.openSheet} style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#e6ded0', borderRadius: 24, paddingVertical: 9, paddingHorizontal: 10 }}>
           <Svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="#6b665c" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
             <Rect x="3" y="5" width="18" height="16" rx="3" />
             <Path d="M8 3v4" />
             <Path d="M16 3v4" />
             <Path d="M3 11h18" />
           </Svg>
-          <Text style={{ fontSize: 13, fontWeight: '600', color: '#1a1a18' }}>{v.period.label}</Text>
-          <Text style={{ fontSize: 11, fontWeight: '600', color: '#6b665c' }}>{v.period.days}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.74} allowFontScaling={false} style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: '600', color: '#1a1a18' }}>{v.period.compactLabel}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78} allowFontScaling={false} style={{ flexShrink: 0, fontSize: 11, fontWeight: '600', color: '#6b665c' }}>{v.period.days}</Text>
           <Svg viewBox="0 0 24 24" width={15} height={15} fill="none" stroke="#6b665c" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
             <Path d="m6 9 6 6 6-6" />
           </Svg>
         </Pressable>
-        <Pressable onPress={() => setSectionOpen(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#e6ded0', borderRadius: 24, paddingVertical: 9, paddingHorizontal: 13, maxWidth: '48%' }}>
-          <Text numberOfLines={1} style={{ fontSize: 13, fontWeight: '600', color: '#1a1a18', flexShrink: 1 }}>{v.period.sectionId == null ? 'Todas' : (v.period.sectionOptions.find((s) => s.id === v.period.sectionId)?.name ?? 'Sección')}</Text>
+        <Pressable onPress={() => setSectionOpen(true)} style={{ width: 104, flexShrink: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#e6ded0', borderRadius: 24, paddingVertical: 9, paddingHorizontal: 10 }}>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82} allowFontScaling={false} style={{ flex: 1, minWidth: 0, textAlign: 'center', fontSize: 13, fontWeight: '600', color: '#1a1a18' }}>{v.period.sectionId == null ? 'Todas' : (v.period.sectionOptions.find((s) => s.id === v.period.sectionId)?.name ?? 'Sección')}</Text>
           <Svg viewBox="0 0 24 24" width={15} height={15} fill="none" stroke="#6b665c" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
             <Path d="m6 9 6 6 6-6" />
           </Svg>
@@ -83,37 +83,39 @@ export function Dashboard({ v }: { v: MobileView }) {
       </Modal>
 
       <View style={{ flexDirection: 'row', gap: 12 }}>
-        <View style={[card, { flex: 1, minWidth: 0 }]}>
+        <Pressable onPress={() => v.openDashboardDetail('collected')} accessibilityRole="button" accessibilityLabel="Ver cobrado por vehículo" style={[card, { flex: 1, minWidth: 0 }]}>
           <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78} allowFontScaling={false} style={{ width: '100%', fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c' }}>Cobrado · {v.period.short}</Text>
           <SummaryAmount value={d.heroIng} fontSize={summaryAmountSize} />
           <View style={{ height: 4, borderRadius: 2, backgroundColor: '#2e7d5b', marginTop: 10 }} />
-        </View>
-        <View style={[card, { flex: 1, minWidth: 0 }]}>
+        </Pressable>
+        <Pressable onPress={() => v.openDashboardDetail('expenses')} accessibilityRole="button" accessibilityLabel="Ver gastos por vehículo" style={[card, { flex: 1, minWidth: 0 }]}>
           <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78} allowFontScaling={false} style={{ width: '100%', fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', color: '#6b665c' }}>Gastos · {v.period.short}</Text>
           <SummaryAmount value={d.heroEgr} fontSize={summaryAmountSize} />
           <View style={{ height: 4, borderRadius: 2, backgroundColor: '#e8a13a', marginTop: 10, width: `${d.egrBarW}%` }} />
-        </View>
+        </Pressable>
       </View>
 
-      <View style={card}>
+      <Pressable onPress={() => v.openDashboardDetail('breakdown')} accessibilityRole="button" accessibilityLabel="Ver detalle de gastos" style={card}>
         <Donut d={d} />
-      </View>
+      </Pressable>
 
       <View style={card}>
+        <Pressable onPress={() => v.openDashboardDetail('earnings')} accessibilityRole="button" accessibilityLabel="Ver ganancia detallada">
         <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
-          <Text style={{ fontSize: 15, fontWeight: '700' }}>Ganancia por vehículo</Text>
-          <Pressable onPress={v.navGastos}>
+          <Text style={{ fontSize: 15, fontWeight: '700' }}>{d.barMode === 'section' ? 'Ganancia por sección' : 'Ganancia por vehículo'}</Text>
+          <Pressable onPress={(event) => { event.stopPropagation(); v.navGastos(); }}>
             <Text style={{ fontSize: 12, fontWeight: '600', color: '#b5791a' }}>Ver gastos →</Text>
           </Pressable>
         </View>
         <View style={{ marginTop: 14 }}>
           {d.bars.length === 0 ? (
-            <Text style={{ fontSize: 12, color: '#6b665c' }}>Sin vehículos activos todavía</Text>
+            <Text style={{ fontSize: 12, color: '#6b665c' }}>{d.barMode === 'section' ? 'Sin secciones activas todavía' : 'Sin vehículos activos todavía'}</Text>
           ) : (
-            <BarList bars={visibleBars.map((b) => ({ label: b.plate, w: b.w, color: b.color, short: b.short }))} />
+            <BarList bars={visibleBars.map((b) => ({ label: b.label, w: b.w, color: b.color, short: b.short }))} />
           )}
         </View>
-        <Pagination page={page} pageSize={PAGE_SIZE} total={d.bars.length} itemLabel="vehículos" onPageChange={setPage} />
+        </Pressable>
+        {d.barMode === 'vehicle' && <Pagination page={page} pageSize={PAGE_SIZE} total={d.bars.length} itemLabel="vehículos" onPageChange={setPage} />}
       </View>
 
       <HealthCard d={d} onPress={v.navAlertas} />
