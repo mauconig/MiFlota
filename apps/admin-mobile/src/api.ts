@@ -289,7 +289,7 @@ export interface AssistantTable {
 }
 
 export interface AssistantChart {
-  kind: 'bars';
+  kind: 'bars' | 'line';
   title: string;
   items: { label: string; value: number; displayValue: string; subtitle?: string }[];
 }
@@ -338,10 +338,11 @@ export interface ReportExportResponse {
 
 /** La pregunta viaja al backend autenticado. La clave y el acceso a los datos
  * permanecen siempre en el servidor; el bundle de Expo no contiene ninguno. */
-export function askAssistant(question: string, history: AssistantHistoryItem[]): Promise<AssistantReply> {
+export function askAssistant(question: string, history: AssistantHistoryItem[], signal?: AbortSignal): Promise<AssistantReply> {
   return req<AssistantReply>('/api/assistant/query', {
     method: 'POST',
-    body: JSON.stringify({ question, history: history.slice(-6) }),
+    signal,
+    body: JSON.stringify({ question, history: history.slice(-6), capabilities: { lineCharts: true } }),
   });
 }
 

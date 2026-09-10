@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Keyboard, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { KeyboardChatScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useSharedValue } from 'react-native-reanimated';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Circle, Line, Path, Polyline, Text as SvgText } from 'react-native-svg';
 import { askAssistant, SinSesion, type AssistantAction, type AssistantCard, type AssistantChart, type AssistantFollowUp, type AssistantHistoryItem, type AssistantTable } from '../api';
 import { API_BASE } from '../config';
 import { Pagination } from '../components/Pagination';
@@ -30,6 +30,27 @@ const INTRO: ChatMessage = {
 };
 
 const SUGGESTIONS = ['¿Quién debe más?', '¿Qué auto rinde más este mes?', '¿Cuánto cobré esta semana?', '¿En qué gasté más este mes?'];
+
+type TableSort = { key: string; direction: 1 | -1 };
+interface TableSheetState { table: AssistantTable; sort: TableSort }
+
+function initialTableSort(table: AssistantTable): TableSort {
+  return { key: table.columns[0]?.key ?? '', direction: 1 };
+}
+
+function sortTableRows(table: AssistantTable, sort: TableSort): AssistantTable['rows'] {
+  return [...table.rows].sort((a, b) => {
+    const av = a.cells[sort.key] ?? '';
+    const bv = b.cells[sort.key] ?? '';
+    return av.localeCompare(bv, 'es', { numeric: true, sensitivity: 'base' }) * sort.direction;
+  });
+}
+
+function toggleTableSort(current: TableSort, key: string): TableSort {
+  return current.key === key
+    ? { key, direction: current.direction === 1 ? -1 : 1 }
+    : { key, direction: 1 };
+}
 
 function dateLabel(iso: string): string {
   const [year, month, day] = iso.split('-');
@@ -86,16 +107,30 @@ function ResultCard({ card, onAction }: { card: AssistantCard; onAction: (action
   ) : content;
 }
 
-function TableContent({ table, rows, onAction }: { table: AssistantTable; rows: AssistantTable['rows']; onAction: (action: AssistantAction) => void }) {
+function TableContent({ table, rows, onAction, sort, onSort }: { table: AssistantTable; rows: AssistantTable['rows']; onAction: (action: AssistantAction) => void; sort: TableSort; onSort: (key: string) => void }) {
   return (
     <View style={styles.table}>
       <View style={styles.tableRow}>
-        {table.columns.map((column) => <Text key={column.key} style={[styles.tableCell, styles.tableHeader]}>{column.label}</Text>)}
+        {table.columns.map((column) => {
+          const active = sort.key === column.key;
+          const direction = active ? (sort.direction === 1 ? '↑' : '↓') : '↕';
+          return (
+            <Pressable
+              key={column.key}
+              onPress={() => onSort(column.key)}
+              style={[styles.tableCell, styles.tableHeader]}
+              accessibilityRole="button"
+              accessibilityLabel={`Ordenar por ${column.label}${active ? (sort.direction === 1 ? ', ascendente' : ', descendente') : ''}`}
+            >
+              <Text style={styles.tableHeader} numberOfLines={2}>{column.label} {direction}</Text>
+            </Pressable>
+          );
+        })}
       </View>
       {rows.map((row) => {
         const content = (
           <View style={styles.tableRow}>
-            {table.columns.map((column) => <Text key={column.key} style={styles.tableCell} numberOfLines={2}>{row.cells[column.key] || '—'}</Text>)}
+            {table.columns.map((column) => <Text key={column.key} style={styles.tableCell} numberOfLines={2}>{row.cells[column.key] ?? '—'}</Text>)}
           </View>
         );
         return row.action ? (
@@ -108,15 +143,20 @@ function TableContent({ table, rows, onAction }: { table: AssistantTable; rows: 
   );
 }
 
-function ResultTable({ table, onAction, onOpen }: { table: AssistantTable; onAction: (action: AssistantAction) => void; onOpen: (table: AssistantTable) => void }) {
-  const previewRows = table.rows.slice(0, 5);
+function ResultTable({ table, onAction, onOpen }: { table: AssistantTable; onAction: (action: AssistantAction) => void; onOpen: (table: TableSheetState) => void }) {
+  const [sort, setSort] = useState<TableSort>(() => initialTableSort(table));
+  useEffect(() => {
+    setSort(initialTableSort(table));
+  }, [table]);
+  const rows = sortTableRows(table, sort);
+  const previewRows = rows.slice(0, 5);
   return (
     <View style={styles.resultTable}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tableScroll}>
-        <TableContent table={table} rows={previewRows} onAction={onAction} />
+        <TableContent table={table} rows={previewRows} onAction={onAction} sort={sort} onSort={(key) => setSort((current) => toggleTableSort(current, key))} />
       </ScrollView>
       {table.rows.length > previewRows.length ? (
-        <Pressable onPress={() => onOpen(table)} style={styles.moreTableButton} accessibilityRole="button">
+        <Pressable onPress={() => onOpen({ table, sort })} style={styles.moreTableButton} accessibilityRole="button">
           <Text style={styles.moreTableText}>Ver más · {table.rows.length} filas</Text>
         </Pressable>
       ) : (
@@ -127,18 +167,50 @@ function ResultTable({ table, onAction, onOpen }: { table: AssistantTable; onAct
 }
 
 function ResultChart({ chart }: { chart: AssistantChart }) {
-  const max = Math.max(...chart.items.map((item) => Math.abs(item.value)), 1);
+  const items = chart.items.filter((item) => Number.isFinite(item.value));
+  if (!items.length || (chart.kind === 'line' && items.length < 2)) return null;
+
+  const min = Math.min(0, ...items.map((item) => item.value));
+  const max = Math.max(0, ...items.map((item) => item.value));
+  const span = max - min || 1;
+  const x = (index: number) => 24 + index * 280 / Math.max(items.length - 1, 1);
+  const y = (value: number) => 136 - (value - min) / span * 112;
+
   return (
     <View style={styles.chartBox}>
       <Text style={styles.chartTitle}>{chart.title}</Text>
-      {chart.items.map((item) => (
+      {chart.kind === 'line' ? (
+        <>
+          <Svg width="100%" height={168} viewBox="0 0 328 168" accessible accessibilityLabel={chart.title}>
+            <Line x1="24" x2="304" y1={y(0)} y2={y(0)} stroke="#c7bdac" />
+            <Polyline fill="none" stroke="#2e7d5b" strokeWidth={2.5} points={items.map((item, index) => `${x(index)},${y(item.value)}`).join(' ')} />
+            {items.map((item, index) => (
+              <Circle
+                key={`${item.label}-${item.value}`}
+                cx={x(index)}
+                cy={y(item.value)}
+                r={3}
+                fill="#2e7d5b"
+                accessible
+                accessibilityLabel={`${item.label}: ${item.displayValue}`}
+              />
+            ))}
+            <SvgText x={24} y={160} fontSize={10} fill="#6b665c">{items[0].label}</SvgText>
+            <SvgText x={304} y={160} textAnchor="end" fontSize={10} fill="#6b665c">{items[items.length - 1].label}</SvgText>
+          </Svg>
+          <View style={styles.lineValues}>
+            {items.map((item) => <View key={`${item.label}-${item.displayValue}`} style={styles.lineValueRow}><Text style={styles.chartLabel}>{item.label}</Text><Text style={[styles.chartValue, item.value < 0 && styles.chartNegative]}>{item.displayValue}</Text></View>)}
+          </View>
+        </>
+      ) : items.map((item) => (
         <View key={`${item.label}-${item.value}`} style={styles.chartItem}>
           <View style={styles.chartItemHeader}>
             <Text style={styles.chartLabel} numberOfLines={1}>{item.label}</Text>
             <Text style={[styles.chartValue, item.value < 0 && styles.chartNegative]}>{item.displayValue}</Text>
           </View>
           <View style={styles.chartTrack}>
-            <View style={[styles.chartBar, item.value < 0 && styles.chartBarNegative, { width: `${Math.max(2, Math.round((Math.abs(item.value) / max) * 100))}%` }]} />
+            <View style={[styles.chartZero, { left: `${((0 - min) / span) * 100}%` }]} />
+            <View style={[styles.chartBar, item.value < 0 && styles.chartBarNegative, { left: `${((Math.min(0, item.value) - min) / span) * 100}%`, width: `${(Math.abs(item.value) / span) * 100}%` }]} />
           </View>
           {!!item.subtitle && <Text style={styles.chartSubtitle} numberOfLines={1}>{item.subtitle}</Text>}
         </View>
@@ -147,14 +219,22 @@ function ResultChart({ chart }: { chart: AssistantChart }) {
   );
 }
 
-function AssistantTableSheet({ table, onAction, onClose }: { table: AssistantTable | null; onAction: (action: AssistantAction) => void; onClose: () => void }) {
+function AssistantTableSheet({ table, onAction, onClose }: { table: TableSheetState | null; onAction: (action: AssistantAction) => void; onClose: () => void }) {
   const PAGE_SIZE = 10;
   const [page, setPage] = useState(0);
-  const rows = table?.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE) ?? [];
+  const [sort, setSort] = useState<TableSort>(() => table ? table.sort : { key: '', direction: 1 });
+  const tableData = table?.table;
+  const rows = tableData ? sortTableRows(tableData, sort).slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE) : [];
 
   useEffect(() => {
     setPage(0);
+    if (table) setSort(table.sort);
   }, [table]);
+
+  const pickSort = (key: string) => {
+    setSort((current) => toggleTableSort(current, key));
+    setPage(0);
+  };
 
   return (
     <Modal visible={!!table} transparent animationType="slide" onRequestClose={onClose}>
@@ -163,20 +243,20 @@ function AssistantTableSheet({ table, onAction, onClose }: { table: AssistantTab
           <View style={styles.sheetHeader}>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.sheetTitle}>Detalle de resultados</Text>
-              {!!table && <Text style={styles.sheetSubtitle}>{table.rows.length} filas en total</Text>}
+              {!!tableData && <Text style={styles.sheetSubtitle}>{tableData.rows.length} filas en total</Text>}
             </View>
             <Pressable onPress={onClose} style={styles.sheetClose} accessibilityRole="button" accessibilityLabel="Cerrar detalle">
               <Text style={styles.sheetCloseText}>Cerrar</Text>
             </Pressable>
           </View>
-          {!!table && (
+          {!!tableData && (
             <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetScrollContent} showsVerticalScrollIndicator>
               <ScrollView horizontal showsHorizontalScrollIndicator>
-                <TableContent table={table} rows={rows} onAction={onAction} />
+                <TableContent table={tableData} rows={rows} onAction={onAction} sort={sort} onSort={pickSort} />
               </ScrollView>
             </ScrollView>
           )}
-          {!!table && <Pagination page={page} pageSize={PAGE_SIZE} total={table.rows.length} itemLabel="filas" onPageChange={setPage} />}
+          {!!tableData && <Pagination page={page} pageSize={PAGE_SIZE} total={tableData.rows.length} itemLabel="filas" onPageChange={setPage} />}
         </View>
       </View>
     </Modal>
@@ -187,11 +267,14 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
   const [messages, setMessages] = useState<ChatMessage[]>([INTRO]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
-  const [tableSheet, setTableSheet] = useState<AssistantTable | null>(null);
+  const [tableSheet, setTableSheet] = useState<TableSheetState | null>(null);
   const listRef = useRef<React.ElementRef<typeof KeyboardChatScrollView>>(null);
   const composerHeight = useSharedValue(0);
   const nextId = useRef(1);
   const previousMessageCount = useRef(messages.length);
+  const controller = useRef<AbortController | null>(null);
+
+  useEffect(() => () => controller.current?.abort(), []);
 
   useEffect(() => {
     const messageCountIncreased = messages.length > previousMessageCount.current;
@@ -217,9 +300,12 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
     setMessages((current) => [...current, userMessage]);
     setDraft('');
     setSending(true);
+    const abort = new AbortController();
+    controller.current = abort;
 
     try {
-      const reply = await askAssistant(question, history);
+      const reply = await askAssistant(question, history, abort.signal);
+      if (abort.signal.aborted) return;
       setMessages((current) => [
         ...current,
         {
@@ -237,6 +323,7 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
         },
       ]);
     } catch (error) {
+      if (abort.signal.aborted) return;
       if (error instanceof SinSesion) {
         onSinSesion();
         return;
@@ -253,13 +340,23 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
         },
       ]);
     } finally {
-      setSending(false);
+      if (controller.current === abort) {
+        controller.current = null;
+        setSending(false);
+      }
     }
   };
 
   const activateAction = (action: AssistantAction) => {
     if (action.kind === 'car') onOpenCar(action.carId);
     else void send(action.question);
+  };
+
+  const resetConversation = () => {
+    if (sending) return;
+    setMessages([INTRO]);
+    setDraft('');
+    setTableSheet(null);
   };
 
   const renderMessage = (item: ChatMessage) => {
@@ -307,6 +404,13 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
 
   return (
     <View style={styles.screen}>
+      {messages.length > 1 && (
+        <View style={styles.conversationActions}>
+          <Pressable onPress={resetConversation} disabled={sending} accessibilityRole="button" accessibilityLabel="Nueva conversación">
+            <Text style={styles.newConversationText}>+ Nueva conversación</Text>
+          </Pressable>
+        </View>
+      )}
       <KeyboardChatScrollView
         ref={listRef}
         keyboardLiftBehavior="never"
@@ -378,6 +482,8 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  conversationActions: { alignItems: 'flex-end', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 2 },
+  newConversationText: { color: '#8a5d16', fontSize: 11, fontWeight: '700' },
   list: { flexGrow: 1, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 18, gap: 12 },
   suggestions: { gap: 9, marginBottom: 4 },
   suggestionLabel: { paddingLeft: 3, fontSize: 10, fontWeight: '700', letterSpacing: 1, color: '#6b665c' },
@@ -405,16 +511,19 @@ const styles = StyleSheet.create({
   chartLabel: { flex: 1, color: '#5b554b', fontSize: 10, fontWeight: '600' },
   chartValue: { color: '#256b4d', fontSize: 10, fontWeight: '800' },
   chartNegative: { color: '#a34f3c' },
-  chartTrack: { height: 8, borderRadius: 4, backgroundColor: '#eee7dc', overflow: 'hidden' },
-  chartBar: { height: '100%', borderRadius: 4, backgroundColor: '#d1912e' },
+  chartTrack: { position: 'relative', height: 8, borderRadius: 4, backgroundColor: '#eee7dc', overflow: 'hidden' },
+  chartZero: { position: 'absolute', top: 0, bottom: 0, width: 1, backgroundColor: '#c7bdac', zIndex: 1 },
+  chartBar: { position: 'absolute', top: 0, bottom: 0, minWidth: 1, borderRadius: 4, backgroundColor: '#2e7d5b' },
   chartBarNegative: { backgroundColor: '#b96a55' },
   chartSubtitle: { color: '#817b71', fontSize: 9 },
+  lineValues: { gap: 4, marginTop: -2 },
+  lineValueRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   resultTable: { alignSelf: 'stretch', gap: 6, marginTop: 2 },
   tableScroll: { alignSelf: 'stretch', marginTop: 3 },
   table: { minWidth: '100%', borderWidth: 1, borderColor: '#e6ded0', borderRadius: 14, overflow: 'hidden', backgroundColor: '#fffdf8' },
   tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#eee7dc', paddingHorizontal: 10, paddingVertical: 9 },
   tableCell: { minWidth: 104, flex: 1, color: '#3b3831', fontSize: 10, lineHeight: 14, paddingRight: 8 },
-  tableHeader: { color: '#7e5a1e', fontWeight: '800', fontSize: 9 },
+  tableHeader: { color: '#7e5a1e', fontWeight: '800', fontSize: 9, backgroundColor: '#f4efe4' },
   tableCount: { color: '#817b71', fontSize: 10, marginLeft: 3 },
   moreTableButton: { alignSelf: 'flex-start', borderRadius: 14, borderWidth: 1, borderColor: '#e4d7c3', backgroundColor: '#fff8e9', paddingHorizontal: 12, paddingVertical: 8 },
   moreTableText: { color: '#6e4a13', fontSize: 10, fontWeight: '800' },
