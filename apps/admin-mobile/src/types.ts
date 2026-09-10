@@ -5,6 +5,7 @@ export type ServiceUnidad = 'dias' | 'meses';
 
 export interface Car {
   id: string;
+  sectionId: number | null;
   plate: string;
   model: string;
   year: number;
@@ -110,7 +111,7 @@ export interface LocationHistory extends CarLocation {
 // un frame de teléfono, no un dashboard de pestañas siempre montadas como
 // admin-web, así que este estado no se parece al `UIState` de ahí.
 
-export type Screen = 'dashboard' | 'flota' | 'gastos' | 'mas' | 'alertas' | 'choferes' | 'detalle' | 'nuevoVehiculo' | 'registrar' | 'reportes' | 'ranking' | 'assistant' | 'perfil';
+export type Screen = 'dashboard' | 'flota' | 'gastos' | 'mas' | 'secciones' | 'alertas' | 'choferes' | 'detalle' | 'nuevoVehiculo' | 'registrar' | 'reportes' | 'ranking' | 'assistant' | 'perfil';
 export type AdminNotificationRoute = { kind: 'alerts' } | { kind: 'payment'; carId: string; paymentId: number } | { kind: 'report'; carId: string; reportId: number };
 export type Period = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
 export type RegistrarTab = 'cobro' | 'gasto';
@@ -139,6 +140,7 @@ export interface Reporte {
 }
 
 export interface NuevoVehiculoForm {
+  sectionId: number | null;
   plate: string;
   model: string;
   year: string;
@@ -203,7 +205,7 @@ export type FleetFilter = 'todos' | 'activo' | 'taller' | 'alerta';
 export type RankBy = 'auto' | 'modelo';
 
 export type ReportInclude = 'gastos' | 'ingresos' | 'ambos';
-export type ReportStep = 'include' | 'cars' | 'categories' | 'review';
+export type ReportStep = 'period' | 'include' | 'cars' | 'categories' | 'review';
 export type ReportSelection = 'todos' | string[];
 export type ReportCategorySelection = 'todas' | string[];
 
@@ -231,8 +233,12 @@ export interface MobileState {
   backTo: Screen;
   carId: string | null;
   period: Period;
+  dashboardSectionId: number | null;
   cFrom: string;
   cTo: string;
+  periodFromText: string;
+  periodToText: string;
+  periodError: string;
   periodSheet: boolean;
   movementDetailId: string | null;
   quotaDetailId: number | null;
@@ -251,9 +257,9 @@ export interface MobileState {
   nuevoVehiculoGuardando: boolean;
   registrar: RegistrarForm | null;
   registroChoice: boolean;
-  gastosStep: 'vehicle' | 'category' | 'results';
+  gastosStep: 'period' | 'vehicle' | 'category' | 'results';
   gastosCarIds: ReportSelection;
-  gastosCat: string;
+  gastosCat: ReportCategorySelection;
   gastosExpanded: Record<string, boolean>;
   reportesStep: ReportStep;
   reportesInclude: ReportInclude | null;
@@ -263,6 +269,7 @@ export interface MobileState {
   reportesError: string;
   toast: string;
   fleetFilter: FleetFilter;
+  fleetSectionId: number | null;
   rankBy: RankBy;
   /** Formulario de cambio de contraseña de la pantalla Perfil. */
   perfil: PerfilForm;

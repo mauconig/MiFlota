@@ -233,6 +233,7 @@ export function useAuth(): Auth {
 }
 
 export interface NuevoCarPayload {
+  sectionId: number;
   plate: string;
   model: string;
   year: number;
@@ -364,6 +365,7 @@ export interface AssignDriverPayload extends DriverCredentials {
 }
 
 export interface FleetStore {
+  sections: FleetSection[];
   cars: Car[];
   movs: Mov[];
   pagos: Pago[];
@@ -382,7 +384,12 @@ export interface FleetStore {
   mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: PickedFile | null; reportId?: number | null }) => Promise<void>;
   updateReporte: (id: number, estado: Extract<ReportStatus, 'en_taller' | 'resuelta'>) => Promise<Reporte>;
   exportReport: (payload: ReportExportPayload) => Promise<ReportExportResponse>;
+  addSection: (name: string) => Promise<void>;
+  renameSection: (id: number, name: string) => Promise<void>;
+  deleteSection: (id: number) => Promise<void>;
+  reorderSections: (ids: number[]) => Promise<void>;
 }
+export interface FleetSection { id: number; name: string; position: number }
 
 /**
  * Estado de la flota respaldado por la API. `patchCar` se aplica primero en
@@ -394,6 +401,7 @@ export interface FleetStore {
  * admin-mobile los usa.
  */
 export function useFleetStore(onError: (msg: string) => void, onSinSesion: () => void, enabled = true): FleetStore {
+  const [sections, setSections] = useState<FleetSection[]>([]);
   const [cars, setCars] = useState<Car[]>([]);
   const [movs, setMovs] = useState<Mov[]>([]);
   const [pagos, setPagos] = useState<Pago[]>([]);
@@ -413,12 +421,13 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
       setRefrescando(true);
       try {
         const [s, l] = await Promise.all([
-          req<{ cars: CarDto[]; movs: MovDto[]; pagos: PagoDto[]; reportes?: Reporte[] }>('/api/state'),
+          req<{ sections: FleetSection[]; cars: CarDto[]; movs: MovDto[]; pagos: PagoDto[]; reportes?: Reporte[] }>('/api/state'),
           req<CarLocation[]>('/api/locations'),
         ]);
         // Una respuesta de una sesión anterior no puede repoblar el store
         // después de cerrar sesión o cambiar de usuario.
         if (generation !== refreshGeneration.current) return;
+        setSections(s.sections ?? []);
         setCars(s.cars.map(toCar));
         setMovs(s.movs.map(toMov));
         setPagos(s.pagos.map(toPago));
@@ -447,6 +456,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
       // que otro usuario vea por un instante los datos de la sesión anterior;
       // cuando el login termina, `enabled` cambia y se hace la carga real.
       setCars([]);
+      setSections([]);
       setMovs([]);
       setPagos([]);
       setReportes([]);
@@ -562,6 +572,11 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     if (r.reporte) setReportes((rs) => rs.map((reporte) => (reporte.id === r.reporte!.id ? r.reporte! : reporte)));
   }, []);
 
+  const addSection = useCallback(async (name: string) => { const s = await req<FleetSection>('/api/sections', { method: 'POST', body: JSON.stringify({ name }) }); setSections((v) => [...v, s]); }, []);
+  const renameSection = useCallback(async (id: number, name: string) => { const s = await req<FleetSection>(`/api/sections/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }); setSections((v) => v.map((x) => x.id === id ? s : x)); }, []);
+  const deleteSection = useCallback(async (id: number) => { await req(`/api/sections/${id}`, { method: 'DELETE' }); setSections((v) => v.filter((x) => x.id !== id)); setCars((v) => v.map((c) => c.sectionId === id ? { ...c, sectionId: null } : c)); }, []);
+  const reorderSections = useCallback(async (ids: number[]) => { const s = await req<FleetSection[]>('/api/sections/order', { method: 'PUT', body: JSON.stringify({ ids }) }); setSections(s); }, []);
+
   const updateReporte = useCallback(async (id: number, estado: Extract<ReportStatus, 'en_taller' | 'resuelta'>) => {
     const reporte = await req<Reporte>(`/api/reportes/${id}`, { method: 'PATCH', body: JSON.stringify({ estado }) });
     setReportes((rs) => rs.map((r) => (r.id === id ? reporte : r)));
@@ -569,6 +584,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
   }, []);
 
   return {
+    sections,
     cars,
     movs,
     pagos,
@@ -582,6 +598,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     previewDriverCredentials,
     assignDriver,
     addCar,
+    addSection, renameSection, deleteSection, reorderSections,
     addPago,
     addEgreso,
     mandarATaller,

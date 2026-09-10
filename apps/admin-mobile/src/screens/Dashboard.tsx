@@ -1,4 +1,4 @@
-import { Pressable, Text, View } from 'react-native';
+import { Modal, Pressable, Text, View } from 'react-native';
 import { useEffect, useMemo, useState } from 'react';
 import Svg, { Path, Rect } from 'react-native-svg';
 import type { MobileView } from '../useMobileView';
@@ -27,6 +27,7 @@ export function Dashboard({ v }: { v: MobileView }) {
   const summaryAmountLength = Math.max(d.heroIng.length, d.heroEgr.length);
   const summaryAmountSize = summaryAmountLength > 13 ? 17 : 20;
   const [page, setPage] = useState(0);
+  const [sectionOpen, setSectionOpen] = useState(false);
   const resetKey = useMemo(() => d.bars.map((bar) => bar.plate).join('|'), [d.bars]);
   const pageCount = Math.max(1, Math.ceil(d.bars.length / PAGE_SIZE));
   const visibleBars = d.bars.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -50,7 +51,7 @@ export function Dashboard({ v }: { v: MobileView }) {
         <Sparkline d={d} />
       </View>
 
-      <View style={{ flexDirection: 'row', justifyContent: 'center', paddingVertical: 2 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, paddingVertical: 2 }}>
         <Pressable onPress={v.period.openSheet} style={{ flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#e6ded0', borderRadius: 24, paddingVertical: 9, paddingHorizontal: 18 }}>
           <Svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="#6b665c" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
             <Rect x="3" y="5" width="18" height="16" rx="3" />
@@ -64,7 +65,22 @@ export function Dashboard({ v }: { v: MobileView }) {
             <Path d="m6 9 6 6 6-6" />
           </Svg>
         </Pressable>
+        <Pressable onPress={() => setSectionOpen(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#e6ded0', borderRadius: 24, paddingVertical: 9, paddingHorizontal: 13, maxWidth: '48%' }}>
+          <Text numberOfLines={1} style={{ fontSize: 13, fontWeight: '600', color: '#1a1a18', flexShrink: 1 }}>{v.period.sectionId == null ? 'Todas' : (v.period.sectionOptions.find((s) => s.id === v.period.sectionId)?.name ?? 'Sección')}</Text>
+          <Svg viewBox="0 0 24 24" width={15} height={15} fill="none" stroke="#6b665c" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <Path d="m6 9 6 6 6-6" />
+          </Svg>
+        </Pressable>
       </View>
+      <Modal visible={sectionOpen} transparent animationType="fade" onRequestClose={() => setSectionOpen(false)}>
+        <Pressable onPress={() => setSectionOpen(false)} style={{ flex: 1, backgroundColor: 'rgba(22,21,15,0.28)', justifyContent: 'center', padding: 28 }}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={{ backgroundColor: '#fffdf8', borderRadius: 22, padding: 18, gap: 8 }}>
+            <Text style={{ fontSize: 16, fontWeight: '800', marginBottom: 4 }}>Sección</Text>
+            <Pressable onPress={() => { v.period.setSectionId(null); setSectionOpen(false); }} style={{ padding: 13, borderRadius: 12, backgroundColor: v.period.sectionId == null ? '#16150f' : '#f4efe4' }}><Text style={{ color: v.period.sectionId == null ? '#fffdf8' : '#3d3a34', fontWeight: '700' }}>Todas</Text></Pressable>
+            {v.period.sectionOptions.map((section) => <Pressable key={section.id} onPress={() => { v.period.setSectionId(section.id); setSectionOpen(false); }} style={{ padding: 13, borderRadius: 12, backgroundColor: v.period.sectionId === section.id ? '#16150f' : '#f4efe4' }}><Text style={{ color: v.period.sectionId === section.id ? '#fffdf8' : '#3d3a34', fontWeight: '700' }}>{section.name}</Text></Pressable>)}
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <View style={{ flexDirection: 'row', gap: 12 }}>
         <View style={[card, { flex: 1, minWidth: 0 }]}>

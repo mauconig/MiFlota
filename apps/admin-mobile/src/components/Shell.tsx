@@ -22,6 +22,7 @@ import { Choferes } from '../screens/Choferes';
 import { Ranking } from '../screens/Ranking';
 import { Assistant } from '../screens/Assistant';
 import { Perfil } from '../screens/Perfil';
+import { Secciones } from '../screens/Secciones';
 import { ReportDetailModal } from './ReportDetailModal';
 
 export function Shell({ v, nombre, usuario, onLogout, onRefresh, refreshing, syncError }: { v: MobileView; nombre: string; usuario: string; onLogout: () => void; onRefresh: () => void; refreshing: boolean; syncError: string }) {
@@ -67,6 +68,7 @@ export function Shell({ v, nombre, usuario, onLogout, onRefresh, refreshing, syn
             {v.screen === 'flota' && <Flota v={v} />}
             {v.screen === 'gastos' && <Gastos v={v} />}
             {v.screen === 'mas' && <Mas v={v} />}
+            {v.screen === 'secciones' && <Secciones v={v} />}
             {v.screen === 'alertas' && <Alertas v={v} />}
             {v.screen === 'choferes' && <Choferes v={v} />}
             {v.screen === 'detalle' && <Detalle v={v} />}

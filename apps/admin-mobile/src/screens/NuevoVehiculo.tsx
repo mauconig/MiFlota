@@ -22,6 +22,12 @@ export function NuevoVehiculo({ v }: { v: MobileView }) {
 
       <View style={card}>
         <View style={[row, divider]}>
+          <Text style={label}>Sección</Text>
+          <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 6 }}>
+            {nc.sections.map((section) => <Pressable key={section.id} onPress={() => nc.setSectionId(section.id)} style={{ paddingHorizontal: 10, paddingVertical: 7, borderRadius: 12, backgroundColor: nc.sectionId === section.id ? '#16150f' : '#f4efe4' }}><Text style={{ color: nc.sectionId === section.id ? '#fffdf8' : '#3d3a34', fontWeight: '700', fontSize: 12 }}>{section.name}</Text></Pressable>)}
+          </View>
+        </View>
+        <View style={[row, divider]}>
           <Text style={label}>Chapa</Text>
           <TextInput
             value={nc.plate}

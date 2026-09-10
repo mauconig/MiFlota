@@ -6,7 +6,8 @@ import { isoLocal } from '../format';
 const parseIso = (iso: string) => new Date(iso + 'T12:00:00');
 
 /** Reemplazo de `<input type="date">`: no existe en React Native. Muestra el
- *  picker nativo (diálogo en Android, rueda inline en iOS) sobre demanda. */
+ * picker nativo para fechas de formularios (no se usa en el selector de
+ * período, que permite escribir el rango manualmente). */
 export function useDateField(value: string, onChange: (iso: string) => void, max?: string) {
   const [open, setOpen] = useState(false);
   const picker = open ? (
@@ -16,9 +17,6 @@ export function useDateField(value: string, onChange: (iso: string) => void, max
       display={Platform.OS === 'ios' ? 'inline' : 'default'}
       maximumDate={max ? parseIso(max) : undefined}
       onChange={(e, d) => {
-        // En Android el diálogo se cierra solo apenas hay una elección (o se
-        // cancela); en iOS la rueda queda inline y solo se oculta al tocar
-        // "listo" en otro lado — acá se cierra en el próximo `open()`.
         if (Platform.OS === 'android') setOpen(false);
         if (e.type === 'set' && d) onChange(isoLocal(d));
       }}

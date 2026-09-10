@@ -9,9 +9,9 @@ export function TabHeader({ title, sub, onAssistant, onProfile, onRefresh, refre
     <View style={{ paddingTop: 10, paddingHorizontal: 20, paddingBottom: 6, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={{ fontSize: 24, fontWeight: '700', letterSpacing: -0.5 }}>{title}</Text>
-        <Text style={{ fontSize: 12, color: '#6b665c', marginTop: 1 }} numberOfLines={1}>
+        {!!sub && <Text style={{ fontSize: 12, color: '#6b665c', marginTop: 1 }} numberOfLines={1}>
           {sub}
-        </Text>
+        </Text>}
       </View>
       <Pressable onPress={onRefresh} disabled={refreshing} accessibilityLabel="Actualizar datos" style={[iconBtnStyle, refreshing && { opacity: 0.55 }]}>
         {refreshing ? <ActivityIndicator size="small" color="#1a1a18" /> : (

@@ -6,6 +6,7 @@ import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, daysBetween, durLbl, dLbl, dLblFull, fmt, fmtShort, initials, statusColor, numFromInput, miles, isoLocal } from './format';
 import { getAuthHeaders, type FleetStore, type NuevoCarPayload } from './api';
 import { API_BASE } from './config';
+import { dateTextFromIso, maskDateInput, validateDateRange } from './dateRange';
 
 const UMBRAL_VERDE = 2500000;
 const SVC_AVISO_DIAS = 15;
@@ -180,6 +181,7 @@ export function blankRegistrarForm(tab: RegistrarTab, carId: string, driver: str
 
 function blankNuevoVehiculo(): import('./types').NuevoVehiculoForm {
   return {
+    sectionId: null,
     plate: '',
     model: '',
     year: '2018',
@@ -197,6 +199,7 @@ function blankNuevoVehiculo(): import('./types').NuevoVehiculoForm {
 
 function nuevoVehiculoDesdeCar(car: Car): import('./types').NuevoVehiculoForm {
   return {
+    sectionId: car.sectionId,
     plate: car.plate,
     model: car.model,
     year: String(car.year),
@@ -217,8 +220,12 @@ export function initialMobileState(): MobileState {
     backTo: 'dashboard',
     carId: null,
     period: 'mes',
+    dashboardSectionId: null,
     cFrom: isoLocal(inicioMes(TODAY)),
     cTo: isoLocal(TODAY),
+    periodFromText: dateTextFromIso(isoLocal(inicioMes(TODAY))),
+    periodToText: dateTextFromIso(isoLocal(TODAY)),
+    periodError: '',
     periodSheet: false,
     movementDetailId: null,
     quotaDetailId: null,
@@ -235,18 +242,21 @@ export function initialMobileState(): MobileState {
     nuevoVehiculoGuardando: false,
     registrar: null,
     registroChoice: false,
-    gastosStep: 'vehicle',
+    gastosStep: 'period',
     gastosCarIds: 'todos',
     gastosCat: 'todas',
     gastosExpanded: {},
-    reportesStep: 'include',
-    reportesInclude: null,
+    // El flujo nuevo comienza por el período visible arriba y luego por
+    // sección. Se exportan ambos tipos de movimientos por defecto.
+    reportesStep: 'period',
+    reportesInclude: 'ambos',
     reportesCarIds: 'todos',
     reportesCategories: 'todas',
     reportesExportando: false,
     reportesError: '',
     toast: '',
     fleetFilter: 'todos',
+    fleetSectionId: null,
     rankBy: 'auto',
     perfil: { actual: '', nueva: '', repetir: '', guardando: false },
   };
@@ -257,6 +267,7 @@ export function initialMobileState(): MobileState {
 
 interface CarCardView {
   id: string;
+  sectionId: number | null;
   plate: string;
   model: string;
   driver: string;
@@ -418,6 +429,7 @@ interface GastoChoiceView {
   id: string;
   label: string;
   sub: string;
+  brand?: string;
   selected: boolean;
   pick: () => void;
 }
@@ -502,11 +514,18 @@ export interface MobileView {
     chips: Chip[];
     cFrom: string;
     cTo: string;
-    setFrom: (iso: string) => void;
-    setTo: (iso: string) => void;
+    fromText: string;
+    toText: string;
+    error: string;
+    setFromText: (value: string) => void;
+    setToText: (value: string) => void;
+    applyTextRange: () => boolean;
     open: boolean;
     openSheet: () => void;
     closeSheet: () => void;
+    sectionId: number | null;
+    sectionOptions: import('./api').FleetSection[];
+    setSectionId: (id: number | null) => void;
   };
 
   dashboard: {
@@ -528,11 +547,12 @@ export interface MobileView {
     healthSub: string;
   };
 
-  flota: { filters: Chip[]; cars: CarCardView[] };
+  flota: { filters: Chip[]; sectionFilters: Chip[]; cars: CarCardView[]; sections: import('./api').FleetSection[]; addSection: (name: string) => Promise<void>; renameSection: (id: number, name: string) => Promise<void>; deleteSection: (id: number) => Promise<void>; moveSection: (id: number, direction: -1 | 1) => Promise<void> };
 
   gastos: {
-    step: 'vehicle' | 'category' | 'results';
-    carOptions: GastoChoiceView[];
+    step: 'period' | 'vehicle' | 'category' | 'results';
+    allOption: GastoChoiceView;
+    sectionOptions: GastoChoiceView[];
     categoryOptions: GastoChoiceView[];
     selectedCarLabel: string;
     selectedCategoryLabel: string;
@@ -542,10 +562,14 @@ export interface MobileView {
     groups: GastoGroupView[];
     empty: boolean;
     vehicleSelectionValid: boolean;
+    categorySelectionValid: boolean;
+    continuePeriod: () => void;
     continueVehicles: () => void;
+    continueCategory: () => void;
   };
 
-  mas: { alertCount: number; driverCount: number; navAlertas: () => void; navChoferes: () => void; navReportes: () => void; goPerfil: () => void };
+  mas: { alertCount: number; driverCount: number; navAlertas: () => void; navChoferes: () => void; navReportes: () => void; navSecciones: () => void; goPerfil: () => void };
+  secciones: { items: import('./api').FleetSection[]; add: (name: string) => Promise<void>; rename: (id: number, name: string) => Promise<void>; remove: (id: number) => Promise<void>; move: (id: number, direction: -1 | 1) => Promise<void> };
   alertas: { items: AlertView[] };
   choferes: { items: ChoferView[] };
 
@@ -568,6 +592,9 @@ export interface MobileView {
 
   nuevoVehiculo: {
     editando: boolean;
+    sectionId: number | null;
+    sections: import('./api').FleetSection[];
+    setSectionId: (id: number | null) => void;
     plate: string;
     model: string;
     year: string;
@@ -675,7 +702,7 @@ export interface MobileView {
     include: ReportInclude | null;
     setInclude: (value: ReportInclude) => void;
     carSelection: ReportSelection;
-    carOptions: { id: string; label: string; sub: string; selected: boolean; toggle: () => void }[];
+    sectionOptions: { id: string; label: string; sub: string; brand?: string; selected: boolean; toggle: () => void }[];
     selectAllCars: () => void;
     categorySelection: ReportCategorySelection;
     categoryOptions: { label: string; selected: boolean; toggle: () => void }[];
@@ -765,7 +792,7 @@ export function useMobileView(
   locations: CarLocation[],
   state: MobileState,
   update: (patch: Partial<MobileState> | ((s: MobileState) => Partial<MobileState>)) => void,
-  persist: Pick<FleetStore, 'patchCar' | 'previewDriverCredentials' | 'assignDriver' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller' | 'updateReporte' | 'exportReport'>,
+  persist: Pick<FleetStore, 'sections' | 'patchCar' | 'previewDriverCredentials' | 'assignDriver' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller' | 'updateReporte' | 'exportReport' | 'addSection' | 'renameSection' | 'deleteSection' | 'reorderSections'>,
   cambiarPassword: (actual: string, nueva: string) => Promise<void>,
 ): MobileView {
   const toast = (msg: string) => update({ toast: msg });
@@ -798,7 +825,7 @@ export function useMobileView(
   const replaceTab = (screen: Screen) => {
     Keyboard.dismiss();
     stackRef.current = [];
-    update({ screen, backTo: screen, carId: null, ...(screen === 'gastos' ? { gastosStep: 'vehicle' } : {}) });
+    update({ screen, backTo: screen, carId: null, ...(screen === 'gastos' ? { gastosStep: 'period', periodError: '' } : {}) });
   };
   const back = () => {
     Keyboard.dismiss();
@@ -812,9 +839,9 @@ export function useMobileView(
     }
     if (state.screen === 'reportes') {
       const previousReportStep: Partial<Record<ReportStep, ReportStep>> = {
-        cars: 'include',
+        cars: 'period',
         categories: 'cars',
-        review: state.reportesInclude === 'gastos' || state.reportesInclude === 'ambos' ? 'categories' : 'cars',
+        review: 'categories',
       };
       const previousStep = previousReportStep[state.reportesStep];
       if (previousStep) {
@@ -824,6 +851,7 @@ export function useMobileView(
     }
     if (state.screen === 'gastos') {
       const previousGastosStep: Partial<Record<MobileState['gastosStep'], MobileState['gastosStep']>> = {
+        vehicle: 'period',
         category: 'vehicle',
         results: 'category',
       };
@@ -892,7 +920,9 @@ export function useMobileView(
       toast('Cada cuánto se renueva el seguro: entre 1 y ' + SEG_CADA_MAX + ' meses');
       return null;
     }
+    if (n.sectionId == null) { toast('Elegí una sección'); return null; }
     const payload: NuevoCarPayload = {
+      sectionId: n.sectionId,
       plate,
       model: n.model.trim(),
       year: numFromInput(n.year) || 2018,
@@ -967,8 +997,15 @@ export function useMobileView(
   const inRP = (p: Pago) => p.fecha >= r.start && p.fecha <= r.end;
   const inPrevP = (p: Pago) => p.fecha >= prevStart && p.fecha <= prevEnd;
 
-  const tot = stats(movs, aplicaciones, inR, inRA, pagos, inRP);
-  const prev = stats(movs, aplicaciones, inPrev, inPrevA, pagos, inPrevP);
+  const sectionMatches = (carId: string | null) => state.dashboardSectionId == null || (!!carId && carDe.get(carId)?.sectionId === state.dashboardSectionId);
+  const inRSection = (m: Mov) => inR(m) && sectionMatches(m.carId);
+  const inPrevSection = (m: Mov) => inPrev(m) && sectionMatches(m.carId);
+  const inRASection = (a: Aplicacion) => inRA(a) && sectionMatches(a.carId);
+  const inPrevASection = (a: Aplicacion) => inPrevA(a) && sectionMatches(a.carId);
+  const inRPSection = (p: Pago) => inRP(p) && sectionMatches(p.carId);
+  const inPrevPSection = (p: Pago) => inPrevP(p) && sectionMatches(p.carId);
+  const tot = stats(movs, aplicaciones, inRSection, inRASection, pagos, inRPSection);
+  const prev = stats(movs, aplicaciones, inPrevSection, inPrevASection, pagos, inPrevPSection);
 
   const alerts = buildAlerts(active, reportes, cars);
   const alertsByCar = new Map<string, Alerta[]>();
@@ -980,7 +1017,8 @@ export function useMobileView(
 
   const perCarNet = (c: Car) => stats(movs, aplicaciones, (m) => m.carId === c.id && inR(m), (a) => a.carId === c.id && inRA(a), pagos, (p) => p.carId === c.id && inRP(p)).net;
   const sorted = active.map((c) => ({ c, n: perCarNet(c) })).sort((a, b) => b.n - a.n);
-  const maxAbs = Math.max(...sorted.map((x) => Math.abs(x.n)), 1);
+  const dashboardSorted = sorted.filter((x) => state.dashboardSectionId == null || x.c.sectionId === state.dashboardSectionId);
+  const maxAbs = Math.max(...dashboardSorted.map((x) => Math.abs(x.n)), 1);
 
   const deudaPorChofer = new Map<string, number>();
   cuotas.forEach((m) => {
@@ -1031,6 +1069,29 @@ export function useMobileView(
     ['custom', 'Rango'],
   ];
 
+  const selectPeriodPreset = (period: MobileState['period']) => {
+    const selected = range(period, state.cFrom, state.cTo);
+    const from = isoLocal(selected.start);
+    const to = isoLocal(selected.end);
+    update({ period, cFrom: from, cTo: to, periodFromText: dateTextFromIso(from), periodToText: dateTextFromIso(to), periodError: '' });
+  };
+  // Fast Refresh can preserve a state object created before the visible date
+  // fields existed. Keep those sessions usable without replacing an
+  // intentionally empty input while the user is editing it.
+  const periodFromText = typeof state.periodFromText === 'string' ? state.periodFromText : dateTextFromIso(state.cFrom);
+  const periodToText = typeof state.periodToText === 'string' ? state.periodToText : dateTextFromIso(state.cTo);
+  const setPeriodFromText = (value: string) => update({ period: 'custom', periodFromText: maskDateInput(value), periodError: '' });
+  const setPeriodToText = (value: string) => update({ period: 'custom', periodToText: maskDateInput(value), periodError: '' });
+  const applyTextRange = () => {
+    const result = validateDateRange(periodFromText, periodToText);
+    if (!result.ok) {
+      update({ periodError: result.error });
+      return false;
+    }
+    update({ cFrom: result.from, cTo: result.to, periodFromText: dateTextFromIso(result.from), periodToText: dateTextFromIso(result.to), periodError: '' });
+    return true;
+  };
+
   // ---- dashboard -------------------------------------------------------
   const donutCats = CATS.map((cat) => ({ cat, v: tot.byCat[cat] || 0 }))
     .filter((x) => x.v > 0)
@@ -1042,7 +1103,7 @@ export function useMobileView(
     acc += pct;
     return seg;
   });
-  const bars = sorted.map((x) => ({ plate: x.c.plate, w: Math.max(4, Math.round((Math.abs(x.n) / maxAbs) * 100)), color: statusColor(x.n, UMBRAL_VERDE), short: fmtShort(x.n) }));
+  const bars = dashboardSorted.map((x) => ({ plate: x.c.plate, w: Math.max(4, Math.round((Math.abs(x.n) / maxAbs) * 100)), color: statusColor(x.n, UMBRAL_VERDE), short: fmtShort(x.n) }));
 
   const baseMonth = new Date(TODAY.getFullYear(), TODAY.getMonth(), 1);
   const monthNets: number[] = [];
@@ -1053,7 +1114,7 @@ export function useMobileView(
     const mo = d.getMonth();
     const fm = (m: Mov) => m.date.getFullYear() === y && m.date.getMonth() === mo;
     const fa = (a: Aplicacion) => a.fecha.getFullYear() === y && a.fecha.getMonth() === mo;
-    monthNets.push(stats(movs, aplicaciones, fm, fa, pagos, (p) => p.fecha.getFullYear() === y && p.fecha.getMonth() === mo).net);
+    monthNets.push(stats(movs, aplicaciones, (m) => fm(m) && sectionMatches(m.carId), (a) => fa(a) && sectionMatches(a.carId), pagos, (p) => p.fecha.getFullYear() === y && p.fecha.getMonth() === mo && sectionMatches(p.carId)).net);
     monthLbls.push(MESES_ABR[mo][0].toUpperCase() + MESES_ABR[mo].slice(1));
   }
   const tMin = Math.min(...monthNets);
@@ -1065,12 +1126,13 @@ export function useMobileView(
   const areaPoints = linePoints + ' ' + X(5).toFixed(1) + ',94 8,94';
 
   const nAlertCars = alertsByCar.size;
-  const nLossCars = sorted.filter((x) => x.n <= 0).length;
+  const nLossCars = dashboardSorted.filter((x) => x.n <= 0).length;
   const health = Math.max(20, 100 - nAlertCars * 4 - nLossCars * 9);
   const healthLbl = health >= 80 ? 'Buena' : health >= 60 ? 'Atención' : 'Crítica';
 
   // ---- flota -------------------------------------------------------
   const fleetFiltered = cars.filter((c) => {
+    if (state.fleetSectionId != null && c.sectionId !== state.fleetSectionId) return false;
     if (state.fleetFilter === 'todos') return true;
     if (state.fleetFilter === 'alerta') return alertsByCar.has(c.id);
     return c.estado === state.fleetFilter;
@@ -1080,6 +1142,7 @@ export function useMobileView(
     const col = c.estado === 'baja' ? '#6b665c' : statusColor(n, UMBRAL_VERDE);
     return {
       id: c.id,
+      sectionId: c.sectionId,
       plate: c.plate,
       model: c.model,
       driver: c.driver,
@@ -1099,6 +1162,26 @@ export function useMobileView(
     ['alerta', 'Con alerta'],
   ];
 
+  // Agrupa autos por sección (en el orden definido) y agrega un grupo final
+  // "Sin sección" para los que todavía no tienen una asignada.
+  const carsBySection = (list: Car[]) => {
+    const groups: { name: string; cars: Car[] }[] = [];
+    for (const section of persist.sections) {
+      const group = list.filter((c) => c.sectionId === section.id);
+      if (group.length) groups.push({ name: section.name, cars: group });
+    }
+    const unassigned = list.filter((c) => c.sectionId == null);
+    if (unassigned.length) groups.push({ name: 'Sin sección', cars: unassigned });
+    return groups;
+  };
+
+  const brandForSection = (name: string) => {
+    const firstWord = name.trim().split(/\s+/)[0].toLowerCase();
+    return firstWord === 'hyundai' || firstWord === 'kia' || firstWord === 'chevrolet' || firstWord === 'toyota'
+      ? name.trim().split(/\s+/)[0]
+      : undefined;
+  };
+
   // ---- gastos -------------------------------------------------------
   // Los movimientos siguen siendo la fuente de verdad. Esta pantalla solo
   // cambia la forma de leerlos: primero por vehículo y después por gasto.
@@ -1106,7 +1189,7 @@ export function useMobileView(
   const gastoGroups: GastoGroupView[] = expenseCars
     .filter((c) => state.gastosCarIds === 'todos' || state.gastosCarIds.includes(c.id))
     .map((c) => {
-      const movements = movs.filter((m) => m.type === 'egreso' && m.carId === c.id && inR(m) && (state.gastosCat === 'todas' || (m.cat || 'Otro') === state.gastosCat));
+      const movements = movs.filter((m) => m.type === 'egreso' && m.carId === c.id && inR(m) && (state.gastosCat === 'todas' || state.gastosCat.includes(m.cat || 'Otros')));
       const groupKey = 'car:' + c.id;
       return {
         carId: c.id,
@@ -1121,7 +1204,7 @@ export function useMobileView(
           return {
             id: rowKey,
             desc: m.desc,
-            cat: m.cat || 'Otro',
+            cat: m.cat || 'Otros',
             date: dLbl(m.date),
             amount: fmt(m.amount),
             repuestos: fmt(repuestos),
@@ -1145,47 +1228,85 @@ export function useMobileView(
   ];
   const gastoCatFilters: Chip[] = [
     { label: 'Todas', ...chipStyle(state.gastosCat === 'todas', 'amber'), pick: () => update({ gastosCat: 'todas' }) },
-    ...CATS.map((cat) => ({ label: cat, ...chipStyle(state.gastosCat === cat, 'amber'), pick: () => update({ gastosCat: cat }) })),
-  ];
-  const selectedGastoCars = state.gastosCarIds === 'todos' ? active : active.filter((c) => state.gastosCarIds.includes(c.id));
-  const selectedGastoCarLabel = state.gastosCarIds === 'todos'
-    ? 'Todos los vehículos'
-    : selectedGastoCars.length === 0
-      ? 'Ningún vehículo'
-      : selectedGastoCars.length <= 2
-        ? selectedGastoCars.map((c) => c.plate).join(' · ')
-        : `${selectedGastoCars.length} vehículos seleccionados`;
-  const selectedGastoCategoryLabel = state.gastosCat === 'todas' ? 'Todas las categorías' : state.gastosCat;
-  const gastoCarOptions: GastoChoiceView[] = [
-    {
-      id: 'todos',
-      label: 'Todos los vehículos',
-      sub: `${active.length} vehículo${active.length === 1 ? '' : 's'} activos`,
-      selected: state.gastosCarIds === 'todos',
-      pick: () => update({ gastosCarIds: 'todos' }),
-    },
-    ...active.map((c) => ({
-      id: c.id,
-      label: c.plate,
-      sub: c.model || 'Vehículo de la flota',
-      selected: state.gastosCarIds !== 'todos' && state.gastosCarIds.includes(c.id),
-      pick: () => update((s) => ({ gastosCarIds: s.gastosCarIds === 'todos' ? [c.id] : s.gastosCarIds.includes(c.id) ? s.gastosCarIds.filter((id) => id !== c.id) : [...s.gastosCarIds, c.id] })),
+    ...CATS.map((cat) => ({
+      label: cat,
+      ...chipStyle(state.gastosCat !== 'todas' && state.gastosCat.includes(cat), 'amber'),
+      pick: () => update((s) => {
+        if (s.gastosCat === 'todas') return { gastosCat: [cat] };
+        return { gastosCat: s.gastosCat.includes(cat) ? s.gastosCat.filter((item) => item !== cat) : [...s.gastosCat, cat] };
+      }),
     })),
   ];
+  const selectedGastoCars = state.gastosCarIds === 'todos' ? active : active.filter((c) => state.gastosCarIds.includes(c.id));
+  const gastoSectionLabel = (() => {
+    if (state.gastosCarIds === 'todos') return '';
+    const full = carsBySection(active).filter((g) => g.cars.every((c) => state.gastosCarIds.includes(c.id)));
+    if (!full.length || full.reduce((sum, g) => sum + g.cars.length, 0) !== state.gastosCarIds.length) return '';
+    return full.map((g) => g.name).join(' · ');
+  })();
+  const selectedGastoCarLabel = state.gastosCarIds === 'todos'
+    ? 'Todos los vehículos'
+    : gastoSectionLabel
+      ? gastoSectionLabel
+      : selectedGastoCars.length === 0
+        ? 'Ningún vehículo'
+        : selectedGastoCars.length <= 2
+          ? selectedGastoCars.map((c) => c.plate).join(' · ')
+          : `${selectedGastoCars.length} vehículos seleccionados`;
+  const selectedGastoCategoryLabel = state.gastosCat === 'todas'
+    ? 'Todas las categorías'
+    : state.gastosCat.length === 0
+      ? 'Ninguna categoría'
+      : state.gastosCat.length <= 2
+        ? state.gastosCat.join(' · ')
+        : `${state.gastosCat.length} categorías seleccionadas`;
+  const gastoAllOption: GastoChoiceView = {
+    id: 'todos',
+    label: 'Todos los vehículos',
+    sub: `${active.length} vehículo${active.length === 1 ? '' : 's'} activos`,
+    selected: state.gastosCarIds === 'todos',
+    pick: () => update({ gastosCarIds: 'todos' }),
+  };
+  const gastoSectionOptions: GastoChoiceView[] = carsBySection(active).map((group) => {
+    const ids = group.cars.map((c) => c.id);
+    return {
+      id: 'section:' + group.name,
+      label: group.name,
+      sub: `${group.cars.length} vehículo${group.cars.length === 1 ? '' : 's'}`,
+      brand: brandForSection(group.name),
+      selected: state.gastosCarIds !== 'todos' && ids.every((id) => state.gastosCarIds.includes(id)),
+      pick: () => update((s) => {
+        // "Todos" es el estado inicial, no una lista de exclusiones. Al
+        // tocar una sección por primera vez se selecciona únicamente esa
+        // sección; luego se pueden sumar o quitar otras secciones.
+        if (s.gastosCarIds === 'todos') return { gastosCarIds: ids };
+        const next = ids.every((id) => s.gastosCarIds.includes(id))
+          ? s.gastosCarIds.filter((id) => !ids.includes(id))
+          : [...new Set([...s.gastosCarIds, ...ids])];
+        return { gastosCarIds: next };
+      }),
+    };
+  });
   const gastoCategoryOptions: GastoChoiceView[] = [
     {
       id: 'todas',
       label: 'Todas las categorías',
       sub: 'Mostrar todos los gastos',
       selected: state.gastosCat === 'todas',
-      pick: () => update({ gastosCat: 'todas', gastosStep: 'results', gastosExpanded: {} }),
+      pick: () => update({ gastosCat: 'todas' }),
     },
     ...CATS.map((cat) => ({
       id: cat,
       label: cat,
       sub: 'Mostrar sólo esta categoría',
-      selected: state.gastosCat === cat,
-      pick: () => update({ gastosCat: cat, gastosStep: 'results', gastosExpanded: {} }),
+      selected: state.gastosCat !== 'todas' && state.gastosCat.includes(cat),
+      pick: () => update((s) => ({
+        gastosCat: s.gastosCat === 'todas'
+          ? [cat]
+          : s.gastosCat.includes(cat)
+            ? s.gastosCat.filter((item) => item !== cat)
+            : [...s.gastosCat, cat],
+      })),
     })),
   ];
 
@@ -1196,6 +1317,14 @@ export function useMobileView(
     }
     update({ gastosStep: 'category', gastosExpanded: {} });
   };
+  const continueGastoCategory = () => {
+    if (state.gastosCat !== 'todas' && state.gastosCat.length === 0) {
+      toast('Elegí al menos una categoría');
+      return;
+    }
+    update({ gastosStep: 'results', gastosExpanded: {} });
+  };
+  const continueGastoPeriod = () => update({ gastosStep: 'vehicle' });
 
   const alertViews: AlertView[] = alerts.map((a) => ({
     key: a.report ? `report:${a.report.id}` : `${a.car.id}:${a.kind}`,
@@ -1796,24 +1925,34 @@ export function useMobileView(
   // ---- reportes -------------------------------------------------------
   const reportCarAllowed = (carId: string | null) => state.reportesCarIds === 'todos' || (carId !== null && state.reportesCarIds.includes(carId));
   const reportCategoryAllowed = (category: string) => state.reportesCategories === 'todas' || state.reportesCategories.includes(category);
-  const reportIncludeExpenses = state.reportesInclude === 'gastos' || state.reportesInclude === 'ambos';
-  const reportIncludeIncome = state.reportesInclude === 'ingresos' || state.reportesInclude === 'ambos';
+  const reportInclude = state.reportesInclude ?? 'ambos';
+  const reportIncludeExpenses = reportInclude === 'gastos' || reportInclude === 'ambos';
+  const reportIncludeIncome = reportInclude === 'ingresos' || reportInclude === 'ambos';
   const reportExpenses = reportIncludeExpenses
     ? movs.filter((m) => m.type === 'egreso' && inR(m) && reportCarAllowed(m.carId) && reportCategoryAllowed(m.cat || 'Otros'))
     : [];
   const reportIncome = reportIncludeIncome ? pagos.filter((p) => p.tipo === 'pago' && p.fecha >= r.start && p.fecha <= r.end && reportCarAllowed(p.carId)) : [];
   const reportCounts = { ingresos: reportIncome.length, gastos: reportExpenses.length, total: reportIncome.length + reportExpenses.length };
-  const reportCarOptions = cars.map((car) => ({
-    id: car.id,
-    label: car.plate,
-    sub: `${car.model}${car.estado === 'baja' ? ' · Baja' : ''}`,
-    selected: state.reportesCarIds === 'todos' || state.reportesCarIds.includes(car.id),
-    toggle: () => update((s) => {
-      if (s.reportesCarIds === 'todos') return { reportesCarIds: [car.id], reportesError: '' };
-      const next = s.reportesCarIds.includes(car.id) ? s.reportesCarIds.filter((id) => id !== car.id) : [...s.reportesCarIds, car.id];
-      return { reportesCarIds: next, reportesError: '' };
-    }),
-  }));
+  const reportSectionOptions = carsBySection(cars).map((group) => {
+    const ids = group.cars.map((c) => c.id);
+    const hasBaja = group.cars.some((c) => c.estado === 'baja');
+    return {
+      id: 'section:' + group.name,
+      label: group.name,
+      sub: `${group.cars.length} vehículo${group.cars.length === 1 ? '' : 's'}${hasBaja ? ' · incluye dados de baja' : ''}`,
+      brand: brandForSection(group.name),
+      selected: state.reportesCarIds !== 'todos' && ids.every((id) => state.reportesCarIds.includes(id)),
+      toggle: () => update((s) => {
+        // Igual que en Gastos, la primera sección elegida reemplaza el
+        // valor inicial "todos" en vez de convertirse en una exclusión.
+        if (s.reportesCarIds === 'todos') return { reportesCarIds: ids, reportesError: '' };
+        const next = ids.every((id) => s.reportesCarIds.includes(id))
+          ? s.reportesCarIds.filter((id) => !ids.includes(id))
+          : [...new Set([...s.reportesCarIds, ...ids])];
+        return { reportesCarIds: next, reportesError: '' };
+      }),
+    };
+  });
   const reportCategoryOptions = CATS.map((category) => ({
     label: category,
     selected: state.reportesCategories === 'todas' || state.reportesCategories.includes(category),
@@ -1823,7 +1962,12 @@ export function useMobileView(
       return { reportesCategories: next, reportesError: '' };
     }),
   }));
-  const reportSelectedCarLabels = reportCarOptions.filter((car) => car.selected).map((car) => car.label);
+  const reportSelectedCarLabels = (() => {
+    const ids = state.reportesCarIds === 'todos' ? cars.map((c) => c.id) : state.reportesCarIds;
+    const full = carsBySection(cars).filter((g) => g.cars.every((c) => ids.includes(c.id)));
+    if (full.length && full.reduce((sum, g) => sum + g.cars.length, 0) === ids.length) return full.map((g) => g.name);
+    return ids.map((id) => cars.find((c) => c.id === id)?.plate).filter((plate): plate is string => Boolean(plate));
+  })();
   const reportSelectedCategoryLabels = reportCategoryOptions.filter((category) => category.selected).map((category) => category.label);
   const reportPreviewRows: ReportPreviewRow[] = [
     ...reportIncome.map((pago) => ({
@@ -1855,17 +1999,16 @@ export function useMobileView(
       manoObra: mov.manoObra ?? 0,
     })),
   ];
-  const reportSetInclude = (value: ReportInclude) => update({ reportesInclude: value, reportesStep: 'include', reportesError: '' });
+  const reportSetInclude = (value: ReportInclude) => update({ reportesInclude: value, reportesError: '' });
   const reportSelectAllCars = () => update({ reportesCarIds: 'todos', reportesError: '' });
   const reportSelectAllCategories = () => update({ reportesCategories: 'todas', reportesError: '' });
   const reportNext = () => {
-    if (state.reportesStep === 'include') {
-      if (!state.reportesInclude) return toast('Elegí qué querés incluir');
+    if (state.reportesStep === 'period' || state.reportesStep === 'include') {
       return update({ reportesStep: 'cars', reportesError: '' });
     }
     if (state.reportesStep === 'cars') {
       if (state.reportesCarIds !== 'todos' && state.reportesCarIds.length === 0) return toast('Elegí al menos un vehículo');
-      return update({ reportesStep: reportIncludeExpenses ? 'categories' : 'review', reportesError: '' });
+      return update({ reportesStep: 'categories', reportesError: '' });
     }
     if (state.reportesStep === 'categories') {
       if (state.reportesCategories !== 'todas' && state.reportesCategories.length === 0) return toast('Elegí al menos una categoría');
@@ -1874,16 +2017,16 @@ export function useMobileView(
   };
   const reportPrevious = () => {
     const previousReportStep: Partial<Record<ReportStep, ReportStep>> = {
-      cars: 'include',
+      cars: 'period',
       categories: 'cars',
-      review: reportIncludeExpenses ? 'categories' : 'cars',
+      review: 'categories',
     };
     const previousStep = previousReportStep[state.reportesStep];
     if (previousStep) update({ reportesStep: previousStep, reportesError: '' });
   };
-  const reportReset = () => update({ reportesStep: 'include', reportesInclude: null, reportesCarIds: 'todos', reportesCategories: 'todas', reportesExportando: false, reportesError: '' });
+  const reportReset = () => update({ reportesStep: 'period', reportesInclude: 'ambos', reportesCarIds: 'todos', reportesCategories: 'todas', reportesExportando: false, reportesError: '', periodError: '' });
   const reportExport = (format: 'pdf' | 'xlsx') => {
-    if (!state.reportesInclude) return toast('Elegí qué querés incluir');
+    const include = state.reportesInclude ?? 'ambos';
     if (!reportCounts.total) {
       update({ reportesError: 'No hay datos para los filtros elegidos.' });
       return;
@@ -1891,7 +2034,7 @@ export function useMobileView(
     update({ reportesExportando: true, reportesError: '' });
     persist.exportReport({
       period: { type: state.period, from: isoLocal(r.start), to: isoLocal(r.end) },
-      include: state.reportesInclude,
+      include,
       carIds: state.reportesCarIds,
       ...(reportIncludeExpenses ? { categories: state.reportesCategories } : {}),
       format,
@@ -1953,23 +2096,24 @@ export function useMobileView(
     ['baja', 'Baja', 'Fuera de la flota, no entra en los cálculos'],
   ];
 
-  const goReportes = () => push('reportes', { reportesStep: 'include', reportesInclude: null, reportesCarIds: 'todos', reportesCategories: 'todas', reportesExportando: false, reportesError: '' });
+  const goReportes = () => push('reportes', { reportesStep: 'period', reportesInclude: 'ambos', reportesCarIds: 'todos', reportesCategories: 'todas', reportesExportando: false, reportesError: '', periodError: '' });
 
   const headerByScreen: Record<string, [string, string]> = {
     dashboard: ['MiFlota', 'Actualizado · ' + r.label],
     flota: ['Vehículos', active.length + ' activos · ' + (cars.length - active.length) + ' de baja'],
     ranking: ['Ganancia por vehículo', 'Comparación del período'],
-    reportes: ['Reportes', 'Exportá para tu contador'],
+    reportes: ['Reportes', ''],
     detalle: ['Detalle del vehículo', ''],
     nuevoVehiculo: [state.carId ? 'Editar vehículo' : 'Nuevo vehículo', ''],
     registrar: [f?.serviceMode ? 'Registrar service' : f?.tab === 'gasto' ? 'Registrar egreso' : 'Registrar ingreso', ''],
     assistant: ['MiFlota IA', ''],
     perfil: ['Perfil', ''],
+    secciones: ['Secciones', 'Organizá tu flota'],
   };
 
   Object.assign(headerByScreen, {
     dashboard: ['Inicio', 'Actualizado · ' + r.label],
-    gastos: ['Gastos', 'Repuestos y mano de obra'],
+    gastos: ['Gastos', ''],
     mas: ['Más', 'Accesos y configuración'],
     alertas: ['Alertas', alerts.length ? alerts.length + ' avisos para revisar' : 'Todo al día'],
     choferes: ['Choferes', choferViews.filter((d) => d.name !== 'Sin chofer').length + ' personas asignadas'],
@@ -1977,7 +2121,7 @@ export function useMobileView(
   });
 
   const isTab = ['dashboard', 'flota', 'gastos', 'mas'].includes(state.screen);
-  const isSub = ['detalle', 'nuevoVehiculo', 'registrar', 'reportes', 'alertas', 'choferes', 'perfil'].includes(state.screen);
+  const isSub = ['detalle', 'nuevoVehiculo', 'registrar', 'reportes', 'alertas', 'choferes', 'secciones', 'perfil'].includes(state.screen);
   const isAssistant = state.screen === 'assistant';
 
   return {
@@ -2000,7 +2144,7 @@ export function useMobileView(
       dash: state.screen === 'dashboard',
       flota: state.screen === 'flota' || state.screen === 'detalle' || state.screen === 'nuevoVehiculo',
       gastos: state.screen === 'gastos',
-      mas: ['mas', 'alertas', 'choferes', 'reportes', 'perfil'].includes(state.screen),
+      mas: ['mas', 'alertas', 'choferes', 'secciones', 'reportes', 'perfil'].includes(state.screen),
     },
     registroChoice: {
       open: state.registroChoice,
@@ -2033,14 +2177,21 @@ export function useMobileView(
       label: r.label,
       short: r.short,
       days: days + ' d',
-      chips: periodOpts.map(([k, label]) => ({ label, ...chipStyle(state.period === k), pick: () => update({ period: k }) })),
+      chips: periodOpts.map(([k, label]) => ({ label, ...chipStyle(state.period === k), pick: () => selectPeriodPreset(k) })),
       cFrom: state.cFrom,
       cTo: state.cTo,
-      setFrom: (iso) => update({ cFrom: iso, period: 'custom' }),
-      setTo: (iso) => update({ cTo: iso, period: 'custom' }),
+      fromText: periodFromText,
+      toText: periodToText,
+      error: state.periodError,
+      setFromText: setPeriodFromText,
+      setToText: setPeriodToText,
+      applyTextRange,
       open: state.periodSheet,
-      openSheet: () => update({ periodSheet: true }),
-      closeSheet: () => update({ periodSheet: false }),
+      openSheet: () => update({ periodSheet: true, periodError: '' }),
+    closeSheet: () => update({ periodSheet: false }),
+    sectionId: state.dashboardSectionId,
+    sectionOptions: persist.sections,
+    setSectionId: (id) => update({ dashboardSectionId: id }),
     },
 
     dashboard: {
@@ -2062,11 +2213,21 @@ export function useMobileView(
       healthSub: nAlertCars + ' autos con mantenimiento pendiente · ' + nLossCars + ' en pérdida',
     },
 
-    flota: { filters: FILT.map(([k, label]) => ({ label, ...chipStyle(state.fleetFilter === k), pick: () => update({ fleetFilter: k }) })), cars: flotaCars },
+    flota: {
+      filters: FILT.map(([k, label]) => ({ label, ...chipStyle(state.fleetFilter === k), pick: () => update({ fleetFilter: k }) })),
+      sectionFilters: [{ label: 'Todas', ...chipStyle(state.fleetSectionId == null), pick: () => update({ fleetSectionId: null }) }, ...persist.sections.map((section) => ({ label: section.name, ...chipStyle(state.fleetSectionId === section.id), pick: () => update({ fleetSectionId: section.id }) }))],
+      cars: flotaCars,
+      sections: persist.sections,
+      addSection: persist.addSection,
+      renameSection: persist.renameSection,
+      deleteSection: persist.deleteSection,
+      moveSection: async (id, direction) => { const ids = persist.sections.map((s) => s.id); const at = ids.indexOf(id); const to = at + direction; if (to < 0 || to >= ids.length) return; [ids[at], ids[to]] = [ids[to], ids[at]]; await persist.reorderSections(ids); },
+    },
 
     gastos: {
       step: state.gastosStep,
-      carOptions: gastoCarOptions,
+      allOption: gastoAllOption,
+      sectionOptions: gastoSectionOptions,
       categoryOptions: gastoCategoryOptions,
       selectedCarLabel: selectedGastoCarLabel,
       selectedCategoryLabel: selectedGastoCategoryLabel,
@@ -2076,7 +2237,10 @@ export function useMobileView(
       groups: gastoGroups,
       empty: gastoGroups.length === 0,
       vehicleSelectionValid: state.gastosCarIds === 'todos' || state.gastosCarIds.length > 0,
+      categorySelectionValid: state.gastosCat === 'todas' || state.gastosCat.length > 0,
+      continuePeriod: continueGastoPeriod,
       continueVehicles: continueGastoVehicles,
+      continueCategory: continueGastoCategory,
     },
 
     mas: {
@@ -2085,7 +2249,15 @@ export function useMobileView(
       navAlertas: () => push('alertas'),
       navChoferes: () => push('choferes'),
       navReportes: goReportes,
+      navSecciones: () => push('secciones'),
       goPerfil: () => push('perfil', { perfil: { actual: '', nueva: '', repetir: '', guardando: false } }),
+    },
+    secciones: {
+      items: persist.sections,
+      add: persist.addSection,
+      rename: persist.renameSection,
+      remove: persist.deleteSection,
+      move: async (id, direction) => { const ids = persist.sections.map((s) => s.id); const at = ids.indexOf(id); const to = at + direction; if (to < 0 || to >= ids.length) return; [ids[at], ids[to]] = [ids[to], ids[at]]; await persist.reorderSections(ids); },
     },
     alertas: { items: alertViews },
     choferes: { items: choferViews },
@@ -2097,6 +2269,9 @@ export function useMobileView(
 
     nuevoVehiculo: {
       editando: state.carId !== null,
+      sectionId: state.nuevoVehiculo.sectionId,
+      sections: persist.sections,
+      setSectionId: (id) => update((s) => ({ nuevoVehiculo: { ...s.nuevoVehiculo, sectionId: id } })),
       plate: state.nuevoVehiculo.plate,
       model: state.nuevoVehiculo.model,
       year: state.nuevoVehiculo.year,
@@ -2141,6 +2316,7 @@ export function useMobileView(
           }
           if (state.carId) {
             persist.patchCar(state.carId, {
+              sectionId: v.payload.sectionId,
               plate: v.payload.plate,
               model: v.payload.model,
               year: v.payload.year,
@@ -2177,11 +2353,13 @@ export function useMobileView(
     registrar: registrarView,
 
     reportes: {
-      step: state.reportesStep,
-      include: state.reportesInclude,
+      // Un estado de una sesión anterior puede conservar `include`; el paso
+      // ya no existe en la UI y se continúa directamente con las secciones.
+      step: state.reportesStep === 'include' ? 'period' : state.reportesStep,
+      include: reportInclude,
       setInclude: reportSetInclude,
       carSelection: state.reportesCarIds,
-      carOptions: reportCarOptions,
+      sectionOptions: reportSectionOptions,
       selectAllCars: reportSelectAllCars,
       categorySelection: state.reportesCategories,
       categoryOptions: reportCategoryOptions,

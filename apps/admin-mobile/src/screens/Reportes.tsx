@@ -1,9 +1,11 @@
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useEffect, useMemo, useState } from 'react';
-import Svg, { Path, Rect } from 'react-native-svg';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type { MobileView } from '../useMobileView';
-import type { ReportInclude } from '../types';
 import { Pagination } from '../components/Pagination';
+import { BrandIcon } from '../components/BrandIcon';
+import { DateRangeInputs } from '../components/DateRangeInputs';
+import { ChipRow } from '../components/ChipRow';
 
 const PAPER = '#fffdf8';
 const BORDER = '#e6ded0';
@@ -11,12 +13,6 @@ const INK = '#16150f';
 const MUTED = '#6b665c';
 const SOFT = '#f4f0e8';
 const PREVIEW_PAGE_SIZE = 5;
-
-const includeOptions: { value: ReportInclude; title: string; description: string; icon: string }[] = [
-  { value: 'gastos', title: 'Gastos', description: 'Repuestos, mano de obra y otros gastos', icon: '−' },
-  { value: 'ingresos', title: 'Ingresos cobrados', description: 'Pagos que efectivamente entraron', icon: '+' },
-  { value: 'ambos', title: 'Ambos', description: 'Gastos e ingresos en un mismo reporte', icon: '±' },
-];
 
 function Check({ active }: { active: boolean }) {
   return (
@@ -26,47 +22,31 @@ function Check({ active }: { active: boolean }) {
   );
 }
 
-function OptionCard({ title, description, selected, onPress, icon }: { title: string; description: string; selected: boolean; onPress: () => void; icon?: string }) {
+function OptionCard({ title, selected, onPress, icon, brand }: { title: string; description: string; selected: boolean; onPress: () => void; icon?: string; brand?: string }) {
   return (
-    <Pressable onPress={onPress} style={{ minHeight: 72, borderWidth: 1.5, borderColor: selected ? INK : BORDER, backgroundColor: selected ? '#f0ece3' : PAPER, borderRadius: 18, paddingHorizontal: 16, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-      {icon && <View style={{ width: 34, height: 34, borderRadius: 12, backgroundColor: selected ? INK : SOFT, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: selected ? PAPER : INK, fontSize: 22, fontWeight: '700' }}>{icon}</Text></View>}
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={{ color: INK, fontSize: 16, fontWeight: '700' }}>{title}</Text>
-        <Text style={{ color: MUTED, fontSize: 12, lineHeight: 17, marginTop: 2 }}>{description}</Text>
+    <Pressable onPress={onPress} style={{ minHeight: 58, borderWidth: 1.5, borderColor: selected ? INK : BORDER, backgroundColor: selected ? '#f0ece3' : PAPER, borderRadius: 18, paddingHorizontal: 16, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+      {(icon || brand) && <View style={{ width: 34, height: 34, borderRadius: 12, backgroundColor: selected ? INK : SOFT, alignItems: 'center', justifyContent: 'center', flex: 0 }}>
+        {brand ? <BrandIcon brand={brand} size={21} color={selected ? PAPER : INK} /> : <Text style={{ color: selected ? PAPER : INK, fontSize: 22, fontWeight: '700' }}>{icon}</Text>}
+      </View>}
+      <View style={{ flex: 1, minWidth: 0, flexShrink: 1 }}>
+        <Text numberOfLines={2} style={{ color: INK, fontSize: 16, lineHeight: 20, fontWeight: '700', flexShrink: 1 }}>{title}</Text>
       </View>
       <Check active={selected} />
     </Pressable>
   );
 }
 
-function ContinueButton({ label = 'Continuar', onPress, disabled = false, fixed = false }: { label?: string; onPress: () => void; disabled?: boolean; fixed?: boolean }) {
+function ContinueButton({ label = 'Continuar', onPress, disabled = false }: { label?: string; onPress: () => void; disabled?: boolean }) {
   return (
-    <Pressable disabled={disabled} onPress={onPress} style={{ minHeight: 50, borderRadius: 17, backgroundColor: disabled ? '#d7d0c3' : INK, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16, ...(fixed ? { position: 'absolute', left: 0, right: 0, bottom: 22, zIndex: 3, elevation: 3 } : {}) }}>
+    <Pressable disabled={disabled} onPress={onPress} style={{ minHeight: 50, borderRadius: 17, backgroundColor: disabled ? '#d7d0c3' : INK, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 }}>
       <Text style={{ color: disabled ? '#8c8476' : PAPER, fontSize: 14, fontWeight: '700' }}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function PeriodButton({ v }: { v: MobileView }) {
-  return (
-    <Pressable onPress={v.period.openSheet} style={{ alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 50, backgroundColor: PAPER, borderWidth: 1, borderColor: BORDER, borderRadius: 16, paddingHorizontal: 15 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
-        <Svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke={MUTED} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-          <Rect x="3" y="5" width="18" height="16" rx="3" />
-          <Path d="M8 3v4" />
-          <Path d="M16 3v4" />
-          <Path d="M3 11h18" />
-        </Svg>
-        <Text numberOfLines={1} style={{ color: INK, fontSize: 13, fontWeight: '700', flex: 1 }}>{v.period.label}</Text>
-      </View>
-      <Text style={{ color: MUTED, fontSize: 12, fontWeight: '600', marginLeft: 8 }}>{v.period.days}</Text>
     </Pressable>
   );
 }
 
 function SelectionLabel({ value, allLabel, countLabel }: { value: 'todos' | 'todas' | string[]; allLabel: string; countLabel: string }) {
   const label = value === 'todos' || value === 'todas' ? allLabel : value.length === 0 ? 'Ninguno elegido' : `${value.length} ${countLabel}${value.length === 1 ? '' : 's'} elegidos`;
-  return <Text style={{ position: 'absolute', left: 0, right: 0, bottom: 76, color: MUTED, fontSize: 12 }}>{label}</Text>;
+  return <Text style={{ color: MUTED, fontSize: 12 }}>{label}</Text>;
 }
 
 function previewMoney(value: number) {
@@ -88,51 +68,61 @@ export function Reportes({ v }: { v: MobileView }) {
     setPreviewPage((current) => Math.min(current, previewPageCount - 1));
   }, [previewPageCount]);
 
-  const isInclude = rep.step === 'include';
+  const isPeriod = rep.step === 'period';
   const isCars = rep.step === 'cars';
   const isCategories = rep.step === 'categories';
   const isReview = rep.step === 'review';
-  const totalSteps = rep.include === 'gastos' || rep.include === 'ambos' ? 4 : 3;
-  const currentStep = isInclude ? 1 : isCars ? 2 : isCategories ? 3 : totalSteps;
+  const totalSteps = 4;
+  const currentStep = isPeriod ? 1 : isCars ? 2 : isCategories ? 3 : 4;
   const includeLabel = rep.include === 'gastos' ? 'Gastos' : rep.include === 'ingresos' ? 'Ingresos cobrados' : rep.include === 'ambos' ? 'Gastos e ingresos cobrados' : 'Sin elegir';
   const carLabel = rep.carSelection === 'todos' ? 'Todos los vehículos' : `${rep.carSelection.length} vehículo${rep.carSelection.length === 1 ? '' : 's'}`;
   const categoryLabel = rep.categorySelection === 'todas' ? 'Todas las categorías' : `${rep.categorySelection.length} categoría${rep.categorySelection.length === 1 ? '' : 's'}`;
 
   return (
     <View style={{ flex: 1, minHeight: 0, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12, gap: 14 }}>
-      <PeriodButton v={v} />
-
       <View style={{ gap: 4 }}>
         <Text style={{ color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' }}>Paso {currentStep} de {totalSteps}</Text>
-        <Text style={{ color: INK, fontSize: 24, fontWeight: '800', letterSpacing: -0.4 }}>{isInclude ? '¿Qué querés ver?' : isCars ? '¿Qué vehículos querés incluir?' : isCategories ? '¿Qué gastos querés incluir?' : 'Revisá tu reporte'}</Text>
-        <Text style={{ color: MUTED, fontSize: 13, lineHeight: 18 }}>{isInclude ? 'Elegí el tipo de información que querés llevarte.' : isCars ? 'Podés elegir todos o sólo algunos.' : isCategories ? 'Elegí todas o sólo algunas categorías.' : 'Todo está listo para generar el archivo.'}</Text>
+        <Text style={{ color: INK, fontSize: 24, lineHeight: 29, fontWeight: '800', letterSpacing: -0.4 }}>{isPeriod ? '¿Qué período querés ver?' : isCars ? '¿Qué sección querés incluir?' : isCategories ? '¿Qué categorías querés incluir?' : 'Revisá tu reporte'}</Text>
       </View>
 
-      {isInclude && (
-        <View style={{ gap: 10 }}>
-          {includeOptions.map((option) => <OptionCard key={option.value} title={option.title} description={option.description} icon={option.icon} selected={rep.include === option.value} onPress={() => rep.setInclude(option.value)} />)}
-        </View>
+      {isPeriod && (
+        <KeyboardAwareScrollView
+          style={{ flex: 1, minHeight: 0 }}
+          mode="layout"
+          bottomOffset={32}
+          extraKeyboardSpace={24}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ gap: 12, paddingBottom: 24 }}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={{ backgroundColor: PAPER, borderWidth: 1, borderColor: BORDER, borderRadius: 18, padding: 16, gap: 12 }}>
+            <ChipRow chips={v.period.chips} wrap />
+            <DateRangeInputs fromText={v.period.fromText} toText={v.period.toText} error={v.period.error} onFromChange={v.period.setFromText} onToChange={v.period.setToText} />
+          </View>
+          <View style={{ paddingTop: 2, backgroundColor: '#f4f0e8' }}><ContinueButton onPress={() => { if (v.period.applyTextRange()) rep.next(); }} /></View>
+        </KeyboardAwareScrollView>
       )}
 
       {isCars && (
         <View style={{ flex: 1, minHeight: 0 }}>
-          <ScrollView style={{ flex: 1, minHeight: 0, height: 0 }} contentContainerStyle={{ gap: 10, paddingBottom: 82 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-          <OptionCard title="Todos los vehículos" description="Incluye la flota completa" selected={rep.carSelection === 'todos'} onPress={rep.selectAllCars} />
-          {rep.carOptions.map((car) => <OptionCard key={car.id} title={car.label} description={car.sub} selected={car.selected} onPress={car.toggle} />)}
+          <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ gap: 10, paddingBottom: 12 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+            <OptionCard title="Todos los vehículos" description="Incluye la flota completa" selected={rep.carSelection === 'todos'} onPress={rep.selectAllCars} />
+            {rep.sectionOptions.map((section) => <OptionCard key={section.id} title={section.label} description={section.sub} brand={section.brand} selected={section.selected} onPress={section.toggle} />)}
+            <SelectionLabel value={rep.carSelection} allLabel="Toda la flota" countLabel="vehículo" />
           </ScrollView>
-          <ContinueButton onPress={rep.next} fixed />
-          <SelectionLabel value={rep.carSelection} allLabel="Toda la flota" countLabel="vehículo" />
+          <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}><ContinueButton onPress={rep.next} /></View>
         </View>
       )}
 
       {isCategories && (
         <View style={{ flex: 1, minHeight: 0 }}>
-          <ScrollView style={{ flex: 1, minHeight: 0, height: 0 }} contentContainerStyle={{ gap: 10, paddingBottom: 82 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-          <OptionCard title="Todas las categorías" description="Incluye todos los gastos del período" selected={rep.categorySelection === 'todas'} onPress={rep.selectAllCategories} />
-          {rep.categoryOptions.map((category) => <OptionCard key={category.label} title={category.label} description="Incluir en el reporte" selected={category.selected} onPress={category.toggle} />)}
+          <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ gap: 10, paddingBottom: 12 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+            <OptionCard title="Todas las categorías" description="Incluye todos los gastos del período" selected={rep.categorySelection === 'todas'} onPress={rep.selectAllCategories} />
+            {rep.categoryOptions.map((category) => <OptionCard key={category.label} title={category.label} description="Incluir en el reporte" selected={category.selected} onPress={category.toggle} />)}
+            <SelectionLabel value={rep.categorySelection} allLabel="Todas las categorías" countLabel="categoría" />
           </ScrollView>
-          <ContinueButton onPress={rep.next} fixed />
-          <SelectionLabel value={rep.categorySelection} allLabel="Todas las categorías" countLabel="categoría" />
+          <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}><ContinueButton onPress={rep.next} /></View>
         </View>
       )}
 
@@ -193,7 +183,6 @@ export function Reportes({ v }: { v: MobileView }) {
         </ScrollView>
       )}
 
-      {!isReview && !isCars && !isCategories && <ContinueButton onPress={rep.next} />}
     </View>
   );
 }
