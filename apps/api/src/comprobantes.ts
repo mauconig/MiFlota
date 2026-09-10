@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { basename, join } from 'node:path';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { v2 as cloudinary, type UploadApiResponse } from 'cloudinary';
+import sharp from 'sharp';
 import { COMPROBANTES_DIR } from './db.js';
+
+export const MAX_COMPROBANTE_IMAGE_DIMENSION = 1600;
+export const COMPROBANTE_IMAGE_QUALITY = 78;
 
 const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
 const apiKey = process.env.CLOUDINARY_API_KEY?.trim();
@@ -32,6 +36,13 @@ export interface ComprobanteRecord {
   id: string;
   nombre: string;
   tipo: string;
+}
+
+export class ComprobanteInvalidoError extends Error {
+  constructor(message = 'La imagen del comprobante no se pudo procesar') {
+    super(message);
+    this.name = 'ComprobanteInvalidoError';
+  }
 }
 
 interface CloudinaryReference {
@@ -75,6 +86,43 @@ function localComprobantePath(id: string): string | null {
   return basename(id) === id ? join(COMPROBANTES_DIR, id) : null;
 }
 
+function nombreJpeg(nombre: string): string {
+  const original = basename(nombre || 'comprobante');
+  const base = original.replace(/\.[^.]+$/, '') || 'comprobante';
+  return `${base}.jpg`;
+}
+
+/**
+ * Canonicaliza las imágenes antes de que lleguen al almacenamiento. Los PDFs
+ * se devuelven byte por byte sin tocar: son documentos, no imágenes.
+ */
+export async function normalizarComprobante(input: ComprobanteInput): Promise<ComprobanteInput> {
+  if (!input.tipo.startsWith('image/')) return input;
+
+  try {
+    const data = await sharp(input.data, { failOn: 'none' })
+      .rotate()
+      .resize({
+        width: MAX_COMPROBANTE_IMAGE_DIMENSION,
+        height: MAX_COMPROBANTE_IMAGE_DIMENSION,
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: COMPROBANTE_IMAGE_QUALITY })
+      .toBuffer();
+
+    if (!data.length) throw new Error('La imagen procesada quedó vacía');
+    return {
+      data,
+      nombre: nombreJpeg(input.nombre),
+      tipo: 'image/jpeg',
+      extension: 'jpg',
+    };
+  } catch {
+    throw new ComprobanteInvalidoError();
+  }
+}
+
 function uploadToCloudinary(input: ComprobanteInput): Promise<UploadApiResponse> {
   return new Promise((resolve, reject) => {
     const upload = cloudinary.uploader.upload_stream(
@@ -99,17 +147,19 @@ function uploadToCloudinary(input: ComprobanteInput): Promise<UploadApiResponse>
 export async function guardarComprobante(input: ComprobanteInput): Promise<ComprobanteRecord> {
   if (!input.data.length) throw new Error('No se puede guardar un comprobante vacío');
 
+  const normalizado = await normalizarComprobante(input);
+
   if (!cloudinaryConfigured) {
-    const id = `${randomUUID()}.${input.extension}`;
-    await writeFile(join(COMPROBANTES_DIR, id), input.data);
-    return { id, nombre: input.nombre, tipo: input.tipo };
+    const id = `${randomUUID()}.${normalizado.extension}`;
+    await writeFile(join(COMPROBANTES_DIR, id), normalizado.data);
+    return { id, nombre: normalizado.nombre, tipo: normalizado.tipo };
   }
 
-  const result = await uploadToCloudinary(input);
+  const result = await uploadToCloudinary(normalizado);
   return {
     id: cloudinaryReference(result.resource_type, result.public_id),
-    nombre: input.nombre,
-    tipo: input.tipo,
+    nombre: normalizado.nombre,
+    tipo: normalizado.tipo,
   };
 }
 

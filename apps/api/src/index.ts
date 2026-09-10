@@ -1,4 +1,4 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyCookie from '@fastify/cookie';
 import fastifyMultipart from '@fastify/multipart';
@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { CarRow, GastoItemRow, LocationHistoryRow, LocationRow, MovRow, PagoRow, ReporteRow } from './db.js';
 import { DB_PATH, carToJson, ensureDriver, locationHistoryToJson, locationToJson, movToJson, openDb, pagoToJson, reporteToJson } from './db.js';
-import { borrarComprobante, canonicalizarComprobanteId, COMPROBANTES_STORAGE, guardarComprobante, leerComprobante, type ComprobanteInput } from './comprobantes.js';
+import { borrarComprobante, canonicalizarComprobanteId, ComprobanteInvalidoError, COMPROBANTES_STORAGE, guardarComprobante, leerComprobante, type ComprobanteInput } from './comprobantes.js';
 import {
   COOKIE,
   bloqueado,
@@ -1333,6 +1333,7 @@ const TIPOS_COMPROBANTE: Record<string, string> = {
   'image/png': 'png',
   'image/webp': 'webp',
   'image/heic': 'heic',
+  'image/heif': 'heic',
   'application/pdf': 'pdf',
 };
 
@@ -1344,6 +1345,25 @@ const prepararComprobante = (data: Buffer, filename: string | undefined, mimetyp
   tipo: mimetype,
   extension,
 });
+
+type ComprobanteGuardado = Awaited<ReturnType<typeof guardarComprobante>>;
+type GuardarComprobanteResultado = { ok: true; archivo: ComprobanteGuardado | null } | { ok: false };
+
+async function guardarComprobanteParaRuta(pendiente: ComprobantePendiente, reply: FastifyReply): Promise<{ ok: true; archivo: ComprobanteGuardado }>;
+async function guardarComprobanteParaRuta(pendiente: null, reply: FastifyReply): Promise<{ ok: true; archivo: null }>;
+async function guardarComprobanteParaRuta(pendiente: ComprobantePendiente | null, reply: FastifyReply): Promise<GuardarComprobanteResultado>;
+async function guardarComprobanteParaRuta(pendiente: ComprobantePendiente | null, reply: FastifyReply): Promise<GuardarComprobanteResultado> {
+  if (!pendiente) return { ok: true, archivo: null };
+  try {
+    return { ok: true, archivo: await guardarComprobante(pendiente) };
+  } catch (error) {
+    if (error instanceof ComprobanteInvalidoError) {
+      reply.code(415).send({ error: error.message });
+      return { ok: false };
+    }
+    throw error;
+  }
+}
 
 app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) => {
   const u = quien(req);
@@ -1406,7 +1426,9 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
   if (!razon) return reply.code(400).send({ error: 'Indicá el motivo de la entrada a taller' });
   if (monto <= 0) return reply.code(400).send({ error: 'Indicá cuánto se gasta en el taller' });
 
-  const archivo = archivoPendiente ? await guardarComprobante(archivoPendiente) : null;
+  const guardado = await guardarComprobanteParaRuta(archivoPendiente, reply);
+  if (!guardado.ok) return;
+  const archivo = guardado.archivo;
   const hoy = hoyISO();
   let info;
   try {
@@ -1525,7 +1547,9 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
   const total = items.length || manoObra > 0 ? detalleTotal : monto;
   if (monto > 0 && (items.length || manoObra > 0) && monto !== detalleTotal) return reply.code(400).send({ error: 'El total no coincide con los ítems y la mano de obra' });
   if (total <= 0 || total > 1_000_000_000) return reply.code(400).send({ error: 'Indicá cuánto se gastó' });
-  const archivo = archivoPendiente ? await guardarComprobante(archivoPendiente) : null;
+  const guardado = await guardarComprobanteParaRuta(archivoPendiente, reply);
+  if (!guardado.ok) return;
+  const archivo = guardado.archivo;
   const hoy = hoyISO();
   let info;
   try {
@@ -1607,7 +1631,9 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/service', async (req, reply)
   }
   if (costo !== undefined && (!Number.isInteger(costo) || costo < 0 || costo > 1_000_000_000)) return reply.code(400).send({ error: 'El costo del service no es válido' });
 
-  const archivo = archivoPendiente ? await guardarComprobante(archivoPendiente) : null;
+  const guardado = await guardarComprobanteParaRuta(archivoPendiente, reply);
+  if (!guardado.ok) return;
+  const archivo = guardado.archivo;
 
   try {
     const info = db.transaction(() => {
@@ -2016,7 +2042,9 @@ app.post<{ Params: never }>('/api/chofer/pagos', async (req, reply) => {
   if (!archivoPendiente) return reply.code(400).send({ error: 'Adjuntá el comprobante de la transferencia' });
   if (monto <= 0 || monto > 1_000_000_000) return reply.code(400).send({ error: 'El monto tiene que ser un número mayor a cero' });
 
-  const archivo = await guardarComprobante(archivoPendiente);
+  const guardado = await guardarComprobanteParaRuta(archivoPendiente, reply);
+  if (!guardado.ok) return;
+  const archivo = guardado.archivo;
   const hoy = hoyISO();
   let info;
   try {

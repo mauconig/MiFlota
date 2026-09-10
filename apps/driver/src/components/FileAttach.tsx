@@ -5,6 +5,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { COLORS } from '../theme';
 import type { ComprobanteFile } from '../api';
+import { optimizarComprobante } from '../comprobanteImage';
 
 interface Props {
   value: ComprobanteFile | null;
@@ -44,8 +45,11 @@ function OpcionIcon({ tipo }: { tipo: OpcionAdjunto }) {
 
 export function FileAttach({ value, onChange }: Props) {
   const [menuAbierto, setMenuAbierto] = useState(false);
+  const [procesando, setProcesando] = useState(false);
+  const [error, setError] = useState('');
 
   const elegir = () => {
+    if (procesando) return;
     if (value) {
       onChange(null);
       return;
@@ -58,13 +62,26 @@ export function FileAttach({ value, onChange }: Props) {
     setTimeout(() => void accion(), 160);
   };
 
+  const adjuntarImagen = async (file: ComprobanteFile) => {
+    setError('');
+    setProcesando(true);
+    try {
+      onChange(await optimizarComprobante(file));
+    } catch {
+      setError('No se pudo optimizar la imagen; se procesará al enviarla.');
+      onChange(file);
+    } finally {
+      setProcesando(false);
+    }
+  };
+
   const tomarFoto = async () => {
     const permiso = await ImagePicker.requestCameraPermissionsAsync();
     if (!permiso.granted) return;
     const r = await ImagePicker.launchCameraAsync({ quality: 0.7 });
     if (!r.canceled && r.assets[0]) {
       const a = r.assets[0];
-      onChange({ uri: a.uri, name: a.fileName || 'comprobante.jpg', type: a.mimeType || 'image/jpeg' });
+      await adjuntarImagen({ uri: a.uri, name: a.fileName || 'comprobante.jpg', type: a.mimeType || 'image/jpeg' });
     }
   };
 
@@ -74,7 +91,7 @@ export function FileAttach({ value, onChange }: Props) {
     const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.7 });
     if (!r.canceled && r.assets[0]) {
       const a = r.assets[0];
-      onChange({ uri: a.uri, name: a.fileName || 'comprobante.jpg', type: a.mimeType || 'image/jpeg' });
+      await adjuntarImagen({ uri: a.uri, name: a.fileName || 'comprobante.jpg', type: a.mimeType || 'image/jpeg' });
     }
   };
 
@@ -82,6 +99,7 @@ export function FileAttach({ value, onChange }: Props) {
     const r = await DocumentPicker.getDocumentAsync({ type: 'application/pdf' });
     if (!r.canceled && r.assets[0]) {
       const a = r.assets[0];
+      setError('');
       onChange({ uri: a.uri, name: a.name, type: a.mimeType || 'application/pdf' });
     }
   };
@@ -90,6 +108,7 @@ export function FileAttach({ value, onChange }: Props) {
     <>
       <Pressable
         onPress={elegir}
+        disabled={procesando}
         style={{
           borderWidth: 1,
           borderStyle: 'dashed',
@@ -101,6 +120,7 @@ export function FileAttach({ value, onChange }: Props) {
           alignItems: 'center',
           justifyContent: 'center',
           gap: 9,
+          opacity: procesando ? 0.6 : 1,
         }}
       >
         {value ? (
@@ -119,7 +139,10 @@ export function FileAttach({ value, onChange }: Props) {
         </Text>
       </Pressable>
 
-      <Modal visible={menuAbierto} transparent animationType="fade" onRequestClose={() => setMenuAbierto(false)} statusBarTranslucent>
+      {procesando && <Text style={{ color: COLORS.textMuted, fontSize: 11, textAlign: 'center', marginTop: 6 }}>Optimizando imagen…</Text>}
+      {!!error && <Text style={{ color: COLORS.redDark, fontSize: 11, textAlign: 'center', marginTop: 6 }}>{error}</Text>}
+
+      <Modal visible={menuAbierto && !procesando} transparent animationType="fade" onRequestClose={() => setMenuAbierto(false)} statusBarTranslucent>
         <Pressable
           onPress={() => setMenuAbierto(false)}
           style={{ flex: 1, backgroundColor: 'rgba(22,21,15,0.58)', alignItems: 'center', justifyContent: 'center', padding: 24 }}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Car, CarLocation, LocationHistory, Mov, Pago, Reporte, ReportStatus } from './types';
 import type { ChatHistory, ChatReply } from './components/AssistantChat';
+import { optimizarComprobante } from './comprobanteImage';
 
 export const consultarAsistente = (question: string, history: ChatHistory[], signal: AbortSignal) => req<ChatReply>('/api/assistant/query', {
   method: 'POST', signal, body: JSON.stringify({ question, history: history.slice(-6), capabilities: { lineCharts: true } }),
@@ -370,11 +371,12 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
   // que no puede aplicarse en optimista: se espera al servidor y se aplican las
   // dos cosas juntas o ninguna.
   const mandarATaller = useCallback(async (id: string, datos: { razon: string; monto: number; comprobante: File | null; reportId?: number | null }) => {
+    const comprobante = datos.comprobante ? await optimizarComprobante(datos.comprobante) : null;
     const fd = new FormData();
     fd.append('razon', datos.razon);
     fd.append('monto', String(datos.monto));
     if (datos.reportId != null) fd.append('reportId', String(datos.reportId));
-    if (datos.comprobante) fd.append('comprobante', datos.comprobante);
+    if (comprobante) fd.append('comprobante', comprobante);
     const r = await req<{ car: CarDto; mov?: MovDto; reporte?: Reporte }>(`/api/cars/${id}/taller`, { method: 'POST', body: fd });
     setCars((cs) => cs.map((c) => (c.id === id ? toCar(r.car) : c)));
     if (r.mov) setMovs((ms) => [toMov(r.mov!), ...ms]);
@@ -388,12 +390,13 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
   }, []);
 
   const registrarService = useCallback(async (id: string, datos: RegistrarServicePayload) => {
+    const comprobante = datos.comprobante ? await optimizarComprobante(datos.comprobante) : null;
     const fd = new FormData();
     fd.append('fecha', datos.fecha);
     fd.append('descripcion', datos.descripcion);
     if (datos.kilometraje !== undefined) fd.append('kilometraje', String(datos.kilometraje));
     if (datos.costo !== undefined) fd.append('costo', String(datos.costo));
-    if (datos.comprobante) fd.append('comprobante', datos.comprobante);
+    if (comprobante) fd.append('comprobante', comprobante);
     const r = await req<{ car: CarDto; mov?: MovDto }>(`/api/cars/${id}/service`, { method: 'POST', body: fd });
     const car = toCar(r.car);
     setCars((cs) => cs.map((c) => (c.id === id ? car : c)));
