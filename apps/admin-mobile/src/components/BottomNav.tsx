@@ -20,14 +20,12 @@ export function BottomNav({ v }: { v: MobileView }) {
         </Svg>
         <Text style={{ fontSize: 10, fontWeight: '600', color: color(c.dash) }}>Inicio</Text>
       </Pressable>
-      <Pressable onPress={v.navFlota} style={tabBtn}>
-        <Svg viewBox="0 0 24 24" width={21} height={21} fill="none" stroke={color(c.flota)} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
-          <Path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H8.5c-.6 0-1.2.3-1.6.8L4.5 10.6c-.9.2-1.5 1-1.5 1.9v3.5c0 .6.4 1 1 1h2" />
-          <Circle cx="7" cy="17" r="2" />
-          <Path d="M9 17h6" />
-          <Circle cx="17" cy="17" r="2" />
+      <Pressable onPress={v.navIngresos} style={tabBtn}>
+        <Svg viewBox="0 0 24 24" width={21} height={21} fill="none" stroke={color(c.ingresos)} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
+          <Path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" />
+          <Path d="M9 8h6M9 12h6M9 16h3" />
         </Svg>
-        <Text style={{ fontSize: 10, fontWeight: '600', color: color(c.flota) }}>Vehículos</Text>
+        <Text style={{ fontSize: 10, fontWeight: '600', color: color(c.ingresos) }}>Ingresos</Text>
       </Pressable>
       <View style={{ width: 72, alignItems: 'center' }}>
         <Pressable

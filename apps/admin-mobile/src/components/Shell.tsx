@@ -11,6 +11,8 @@ import { ChoferSheet } from './ChoferSheet';
 import { RegistroChoiceSheet } from './RegistroChoiceSheet';
 import { Dashboard } from '../screens/Dashboard';
 import { DashboardDetail } from '../screens/DashboardDetail';
+import { Ganancias } from '../screens/Ganancias';
+import { Ingresos } from '../screens/Ingresos';
 import { Flota } from '../screens/Flota';
 import { Detalle } from '../screens/Detalle';
 import { NuevoVehiculo } from '../screens/NuevoVehiculo';
@@ -25,6 +27,7 @@ import { Assistant } from '../screens/Assistant';
 import { Perfil } from '../screens/Perfil';
 import { Secciones } from '../screens/Secciones';
 import { ReportDetailModal } from './ReportDetailModal';
+import { MovementDetailSheet } from './MovementDetailSheet';
 
 export function Shell({ v, nombre, usuario, onLogout, onRefresh, refreshing, syncError }: { v: MobileView; nombre: string; usuario: string; onLogout: () => void; onRefresh: () => void; refreshing: boolean; syncError: string }) {
   const keyboardVisible = useKeyboardState((state) => state.isVisible);
@@ -55,6 +58,18 @@ export function Shell({ v, nombre, usuario, onLogout, onRefresh, refreshing, syn
           <View style={{ flex: 1, minHeight: 0 }}>
             <Reportes v={v} />
           </View>
+        ) : v.screen === 'gastos' ? (
+          <View style={{ flex: 1, minHeight: 0 }}>
+            <Gastos v={v} />
+          </View>
+        ) : v.screen === 'ganancias' ? (
+          <View style={{ flex: 1, minHeight: 0 }}>
+            <Ganancias v={v} />
+          </View>
+        ) : v.screen === 'ingresos' ? (
+          <View style={{ flex: 1, minHeight: 0 }}>
+            <Ingresos v={v} />
+          </View>
         ) : (
           <KeyboardAwareScrollView
             style={{ flex: 1 }}
@@ -68,7 +83,6 @@ export function Shell({ v, nombre, usuario, onLogout, onRefresh, refreshing, syn
             {v.screen === 'dashboard' && <Dashboard v={v} />}
             {v.screen === 'dashboardDetail' && <DashboardDetail v={v} />}
             {v.screen === 'flota' && <Flota v={v} />}
-            {v.screen === 'gastos' && <Gastos v={v} />}
             {v.screen === 'mas' && <Mas v={v} />}
             {v.screen === 'secciones' && <Secciones v={v} />}
             {v.screen === 'alertas' && <Alertas v={v} />}
@@ -92,6 +106,7 @@ export function Shell({ v, nombre, usuario, onLogout, onRefresh, refreshing, syn
         {showBottomNav && <BottomNav v={v} />}
       </View>
       <ReportDetailModal v={v} />
+      <MovementDetailSheet movement={v.movementDetail} />
     </View>
   );
 }

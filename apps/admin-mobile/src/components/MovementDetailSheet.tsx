@@ -23,6 +23,7 @@ export function MovementDetailSheet({ movement }: { movement: MovementDetailView
         <Info label="Chofer" value={movement.driver} />
       </View>
       <Info label="Categoría" value={movement.category} />
+      <Info label="Sección" value={movement.section} />
       {!!movement.note && <Info label="Detalle" value={movement.note} multiline />}
 
       {movement.comprobante && <ComprobantePreview source={movement.comprobante} />}

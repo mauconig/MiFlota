@@ -69,11 +69,12 @@ export function Reportes({ v }: { v: MobileView }) {
   }, [previewPageCount]);
 
   const isPeriod = rep.step === 'period';
+  const isInclude = rep.step === 'include';
   const isCars = rep.step === 'cars';
   const isCategories = rep.step === 'categories';
   const isReview = rep.step === 'review';
-  const totalSteps = 4;
-  const currentStep = isPeriod ? 1 : isCars ? 2 : isCategories ? 3 : 4;
+  const totalSteps = 5;
+  const currentStep = isPeriod ? 1 : isInclude ? 2 : isCars ? 3 : isCategories ? 4 : 5;
   const includeLabel = rep.include === 'gastos' ? 'Gastos' : rep.include === 'ingresos' ? 'Ingresos cobrados' : rep.include === 'ambos' ? 'Gastos e ingresos cobrados' : 'Sin elegir';
   const carLabel = rep.carSelection === 'todos' ? 'Todos los vehículos' : `${rep.carSelection.length} vehículo${rep.carSelection.length === 1 ? '' : 's'}`;
   const categoryLabel = rep.categorySelection === 'todas' ? 'Todas las categorías' : `${rep.categorySelection.length} categoría${rep.categorySelection.length === 1 ? '' : 's'}`;
@@ -82,7 +83,7 @@ export function Reportes({ v }: { v: MobileView }) {
     <View style={{ flex: 1, minHeight: 0, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12, gap: 14 }}>
       <View style={{ gap: 4 }}>
         <Text style={{ color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' }}>Paso {currentStep} de {totalSteps}</Text>
-        <Text style={{ color: INK, fontSize: 24, lineHeight: 29, fontWeight: '800', letterSpacing: -0.4 }}>{isPeriod ? '¿Qué período querés ver?' : isCars ? '¿Qué sección querés incluir?' : isCategories ? '¿Qué categorías querés incluir?' : 'Revisá tu reporte'}</Text>
+        <Text style={{ color: INK, fontSize: 24, lineHeight: 29, fontWeight: '800', letterSpacing: -0.4 }}>{isPeriod ? '¿Qué período querés ver?' : isInclude ? '¿Qué querés incluir?' : isCars ? '¿Qué sección querés incluir?' : isCategories ? '¿Qué categorías querés incluir?' : 'Revisá tu reporte'}</Text>
       </View>
 
       {isPeriod && (
@@ -102,6 +103,17 @@ export function Reportes({ v }: { v: MobileView }) {
           </View>
           <View style={{ paddingTop: 2, backgroundColor: '#f4f0e8' }}><ContinueButton onPress={() => { if (v.period.applyTextRange()) rep.next(); }} /></View>
         </KeyboardAwareScrollView>
+      )}
+
+      {isInclude && (
+        <View style={{ flex: 1, minHeight: 0 }}>
+          <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ gap: 10, paddingBottom: 12 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <OptionCard title="Ingresos" description="Incluye los cobros recibidos" icon="↓" selected={rep.include === 'ingresos'} onPress={() => rep.setInclude('ingresos')} />
+            <OptionCard title="Gastos" description="Incluye los egresos registrados" icon="↑" selected={rep.include === 'gastos'} onPress={() => rep.setInclude('gastos')} />
+            <OptionCard title="Ingresos y gastos" description="Incluye ambos tipos de movimiento" icon="↕" selected={rep.include === 'ambos'} onPress={() => rep.setInclude('ambos')} />
+          </ScrollView>
+          <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}><ContinueButton onPress={rep.next} /></View>
+        </View>
       )}
 
       {isCars && (

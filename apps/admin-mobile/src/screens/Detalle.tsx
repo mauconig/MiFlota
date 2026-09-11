@@ -6,13 +6,12 @@ import { Avatar } from '../components/Avatar';
 import { AlertCard } from '../components/AlertCard';
 import { MovRow } from '../components/MovRow';
 import { Pagination } from '../components/Pagination';
-import { MovementDetailSheet } from '../components/MovementDetailSheet';
 import { QuotaDetailSheet } from '../components/QuotaDetailSheet';
 import { LocationHistoryModal } from '../components/LocationHistoryModal';
 
 const ALERT_PAGE_SIZE = 4;
 const MOV_PAGE_SIZE = 5;
-const CUOTA_PAGE_SIZE = 5;
+const GASTO_PAGE_SIZE = 5;
 
 const GpsIcon = ({ color }: { color: string }) => (
   <Svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
@@ -27,58 +26,65 @@ const GpsIcon = ({ color }: { color: string }) => (
 export function Detalle({ v }: { v: MobileView }) {
   const dc = v.detalle;
   const [alertPage, setAlertPage] = useState(0);
-  const [movPage, setMovPage] = useState(0);
-  const [cuotaPage, setCuotaPage] = useState(0);
-  const [activeTable, setActiveTable] = useState<'movs' | 'cuotas'>('movs');
+  const [cobroPage, setCobroPage] = useState(0);
+  const [gastoPage, setGastoPage] = useState(0);
+  const [activeTable, setActiveTable] = useState<'cobros' | 'gastos'>('cobros');
   const [locationOpen, setLocationOpen] = useState(false);
   useEffect(() => { setLocationOpen(false); }, [dc?.car.id]);
   const alertKey = useMemo(() => dc?.alerts.map((alert) => `${alert.txt}-${alert.sub}`).join('|') ?? '', [dc?.alerts]);
-  const movKey = useMemo(() => dc?.movs.map((mov) => String(mov.id)).join('|') ?? '', [dc?.movs]);
-  const cuotaKey = useMemo(() => dc?.cuotas.map((cuota) => String(cuota.id)).join('|') ?? '', [dc?.cuotas]);
+  const cobros = useMemo(() => dc?.movs.filter((mov) => mov.id.startsWith('pago-')) ?? [], [dc?.movs]);
+  const gastos = useMemo(() => dc?.movs.filter((mov) => mov.id.startsWith('gasto-')) ?? [], [dc?.movs]);
+  const cobroKey = useMemo(() => cobros.map((cobro) => String(cobro.id)).join('|'), [cobros]);
+  const gastoKey = useMemo(() => gastos.map((gasto) => String(gasto.id)).join('|'), [gastos]);
   const alertPageCount = Math.max(1, Math.ceil((dc?.alerts.length ?? 0) / ALERT_PAGE_SIZE));
-  const movPageCount = Math.max(1, Math.ceil((dc?.movs.length ?? 0) / MOV_PAGE_SIZE));
-  const cuotaPageCount = Math.max(1, Math.ceil((dc?.cuotas.length ?? 0) / CUOTA_PAGE_SIZE));
+  const cobroPageCount = Math.max(1, Math.ceil(cobros.length / MOV_PAGE_SIZE));
+  const gastoPageCount = Math.max(1, Math.ceil(gastos.length / GASTO_PAGE_SIZE));
   const visibleAlerts = dc?.alerts.slice(alertPage * ALERT_PAGE_SIZE, (alertPage + 1) * ALERT_PAGE_SIZE) ?? [];
-  const visibleMovs = dc?.movs.slice(movPage * MOV_PAGE_SIZE, (movPage + 1) * MOV_PAGE_SIZE) ?? [];
-  const visibleCuotas = dc?.cuotas.slice(cuotaPage * CUOTA_PAGE_SIZE, (cuotaPage + 1) * CUOTA_PAGE_SIZE) ?? [];
-  const activeRows = activeTable === 'movs' ? visibleMovs : visibleCuotas;
-  const activeTitle = activeTable === 'movs' ? 'Movimientos' : 'Cuotas';
-  const activeCount = activeTable === 'movs' ? dc?.movCount : dc?.cuotaCount;
+  const visibleCobros = cobros.slice(cobroPage * MOV_PAGE_SIZE, (cobroPage + 1) * MOV_PAGE_SIZE);
+  const visibleGastos = gastos.slice(gastoPage * GASTO_PAGE_SIZE, (gastoPage + 1) * GASTO_PAGE_SIZE);
+  const activeRows = activeTable === 'cobros' ? visibleCobros : visibleGastos;
+  const activeTitle = activeTable === 'cobros' ? 'Cobros' : 'Gastos';
+  const activeCount = activeTable === 'cobros' ? cobros.length + ' en total' : gastos.length + ' en total';
 
   useEffect(() => {
     setAlertPage(0);
   }, [alertKey]);
 
   useEffect(() => {
-    setMovPage(0);
-  }, [movKey]);
+    setCobroPage(0);
+  }, [cobroKey]);
 
   useEffect(() => {
-    setCuotaPage(0);
-  }, [cuotaKey]);
+    setGastoPage(0);
+  }, [gastoKey]);
 
   useEffect(() => {
     setAlertPage((current) => Math.min(current, alertPageCount - 1));
   }, [alertPageCount]);
 
   useEffect(() => {
-    setMovPage((current) => Math.min(current, movPageCount - 1));
-  }, [movPageCount]);
+    setCobroPage((current) => Math.min(current, cobroPageCount - 1));
+  }, [cobroPageCount]);
 
   useEffect(() => {
-    setCuotaPage((current) => Math.min(current, cuotaPageCount - 1));
-  }, [cuotaPageCount]);
+    setGastoPage((current) => Math.min(current, gastoPageCount - 1));
+  }, [gastoPageCount]);
 
   useEffect(() => {
-    setActiveTable('movs');
+    setActiveTable('cobros');
   }, [dc?.car.id]);
 
   useEffect(() => {
     if (!v.movementDetail) return;
-    setActiveTable('movs');
-    const index = dc?.movs.findIndex((mov) => String(mov.id) === v.movementDetail?.id) ?? -1;
-    if (index >= 0) setMovPage(Math.floor(index / MOV_PAGE_SIZE));
-  }, [dc?.movs, v.movementDetail?.id]);
+    const isCobro = v.movementDetail.id.startsWith('pago-');
+    setActiveTable(isCobro ? 'cobros' : 'gastos');
+    const rows = isCobro ? cobros : gastos;
+    const index = rows.findIndex((mov) => String(mov.id) === v.movementDetail?.id);
+    if (index >= 0) {
+      if (isCobro) setCobroPage(Math.floor(index / MOV_PAGE_SIZE));
+      else setGastoPage(Math.floor(index / GASTO_PAGE_SIZE));
+    }
+  }, [cobros, gastos, v.movementDetail?.id]);
 
   if (!dc) return null;
   return (
@@ -156,25 +162,21 @@ export function Detalle({ v }: { v: MobileView }) {
       </View>
 
       {dc.location && (
-        <View style={{ backgroundColor: dc.location.stale ? '#fff9ec' : '#f2f8f4', borderWidth: 1, borderColor: dc.location.stale ? '#f2e4c6' : '#dcebe2', borderRadius: 18, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 13 }}>
-          <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: dc.location.stale ? '#f9ead0' : '#e7f2ec', alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ backgroundColor: dc.location.stale ? '#fff9ec' : '#f2f8f4', borderWidth: 1, borderColor: dc.location.stale ? '#f2e4c6' : '#dcebe2', borderRadius: 18, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: dc.location.stale ? '#f9ead0' : '#e7f2ec', alignItems: 'center', justifyContent: 'center' }}>
             <GpsIcon color={dc.location.stale ? '#a8730f' : '#2e7d5b'} />
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase', color: '#6b665c' }}>Última ubicación</Text>
-            <Text style={{ fontSize: 13, fontWeight: '700', marginTop: 2 }}>
-              {dc.location.stale ? 'Ubicación desactualizada' : 'Auto localizado'}
+            <Text style={{ fontSize: 9, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase', color: '#6b665c' }}>Última ubicación</Text>
+            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82} allowFontScaling={false} style={{ fontSize: 13, fontWeight: '700', marginTop: 2 }}>
+              {dc.location.stale ? 'Desactualizada' : 'Auto localizado'}
             </Text>
-            <Text style={{ fontSize: 11, color: '#6b665c', marginTop: 1 }}>
-              {dc.location.age}
-              {dc.location.accuracy != null ? ' · precisión ±' + Math.round(dc.location.accuracy) + ' m' : ''}
-            </Text>
-            <Text style={{ fontSize: 10, color: '#6b665c', marginTop: 2 }}>
-              {dc.location.latitude.toFixed(6)}, {dc.location.longitude.toFixed(6)}
+            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82} allowFontScaling={false} style={{ fontSize: 11, color: '#6b665c', marginTop: 1 }}>
+              {dc.location.age}{dc.location.accuracy != null ? ' · precisión ±' + Math.round(dc.location.accuracy) + ' m' : ''}
             </Text>
           </View>
-          <Pressable onPress={() => setLocationOpen(true)} style={{ borderRadius: 12, backgroundColor: '#16150f', paddingVertical: 9, paddingHorizontal: 13 }}>
-            <Text style={{ color: '#fffdf8', fontSize: 12, fontWeight: '700' }}>Ver detalles</Text>
+          <Pressable onPress={() => setLocationOpen(true)} style={{ borderRadius: 12, backgroundColor: '#16150f', paddingVertical: 9, paddingHorizontal: 11 }}>
+            <Text style={{ color: '#fffdf8', fontSize: 12, fontWeight: '700' }}>Detalles</Text>
           </Pressable>
         </View>
       )}
@@ -192,21 +194,21 @@ export function Detalle({ v }: { v: MobileView }) {
       <View style={{ backgroundColor: '#f1ede5', borderRadius: 17, padding: 4, flexDirection: 'row', gap: 4 }}>
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ selected: activeTable === 'movs' }}
-          onPress={() => setActiveTable('movs')}
-          style={{ flex: 1, minHeight: 48, borderRadius: 13, backgroundColor: activeTable === 'movs' ? '#16150f' : 'transparent', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 }}
+          accessibilityState={{ selected: activeTable === 'cobros' }}
+          onPress={() => setActiveTable('cobros')}
+          style={{ flex: 1, minHeight: 48, borderRadius: 13, backgroundColor: activeTable === 'cobros' ? '#16150f' : 'transparent', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 }}
         >
-          <Text style={{ color: activeTable === 'movs' ? '#fffdf8' : '#6b665c', fontSize: 13, fontWeight: '700' }}>Movimientos</Text>
-          <Text style={{ color: activeTable === 'movs' ? '#d8d1c2' : '#8b8478', fontSize: 11, marginTop: 1 }}>{dc.movCount}</Text>
+          <Text style={{ color: activeTable === 'cobros' ? '#fffdf8' : '#6b665c', fontSize: 13, fontWeight: '700' }}>Cobros</Text>
+          <Text style={{ color: activeTable === 'cobros' ? '#d8d1c2' : '#8b8478', fontSize: 11, marginTop: 1 }}>{cobros.length} en total</Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ selected: activeTable === 'cuotas' }}
-          onPress={() => setActiveTable('cuotas')}
-          style={{ flex: 1, minHeight: 48, borderRadius: 13, backgroundColor: activeTable === 'cuotas' ? '#16150f' : 'transparent', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 }}
+          accessibilityState={{ selected: activeTable === 'gastos' }}
+          onPress={() => setActiveTable('gastos')}
+          style={{ flex: 1, minHeight: 48, borderRadius: 13, backgroundColor: activeTable === 'gastos' ? '#16150f' : 'transparent', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 }}
         >
-          <Text style={{ color: activeTable === 'cuotas' ? '#fffdf8' : '#6b665c', fontSize: 13, fontWeight: '700' }}>Cuotas</Text>
-          <Text style={{ color: activeTable === 'cuotas' ? '#d8d1c2' : '#8b8478', fontSize: 11, marginTop: 1 }}>{dc.cuotaCount}</Text>
+          <Text style={{ color: activeTable === 'gastos' ? '#fffdf8' : '#6b665c', fontSize: 13, fontWeight: '700' }}>Gastos</Text>
+          <Text style={{ color: activeTable === 'gastos' ? '#d8d1c2' : '#8b8478', fontSize: 11, marginTop: 1 }}>{gastos.length} en total</Text>
         </Pressable>
       </View>
 
@@ -216,22 +218,20 @@ export function Detalle({ v }: { v: MobileView }) {
           <Text style={{ fontSize: 11, color: '#6b665c' }}>{activeCount}</Text>
         </View>
         <View style={{ backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 20, paddingHorizontal: 14 }}>
-          {activeTable === 'movs' && dc.noMovs && <Text style={{ paddingVertical: 18, textAlign: 'center', fontSize: 12, color: '#6b665c' }}>Todavía no hay movimientos en este vehículo</Text>}
-          {activeTable === 'cuotas' && dc.noCuotas && <Text style={{ paddingVertical: 18, textAlign: 'center', fontSize: 12, color: '#6b665c' }}>No hay cuotas en este vehiculo</Text>}
+          {activeRows.length === 0 && <Text style={{ paddingVertical: 18, textAlign: 'center', fontSize: 12, color: '#6b665c' }}>{activeTable === 'cobros' ? 'Todavía no hay cobros en este vehículo' : 'Todavía no hay gastos en este vehículo'}</Text>}
           {activeRows.map((m) => (
             <MovRow key={m.id} m={m} />
           ))}
         </View>
-        {activeTable === 'movs' ? (
-          <Pagination page={movPage} pageSize={MOV_PAGE_SIZE} total={dc.movs.length} itemLabel="movimientos" onPageChange={setMovPage} />
+        {activeTable === 'cobros' ? (
+          <Pagination page={cobroPage} pageSize={MOV_PAGE_SIZE} total={cobros.length} itemLabel="cobros" onPageChange={setCobroPage} />
         ) : (
-          <Pagination page={cuotaPage} pageSize={CUOTA_PAGE_SIZE} total={dc.cuotas.length} itemLabel="cuotas" onPageChange={setCuotaPage} />
+          <Pagination page={gastoPage} pageSize={GASTO_PAGE_SIZE} total={gastos.length} itemLabel="gastos" onPageChange={setGastoPage} />
         )}
       </View>
 
     </View>
     <QuotaDetailSheet quota={v.quotaDetail} />
-    <MovementDetailSheet movement={v.movementDetail} />
       {locationOpen && dc.location && <LocationHistoryModal carId={dc.car.id} plate={dc.plate} latest={dc.location} onClose={() => setLocationOpen(false)} />}
     </>
   );

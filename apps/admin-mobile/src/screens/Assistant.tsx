@@ -84,6 +84,12 @@ function cleanAssistantAnswer(value: string): string {
   return value;
 }
 
+function hasRenderableChart(chart?: AssistantChart): boolean {
+  if (!chart) return false;
+  const items = chart.items.filter((item) => Number.isFinite(item.value));
+  return items.length > 0 && (chart.kind !== 'line' || items.length >= 2);
+}
+
 function ResultCard({ card, onAction }: { card: AssistantCard; onAction: (action: AssistantAction) => void }) {
   const content = (
     <View style={styles.resultCard}>
@@ -361,21 +367,27 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
 
   const renderMessage = (item: ChatMessage) => {
     const mine = item.role === 'user';
+    // Una respuesta puede traer métrica, gráfico y tabla para la misma
+    // consulta. En móvil elegimos una sola visualización para no repetir el
+    // mismo resultado tres veces y dejar más espacio para la conversación.
+    const showChart = !mine && hasRenderableChart(item.chart);
+    const showTable = !showChart && !!item.table?.rows.length;
+    const showCards = !showChart && !showTable && !!item.cards?.length;
     return (
       <View style={[styles.messageWrap, mine && styles.messageWrapMine]}>
         {!mine && <Text style={styles.sender}>MIFLOTA IA</Text>}
         <View style={[styles.bubble, mine ? styles.userBubble : styles.assistantBubble, item.error && styles.errorBubble]}>
           <Text style={[styles.messageText, mine && styles.userText]}>{item.text}</Text>
         </View>
-        {!!item.cards?.length && (
+        {showCards && item.cards && (
           <View style={styles.cards}>
             {item.cards.map((card, index) => (
               <ResultCard key={`${card.kind}-${card.title}-${index}`} card={card} onAction={activateAction} />
             ))}
           </View>
         )}
-        {!!item.chart?.items.length && <ResultChart chart={item.chart} />}
-        {!!item.table?.rows.length && <ResultTable table={item.table} onAction={activateAction} onOpen={setTableSheet} />}
+        {showChart && item.chart && <ResultChart chart={item.chart} />}
+        {showTable && item.table && <ResultTable table={item.table} onAction={activateAction} onOpen={setTableSheet} />}
         {!!(item.followUps ?? item.filters)?.length && !item.error && (
           <View style={styles.followUps}>
             <Text style={styles.followUpsLabel}>TAMBIÉN PODÉS PREGUNTAR</Text>

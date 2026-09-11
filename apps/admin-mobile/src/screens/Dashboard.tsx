@@ -99,6 +99,10 @@ export function Dashboard({ v }: { v: MobileView }) {
         <Donut d={d} />
       </Pressable>
 
+      <Pressable onPress={() => v.openDashboardDetail('incomeBreakdown')} accessibilityRole="button" accessibilityLabel="Ver detalle de ingresos" style={card}>
+        <Donut d={d} variant="income" />
+      </Pressable>
+
       <View style={card}>
         <Pressable onPress={() => v.openDashboardDetail('earnings')} accessibilityRole="button" accessibilityLabel="Ver ganancia detallada">
         <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>

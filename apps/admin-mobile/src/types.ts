@@ -69,6 +69,7 @@ export interface GastoItem {
 /** `pago` es plata que entró; `ajuste` cancela deuda sin caja (condonación).
     Los dos bajan lo que el chofer debe, pero solo el primero es ingreso. */
 export type PagoTipo = 'pago' | 'ajuste';
+export type IncomeTypeSelection = 'todos' | PagoTipo[];
 
 /**
  * Plata a favor del chofer, con su fecha real. No apunta a una cuota concreta:
@@ -111,8 +112,8 @@ export interface LocationHistory extends CarLocation {
 // un frame de teléfono, no un dashboard de pestañas siempre montadas como
 // admin-web, así que este estado no se parece al `UIState` de ahí.
 
-export type Screen = 'dashboard' | 'dashboardDetail' | 'flota' | 'gastos' | 'mas' | 'secciones' | 'alertas' | 'choferes' | 'detalle' | 'nuevoVehiculo' | 'registrar' | 'reportes' | 'ranking' | 'assistant' | 'perfil';
-export type DashboardDetailKind = 'collected' | 'expenses' | 'breakdown' | 'earnings';
+export type Screen = 'dashboard' | 'dashboardDetail' | 'ganancias' | 'ingresos' | 'flota' | 'gastos' | 'mas' | 'secciones' | 'alertas' | 'choferes' | 'detalle' | 'nuevoVehiculo' | 'registrar' | 'reportes' | 'ranking' | 'assistant' | 'perfil';
+export type DashboardDetailKind = 'collected' | 'expenses' | 'breakdown' | 'incomeBreakdown' | 'earnings';
 export type AdminNotificationRoute = { kind: 'alerts' } | { kind: 'payment'; carId: string; paymentId: number } | { kind: 'report'; carId: string; reportId: number };
 export type Period = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
 export type RegistrarTab = 'cobro' | 'gasto';
@@ -236,6 +237,8 @@ export interface MobileState {
   dashboardDetail: DashboardDetailKind | null;
   period: Period;
   dashboardSectionId: number | null;
+  gananciasSectionId: number | null;
+  ingresosSectionId: number | null;
   cFrom: string;
   cTo: string;
   periodFromText: string;
@@ -263,6 +266,9 @@ export interface MobileState {
   gastosCarIds: ReportSelection;
   gastosCat: ReportCategorySelection;
   gastosExpanded: Record<string, boolean>;
+  ingresosStep: 'period' | 'vehicle' | 'category' | 'results';
+  ingresosCarIds: ReportSelection;
+  ingresosTypes: IncomeTypeSelection;
   reportesStep: ReportStep;
   reportesInclude: ReportInclude | null;
   reportesCarIds: ReportSelection;
