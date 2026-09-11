@@ -272,6 +272,8 @@ const selCars = db.prepare(`
    WHERE c.owner_id = ?
    ORDER BY c.rowid
 `);
+interface SectionRow { id: number; name: string; position: number }
+const selSections = db.prepare('SELECT id,name,position FROM sections WHERE owner_id=? ORDER BY position,id');
 const selMovs = db.prepare('SELECT * FROM movs WHERE owner_id = ? ORDER BY date DESC, id DESC');
 const selPagos = db.prepare('SELECT * FROM pagos WHERE owner_id = ? ORDER BY fecha DESC, id DESC');
 const selReportes = db.prepare('SELECT * FROM reportes_falla WHERE owner_id = ? ORDER BY fecha DESC, id DESC');
@@ -787,11 +789,42 @@ app.get<{ Params: TileParams }>('/api/map/tiles/:z/:x/:y.png', async (req, reply
 app.get('/api/state', async (req) => {
   const u = quien(req);
   return {
+    sections: selSections.all(u.id) as SectionRow[],
     cars: (selCars.all(u.id) as CarRow[]).map(carToJson),
     movs: (selMovs.all(u.id) as MovRow[]).map((m) => movToJson(m, selItems.all(m.id) as GastoItemRow[])),
     pagos: (selPagos.all(u.id) as PagoRow[]).map(pagoToJson),
     reportes: (selReportes.all(u.id) as ReporteRow[]).map(reporteToJson),
   };
+});
+
+const sectionName = (value: unknown) => String(value ?? '').trim().replace(/\s+/g, ' ');
+app.post<{ Body: { name?: string } }>('/api/sections', async (req, reply) => {
+  const u = quien(req); const name = sectionName(req.body?.name);
+  if (!name || name.length > 60) return reply.code(400).send({ error: 'Nombre de sección inválido' });
+  if (db.prepare('SELECT 1 FROM sections WHERE owner_id=? AND lower(trim(name))=lower(?)').get(u.id, name)) return reply.code(409).send({ error: 'Ya existe una sección con ese nombre' });
+  const position = (db.prepare('SELECT COALESCE(MAX(position),-1)+1 position FROM sections WHERE owner_id=?').get(u.id) as { position: number }).position;
+  const result = db.prepare('INSERT INTO sections(owner_id,name,position) VALUES (?,?,?)').run(u.id, name, position);
+  return reply.code(201).send({ id: Number(result.lastInsertRowid), name, position });
+});
+app.patch<{ Params: { id: string }; Body: { name?: string } }>('/api/sections/:id', async (req, reply) => {
+  const u = quien(req); const id = Number(req.params.id); const name = sectionName(req.body?.name);
+  if (!Number.isInteger(id) || !name || name.length > 60) return reply.code(400).send({ error: 'Sección inválida' });
+  const result = db.prepare('UPDATE sections SET name=? WHERE id=? AND owner_id=?').run(name, id, u.id);
+  if (!result.changes) return reply.code(404).send({ error: 'Sección inexistente' });
+  return { id, name, position: (db.prepare('SELECT position FROM sections WHERE id=?').get(id) as { position: number }).position };
+});
+app.put<{ Body: { ids?: number[] } }>('/api/sections/order', async (req, reply) => {
+  const u = quien(req); const ids = req.body?.ids;
+  const current = (selSections.all(u.id) as SectionRow[]).map((s) => s.id);
+  if (!Array.isArray(ids) || ids.length !== current.length || new Set(ids).size !== ids.length || ids.some((id) => !current.includes(id))) return reply.code(400).send({ error: 'Orden de secciones inválido' });
+  db.transaction(() => ids.forEach((id, position) => db.prepare('UPDATE sections SET position=? WHERE id=? AND owner_id=?').run(position, id, u.id)))();
+  return selSections.all(u.id);
+});
+app.delete<{ Params: { id: string } }>('/api/sections/:id', async (req, reply) => {
+  const u = quien(req); const id = Number(req.params.id);
+  const result = db.transaction(() => { db.prepare('UPDATE cars SET section_id=NULL WHERE owner_id=? AND section_id=?').run(u.id, id); return db.prepare('DELETE FROM sections WHERE id=? AND owner_id=?').run(id, u.id); })();
+  if (!result.changes) return reply.code(404).send({ error: 'Sección inexistente' });
+  return { ok: true };
 });
 
 interface AdminPushTokenBody {
@@ -938,6 +971,7 @@ const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 const SEG_CADA_MAX = 120;
 
 interface CarPatch {
+  sectionId?: number | null;
   plate?: string;
   model?: string;
   year?: number;
@@ -1016,6 +1050,10 @@ app.patch<{ Params: { id: string }; Body: CarPatch }>('/api/cars/:id', async (re
   if (!actual) return reply.code(404).send({ error: 'Vehículo inexistente' });
 
   const body = req.body ?? ({} as CarPatch);
+  if (body.sectionId !== undefined) {
+    if (body.sectionId !== null && (!Number.isInteger(body.sectionId) || !db.prepare('SELECT 1 FROM sections WHERE id=? AND owner_id=?').get(body.sectionId, u.id))) return reply.code(400).send({ error: 'Sección inválida' });
+    db.prepare('UPDATE cars SET section_id=? WHERE id=? AND owner_id=?').run(body.sectionId, req.params.id, u.id);
+  }
   if (body.kilometraje !== undefined && (typeof body.kilometraje !== 'number' || body.kilometraje < actual.kilometraje)) return reply.code(400).send({ error: 'El kilometraje no puede disminuir' });
   const normalizedPlate = body.plate === undefined ? undefined : body.plate.trim().toUpperCase();
   if (normalizedPlate !== undefined) {
@@ -1254,6 +1292,7 @@ app.delete<{ Params: { id: string } }>('/api/cars/:id', async (req, reply) => {
 });
 
 interface NuevoCar {
+  sectionId: number;
   plate: string;
   model: string;
   year: number;
@@ -1274,6 +1313,7 @@ app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
   const model = String(b.model ?? '').trim();
   if (!plate) return reply.code(400).send({ error: 'La chapa es obligatoria' });
   if (!model) return reply.code(400).send({ error: 'La marca y modelo son obligatorios' });
+  if (!Number.isInteger(b.sectionId) || !db.prepare('SELECT 1 FROM sections WHERE id=? AND owner_id=?').get(b.sectionId, u.id)) return reply.code(400).send({ error: 'La sección es obligatoria' });
   const kilometraje = b.kilometraje == null ? 0 : Number(b.kilometraje);
   if (!Number.isInteger(kilometraje) || kilometraje < 0 || kilometraje > 10_000_000) return reply.code(400).send({ error: 'El kilometraje inicial no es válido' });
   const seguroNombre = String(b.seguroNombre ?? '').trim();
@@ -1296,6 +1336,7 @@ app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
   const car = {
     id: 'c' + Date.now().toString(36),
     owner_id: u.id,
+    section_id: b.sectionId,
     plate,
     model,
     year: Number.isInteger(b.year) && b.year > 1950 && b.year < 2100 ? b.year : 2018,
@@ -1315,8 +1356,8 @@ app.post<{ Body: NuevoCar }>('/api/cars', async (req, reply) => {
     seguro_cada: seguroCada,
   };
   db.prepare(`
-    INSERT INTO cars (id, owner_id, plate, model, year, driver, cuota, estado, gps_tag, kilometraje, kilometraje_actualizado, service_cada, service_unidad, last_service_date, seguro_date, seguro_nombre, seguro_cada)
-    VALUES (@id, @owner_id, @plate, @model, @year, @driver, @cuota, @estado, @gps_tag, @kilometraje, @kilometraje_actualizado, @service_cada, @service_unidad, @last_service_date, @seguro_date, @seguro_nombre, @seguro_cada)
+    INSERT INTO cars (id, owner_id, section_id, plate, model, year, driver, cuota, estado, gps_tag, kilometraje, kilometraje_actualizado, service_cada, service_unidad, last_service_date, seguro_date, seguro_nombre, seguro_cada)
+    VALUES (@id, @owner_id, @section_id, @plate, @model, @year, @driver, @cuota, @estado, @gps_tag, @kilometraje, @kilometraje_actualizado, @service_cada, @service_unidad, @last_service_date, @seguro_date, @seguro_nombre, @seguro_cada)
   `).run(car);
 
   return reply.code(201).send(carToJson(selCar.get(car.id, u.id) as CarRow));

@@ -17,7 +17,7 @@ export function EditCarModal({ v }: { v: View }) {
   if (!v.editCarModal) return null;
   const f = v.editCar;
   const change = v.editCarChange;
-  return (
+  return (<>
     <div onClick={v.editCarClose} style={modalOverlay}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: '#fffdf8', borderRadius: 24, width: 790, maxWidth: '100%', height: 'min(650px, 90vh)', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 24px 60px rgba(22,21,15,0.3)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '20px 24px', borderBottom: '1px solid #f0ebe0', flex: 'none' }}><span style={modalTitle}>Editar datos del vehículo</span><Btn onClick={v.editCarClose} ariaLabel="Cerrar" style={modalCloseBtn} hoverStyle={modalCloseBtnHover}><CloseIcon size={16} /></Btn></div>
@@ -35,7 +35,14 @@ export function EditCarModal({ v }: { v: View }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, padding: '14px 24px', borderTop: '1px solid #f0ebe0', flex: 'none' }}><Btn onClick={v.editCarClose} style={btnSecondary} hoverStyle={btnSecondaryHover}>Cancelar</Btn><Btn onClick={v.editCarSave} disabled={f.guardando} style={btnPrimary} hoverStyle={btnPrimaryHover} disabledStyle={{ opacity: 0.6 }}>{f.guardando ? 'Guardando…' : 'Guardar cambios'}</Btn></div>
       </div>
     </div>
-  );
+    <label style={{ position: 'fixed', left: 'calc(50% - 205px)', bottom: 'calc(5vh + 15px)', zIndex: 1001, display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700 }}>
+      Sección
+      <select value={f.sectionId ?? ''} onChange={(e) => change('sectionId', e.target.value ? Number(e.target.value) : null)} style={{ ...fieldInput, width: 150, minHeight: 38 }}>
+        <option value="">Sin sección</option>
+        {v.sectionOptions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+      </select>
+    </label>
+  </>);
 }
 
 function Section({ title, hint, children }: { title: string; hint: string; children: React.ReactNode }) { return <><h2 style={{ margin: 0, fontSize: 19 }}>{title}</h2><p style={{ margin: '6px 0 22px', fontSize: 12, color: '#6b665c', lineHeight: 1.5 }}>{hint}</p>{children}</>; }

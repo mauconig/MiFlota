@@ -12,6 +12,7 @@ export const COMPROBANTES_DIR = process.env.MIFLOTA_COMPROBANTES ?? join(dirname
 export interface CarRow {
   id: string;
   owner_id: number;
+  section_id: number | null;
   plate: string;
   model: string;
   year: number;
@@ -163,9 +164,19 @@ export function openDb() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_drivers_username ON drivers(driver_username) WHERE driver_username IS NOT NULL;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_drivers_owner_nombre ON drivers(owner_id, nombre);
 
+    CREATE TABLE IF NOT EXISTS sections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner_id INTEGER NOT NULL,
+      name TEXT NOT NULL CHECK (length(trim(name)) > 0 AND length(name) <= 60),
+      position INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sections_owner_name ON sections(owner_id, lower(trim(name)));
+    CREATE INDEX IF NOT EXISTS idx_sections_owner_position ON sections(owner_id, position, id);
+
     CREATE TABLE IF NOT EXISTS cars (
       id                 TEXT PRIMARY KEY,
       owner_id           INTEGER NOT NULL DEFAULT 0,
+      section_id         INTEGER,
       plate              TEXT NOT NULL,
       model              TEXT NOT NULL,
       year               INTEGER NOT NULL,
@@ -318,8 +329,15 @@ export function openDb() {
   // Los índices sobre owner_id se crean dentro de la migración, no acá: en una
   // base anterior la columna todavía no existe cuando corre este bloque.
   migrarOwner(db);
+  migrarSecciones(db);
   migrarHistorialUbicaciones(db);
   return db;
+}
+
+function migrarSecciones(db: Database.Database) {
+  const cols = (db.prepare('PRAGMA table_info(cars)').all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes('section_id')) db.exec('ALTER TABLE cars ADD COLUMN section_id INTEGER');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_cars_section ON cars(owner_id, section_id)');
 }
 
 /** Conserva en el historial las últimas posiciones que existían antes de crear
@@ -638,8 +656,8 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
   const idDe = (carId: string) => `u${ownerId}${carId}`;
 
   const insCar = db.prepare(`
-    INSERT INTO cars (id, owner_id, plate, model, year, driver_id, driver, cuota, estado, gps_tag, kilometraje, kilometraje_actualizado, service_cada, service_unidad, last_service_date, seguro_date, seguro_nombre, seguro_costo, seguro_periodo, seguro_cada)
-    VALUES (@id, @owner_id, @plate, @model, @year, @driver_id, @driver, @cuota, @estado, @gps_tag, @kilometraje, @kilometraje_actualizado, @service_cada, @service_unidad, @last_service_date, @seguro_date, @seguro_nombre, @seguro_costo, @seguro_periodo, @seguro_cada)
+    INSERT INTO cars (id, owner_id, section_id, plate, model, year, driver_id, driver, cuota, estado, gps_tag, kilometraje, kilometraje_actualizado, service_cada, service_unidad, last_service_date, seguro_date, seguro_nombre, seguro_costo, seguro_periodo, seguro_cada)
+    VALUES (@id, @owner_id, @section_id, @plate, @model, @year, @driver_id, @driver, @cuota, @estado, @gps_tag, @kilometraje, @kilometraje_actualizado, @service_cada, @service_unidad, @last_service_date, @seguro_date, @seguro_nombre, @seguro_costo, @seguro_periodo, @seguro_cada)
   `);
   const insMov = db.prepare(`
     INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, driver, driver_id)
@@ -653,6 +671,12 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
   `);
 
   db.transaction(() => {
+    const sectionIds = new Map<string, number>();
+    for (const [position, brand] of [...new Set(cars.map((c) => c.model.split(/\s+/)[0]))].entries()) {
+      db.prepare('INSERT OR IGNORE INTO sections(owner_id,name,position) VALUES (?,?,?)').run(ownerId, brand, position);
+      const section = db.prepare('SELECT id FROM sections WHERE owner_id=? AND lower(trim(name))=lower(trim(?))').get(ownerId, brand) as { id: number };
+      sectionIds.set(brand, section.id);
+    }
     const driverDe = new Map<string, number>();
     const driverId = (nombre: string) => {
       let id = driverDe.get(nombre);
@@ -668,6 +692,7 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
       insCar.run({
         id: idDe(c.id),
         owner_id: ownerId,
+        section_id: sectionIds.get(c.model.split(/\s+/)[0])!,
         plate: c.plate,
         model: c.model,
         year: c.year,
@@ -732,6 +757,7 @@ export function carToJson(r: CarRow) {
     driver: r.driver,
     driverId: r.driver_id ?? null,
     driverHasCredentials: Boolean(r.driver_username && r.driver_pass_hash),
+    sectionId: r.section_id ?? null,
     cuota: r.cuota,
     estado: r.estado,
     gpsTag: r.gps_tag,

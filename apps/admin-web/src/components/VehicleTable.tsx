@@ -3,7 +3,7 @@ import { Btn } from './Btn';
 import { BrandIcon } from '../icons';
 
 const RESUMEN_GRID = '28px 2.25fr 1.1fr 0.66fr 0.8fr 0.8fr 0.7fr 0.72fr';
-const FLOTA_GRID = '28px 1.7fr 1.1fr 0.66fr 1fr 0.8fr 0.8fr 1.05fr 0.7fr';
+const FLOTA_GRID = '28px 1.7fr 1fr 1.1fr 0.66fr 1fr 0.8fr 0.8fr 1.05fr 0.7fr';
 
 /** Muestra todas las filas y scrollea dentro de la tarjeta, con el encabezado
  *  de columnas fijo, así el contenedor que la envuelve nunca es el que scrollea. */
@@ -44,6 +44,7 @@ export function VehicleTable({ cols, rows, variant }: { cols: ColItem[]; rows: V
           </span>
         </span>
       </span>
+      {variant === 'flota' && <span style={{ padding: cellPad, fontSize: 13, color: '#3d3a34', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.section}</span>}
       <span style={{ padding: cellPad, fontSize: 13, color: '#3d3a34', minWidth: 0 }}>{r.driver}</span>
       <span style={{ padding: cellPad, fontSize: 13, color: '#3d3a34', textAlign: 'right' }}>{r.cuota}</span>
       {variant === 'flota' && <span style={{ padding: cellPad, fontSize: 12, color: r.svcFg, textAlign: 'left' }}>{r.svc}</span>}

@@ -66,6 +66,7 @@ export interface VehicleRow {
   plate: string;
   rawModel: string;
   model: string;
+  section: string;
   driver: string;
   cuota: string;
   svc: string;
@@ -464,10 +465,19 @@ export interface View {
   goMovimientos: (carId?: string) => void;
 
   fleetFilters: Chip[];
+  sectionFilter: UIState['sectionFilter'];
+  setSectionFilter: (value: UIState['sectionFilter']) => void;
   cols: ColItem[];
   colsF: ColItem[];
   rows: VehicleRow[];
   flotaRows: VehicleRow[];
+  flotaGroups: { id: string; name: string; rows: VehicleRow[] }[];
+  sectionOptions: { id: number; name: string }[];
+  setNewCarSection: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+  addSection: () => void;
+  renameSection: (id: number, name: string) => void;
+  deleteSection: (id: number) => void;
+  moveSection: (id: number, direction: -1 | 1) => void;
   openCarModal: () => void;
   carQ: string;
   setCarQ: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -607,7 +617,7 @@ export interface View {
   serviceClose: () => void;
   drvModal: boolean;
   ncar: NewCarForm;
-  ch: Record<Exclude<keyof NewCarForm, 'serviceUnidad' | 'lastService' | 'seguroVence'>, (e: React.ChangeEvent<HTMLInputElement>) => void>;
+  ch: Record<Exclude<keyof NewCarForm, 'sectionId' | 'serviceUnidad' | 'lastService' | 'seguroVence'>, (e: React.ChangeEvent<HTMLInputElement>) => void>;
   /** Campos que ya entregan el valor formateado, no un evento. */
   setLastService: (iso: string) => void;
   setSeguroVence: (iso: string) => void;
@@ -685,6 +695,7 @@ void downloadXlsx;
 
 function blankCar(): NewCarForm {
   return {
+    sectionId: null,
     plate: '',
     model: '',
     year: '2018',
@@ -852,6 +863,11 @@ export function useFleetView(
     exportReport: (payload: ReportExportPayload) => Promise<{ file: { name: string; url: string; mimeType: string }; counts: { ingresos: number; gastos: number; total: number } }>;
     addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
     deletePago: (id: number) => Promise<void>;
+    sections: import('./api').FleetSection[];
+    addSection: (name: string) => Promise<void>;
+    renameSection: (id: number, name: string) => Promise<void>;
+    deleteSection: (id: number) => Promise<void>;
+    reorderSections: (ids: number[]) => Promise<void>;
   },
 ): View {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -927,6 +943,7 @@ export function useFleetView(
       toast('Ingresá la marca y el modelo');
       return;
     }
+    if (n.sectionId == null) { toast('Elegí una sección'); return; }
     if (cars.some((c) => c.plate.toUpperCase() === plate)) {
       toast('Esa chapa ya está en la flota');
       return;
@@ -946,6 +963,7 @@ export function useFleetView(
     // el servidor, así que se espera la confirmación antes de cerrar el modal.
     persist
       .addCar({
+        sectionId: n.sectionId,
         plate,
         model: n.model.trim(),
         year: numFromInput(n.year) || 2018,
@@ -1161,10 +1179,16 @@ export function useFleetView(
   const perCar = cars.map((c) => ({ c, ...stats(movs, aplicaciones, (m) => m.carId === c.id && inR(m), (a) => a.carId === c.id && inRA(a), pagos, (p) => p.carId === c.id && inRP(p)) }));
   const maxNet = Math.max(...perCar.map((x) => Math.abs(x.net)), 1);
   const filtered = perCar.filter((x) => (st.filter === 'todos' ? true : x.c.estado === st.filter) && matches(st.carQ, x.c.plate, x.c.model, x.c.driver, x.c.gpsTag));
+  const filteredFlota = filtered.filter((x) => {
+    if (st.sectionFilter === 'todos') return true;
+    if (st.sectionFilter === 'sin') return x.c.sectionId == null;
+    return x.c.sectionId === st.sectionFilter;
+  });
   const keyF: (x: (typeof perCar)[number]) => string | number =
     ({
       plate: (x: any) => x.c.plate,
       model: (x: any) => x.c.model,
+      section: (x: any) => persist.sections.find((section: { id: number; name: string }) => section.id === x.c.sectionId)?.name ?? 'Sin sección',
       driver: (x: any) => x.c.driver,
       cuota: (x: any) => x.c.cuota,
       svc: (x: any) => svcDaysLeft(x.c),
@@ -1174,6 +1198,11 @@ export function useFleetView(
       estado: (x: any) => x.c.estado,
     } as Record<string, (x: any) => string | number>)[st.sortK] || ((x: any) => x.net);
   const sorted = [...filtered].sort((a, b) => {
+    const ka = keyF(a);
+    const kb = keyF(b);
+    return (typeof ka === 'string' ? ka.localeCompare(kb as string) : (ka as number) - (kb as number)) * st.sortDir;
+  });
+  const sortedFlota = [...filteredFlota].sort((a, b) => {
     const ka = keyF(a);
     const kb = keyF(b);
     return (typeof ka === 'string' ? ka.localeCompare(kb as string) : (ka as number) - (kb as number)) * st.sortDir;
@@ -1206,6 +1235,7 @@ export function useFleetView(
       plate: x.c.plate,
       rawModel: x.c.model,
       model: x.c.model + ' · ' + x.c.year,
+      section: persist.sections.find((section) => section.id === x.c.sectionId)?.name ?? 'Sin sección',
       driver: x.c.driver,
       cuota: x.c.cuota ? fmtShort(x.c.cuota, st.hide) : '—',
       svc: x.c.estado === 'baja' ? '—' : svcLeftLbl(dLeft),
@@ -1245,6 +1275,7 @@ export function useFleetView(
   };
 
   const editCarFrom = (c: Car): EditCarForm => ({
+    sectionId: c.sectionId,
     plate: c.plate,
     model: c.model,
     year: String(c.year),
@@ -1263,6 +1294,7 @@ export function useFleetView(
     guardando: false,
   });
   const editCar = st.editCar || {
+    sectionId: null,
     plate: '', model: '', year: '', gpsTag: '', kilometraje: '', lastService: '', serviceCada: '', serviceUnidad: 'meses' as const,
     seguroVence: '', seguroNombre: '', seguroCada: '', estado: 'activo' as const, driver: '', cuota: '', section: 'general' as const, guardando: false,
   };
@@ -2095,6 +2127,8 @@ export function useFleetView(
         ['baja', 'Baja'],
       ] as [UIState['filter'], string][]
     ).map(([k, label]) => ({ label, ...CH(st.filter === k), pick: () => update({ filter: k }) })),
+    sectionFilter: st.sectionFilter,
+    setSectionFilter: (value) => update({ sectionFilter: value }),
     cols: mkCols([
       ['plate', 'Vehículo', 'left'],
       ['driver', 'Chofer', 'left'],
@@ -2106,6 +2140,7 @@ export function useFleetView(
     ]),
     colsF: mkCols([
       ['model', 'Vehículo', 'left'],
+      ['section', 'Sección', 'left'],
       ['driver', 'Chofer', 'left'],
       ['cuota', 'Cuota', 'right'],
       ['svc', 'Service', 'left'],
@@ -2115,7 +2150,17 @@ export function useFleetView(
       ['estado', 'Estado', 'right'],
     ]),
     rows: sorted.map(mkRow),
-    flotaRows: sorted.map(mkRow),
+    flotaRows: sortedFlota.map(mkRow),
+    flotaGroups: [
+      ...persist.sections.map((section) => ({ id: String(section.id), name: section.name, rows: sortedFlota.filter((item) => item.c.sectionId === section.id).map(mkRow) })),
+      { id: 'none', name: 'Sin sección', rows: sortedFlota.filter((item) => item.c.sectionId == null).map(mkRow) },
+    ].filter((group) => group.rows.length > 0),
+    sectionOptions: persist.sections.map(({ id, name }) => ({ id, name })),
+    setNewCarSection: (e) => update((s2) => ({ ncar: { ...s2.ncar, sectionId: e.target.value ? Number(e.target.value) : null } })),
+    addSection: () => { const name = window.prompt('Nombre de la nueva sección')?.trim(); if (name) void persist.addSection(name).catch((e: Error) => toast(e.message)); },
+    renameSection: (id, oldName) => { const name = window.prompt('Nuevo nombre', oldName)?.trim(); if (name) void persist.renameSection(id, name).catch((e: Error) => toast(e.message)); },
+    deleteSection: (id) => { if (window.confirm('¿Borrar esta sección? Sus autos quedarán sin sección.')) void persist.deleteSection(id).catch((e: Error) => toast(e.message)); },
+    moveSection: (id, direction) => { const ids = persist.sections.map((s) => s.id); const at = ids.indexOf(id); const to = at + direction; if (to < 0 || to >= ids.length) return; [ids[at], ids[to]] = [ids[to], ids[at]]; void persist.reorderSections(ids).catch((e: Error) => toast(e.message)); },
     carQ: st.carQ,
     setCarQ: (e) => update({ carQ: e.target.value }),
     hoyISO: isoLocal(TODAY),

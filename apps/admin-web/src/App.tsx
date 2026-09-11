@@ -39,6 +39,7 @@ function initialState(): UIState {
   return {
   period: 'mes',
   filter: 'todos',
+  sectionFilter: 'todos',
   sortK: 'net',
   sortDir: -1,
   hide: false,

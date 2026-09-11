@@ -5,6 +5,7 @@ export type ServiceUnidad = 'dias' | 'meses';
 
 export interface Car {
   id: string;
+  sectionId: number | null;
   plate: string;
   model: string;
   year: number;
@@ -124,10 +125,12 @@ export interface Reporte {
 export type Nav = 'resumen' | 'flota' | 'movimientos' | 'choferes' | 'alertas' | 'reportes' | 'cobros' | 'gastos';
 export type Period = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
 export type FleetFilter = 'todos' | 'activo' | 'taller' | 'baja';
+export type SectionFilter = 'todos' | 'sin' | number;
 export type MovType = 'todos' | 'ingreso' | 'egreso';
 export type ModalKind = 'car' | 'drv' | null;
 
 export interface NewCarForm {
+  sectionId: number | null;
   plate: string;
   model: string;
   year: string;
@@ -178,6 +181,7 @@ export interface DriverCredentialsEdit {
 export interface UIState {
   period: Period;
   filter: FleetFilter;
+  sectionFilter: SectionFilter;
   sortK: string;
   sortDir: 1 | -1;
   hide: boolean;

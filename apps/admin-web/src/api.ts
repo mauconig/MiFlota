@@ -101,6 +101,7 @@ export function useAuth(): Auth {
 }
 
 export interface NuevoCarPayload {
+  sectionId: number;
   plate: string;
   model: string;
   year: number;
@@ -170,6 +171,7 @@ export interface AssignDriverPayload extends DriverCredentials {
 }
 
 export interface FleetStore {
+  sections: FleetSection[];
   cars: Car[];
   movs: Mov[];
   pagos: Pago[];
@@ -191,7 +193,12 @@ export interface FleetStore {
   exportReport: (payload: ReportExportPayload) => Promise<ReportExportResponse>;
   addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
   deletePago: (id: number) => Promise<void>;
+  addSection: (name: string) => Promise<void>;
+  renameSection: (id: number, name: string) => Promise<void>;
+  deleteSection: (id: number) => Promise<void>;
+  reorderSections: (ids: number[]) => Promise<void>;
 }
+export interface FleetSection { id: number; name: string; position: number }
 
 /**
  * Estado de la flota respaldado por la API. Las mutaciones se aplican primero en
@@ -199,6 +206,7 @@ export interface FleetStore {
  * servidor; si el servidor rechaza, se recarga el estado real y se informa.
  */
 export function useFleetStore(onError: (msg: string) => void, onSinSesion: () => void): FleetStore {
+  const [sections, setSections] = useState<FleetSection[]>([]);
   const [cars, setCars] = useState<Car[]>([]);
   const [movs, setMovs] = useState<Mov[]>([]);
   const [pagos, setPagos] = useState<Pago[]>([]);
@@ -208,7 +216,8 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
   const [error, setError] = useState('');
 
   const recargar = useCallback(async () => {
-    const s = await req<{ cars: CarDto[]; movs: MovDto[]; pagos: PagoDto[]; reportes?: Reporte[] }>('/api/state');
+    const s = await req<{ sections: FleetSection[]; cars: CarDto[]; movs: MovDto[]; pagos: PagoDto[]; reportes?: Reporte[] }>('/api/state');
+    setSections(s.sections ?? []);
     setCars(s.cars.map(toCar));
     setMovs(s.movs.map(toMov));
     setPagos(s.pagos.map(toPago));
@@ -383,6 +392,11 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     if (r.reporte) setReportes((rs) => rs.map((reporte) => (reporte.id === r.reporte!.id ? r.reporte! : reporte)));
   }, []);
 
+  const addSection = useCallback(async (name: string) => { const s = await req<FleetSection>('/api/sections', { method: 'POST', body: JSON.stringify({ name }) }); setSections((v) => [...v, s]); }, []);
+  const renameSection = useCallback(async (id: number, name: string) => { const s = await req<FleetSection>(`/api/sections/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }); setSections((v) => v.map((x) => x.id === id ? s : x)); }, []);
+  const deleteSection = useCallback(async (id: number) => { await req(`/api/sections/${id}`, { method: 'DELETE' }); setSections((v) => v.filter((x) => x.id !== id)); setCars((v) => v.map((c) => c.sectionId === id ? { ...c, sectionId: null } : c)); }, []);
+  const reorderSections = useCallback(async (ids: number[]) => { const s = await req<FleetSection[]>('/api/sections/order', { method: 'PUT', body: JSON.stringify({ ids }) }); setSections(s); }, []);
+
   const updateReporte = useCallback(async (id: number, estado: Extract<ReportStatus, 'en_taller' | 'resuelta'>) => {
     const reporte = await req<Reporte>(`/api/reportes/${id}`, { method: 'PATCH', body: JSON.stringify({ estado }) });
     setReportes((rs) => rs.map((r) => (r.id === id ? reporte : r)));
@@ -421,6 +435,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
   }, []);
 
   return {
+    sections,
     cars,
     movs,
     pagos,
@@ -436,6 +451,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     assignDriver,
     addCar,
     deleteCar,
+    addSection, renameSection, deleteSection, reorderSections,
     mandarATaller,
     updateReporte,
     registrarService,

@@ -17,6 +17,13 @@ export function CarModal({ v }: { v: View }) {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <label style={fieldLabel}>
+            <span style={fieldLabelText}>Sección</span>
+            <select value={v.ncar.sectionId ?? ''} onChange={v.setNewCarSection} style={fieldInput}>
+              <option value="">Elegir sección</option>
+              {v.sectionOptions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </label>
+          <label style={fieldLabel}>
             <span style={fieldLabelText}>Chapa</span>
             <input value={v.ncar.plate} onChange={v.ch.plate} placeholder="ABC 123" style={{ ...fieldInput, textTransform: 'uppercase' }} />
           </label>
