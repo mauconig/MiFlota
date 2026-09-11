@@ -171,6 +171,7 @@ export interface MovementDetailView {
   dateLbl: string;
   driver: string;
   vehicle: string;
+  gpsTag: string;
   medio: string;
   category: string;
   note: string;
@@ -1504,6 +1505,7 @@ export function useFleetView(
   const movementDetail: MovementDetailView | null = (() => {
     const selected = st.movementDetailId == null ? undefined : realMovements.find((x) => x.id === st.movementDetailId);
     if (!selected) return null;
+    const selectedCar = selected.carId ? carDe.get(selected.carId) : undefined;
     const p = selected.id.startsWith('pago-') ? pagos.find((x) => x.id === Number(selected.id.slice(6))) : undefined;
     const ajuste = p?.tipo === 'ajuste';
     const appliedQuotas = aplicaciones
@@ -1530,7 +1532,8 @@ export function useFleetView(
       amountFg: selected.type === 'egreso' ? '#a8412f' : ajuste ? '#6b665c' : '#2e7d5b',
       dateLbl: dLblFull(selected.date),
       driver: selected.driver || 'Sin chofer',
-      vehicle: selected.vehicle,
+      vehicle: selectedCar ? selectedCar.plate + ' · ' + selectedCar.model : selected.vehicle,
+      gpsTag: selectedCar ? gpsTagLabel(selectedCar) : 'Sin GPS',
       medio: selected.medio || 'Sin especificar',
       category: selected.category,
       note: selected.note || '',

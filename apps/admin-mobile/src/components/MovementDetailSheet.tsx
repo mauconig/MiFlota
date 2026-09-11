@@ -24,6 +24,7 @@ export function MovementDetailSheet({ movement }: { movement: MovementDetailView
       </View>
       <Info label="Categoría" value={movement.category} />
       <Info label="Sección" value={movement.section} />
+      <Info label="GPS tag" value={movement.gpsTag} />
       {!!movement.note && <Info label="Detalle" value={movement.note} multiline />}
 
       {movement.comprobante && <ComprobantePreview source={movement.comprobante} />}

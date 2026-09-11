@@ -50,6 +50,7 @@ export function MovementDetailModal({ v }: { v: View }) {
             <Info label="Medio" value={d.medio} />
             <Info label="Fecha" value={d.dateLbl} />
             <Info label="Categoría" value={d.category} />
+            <Info label="GPS tag" value={d.gpsTag} />
           </div>
 
           {d.note && <Info label="Nota" value={d.note} />}

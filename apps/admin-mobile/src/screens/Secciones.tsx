@@ -1,4 +1,4 @@
-import { Alert, Pressable, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Pressable, Text, TextInput, View } from 'react-native';
 import { useState } from 'react';
 import type { MobileView } from '../useMobileView';
 
@@ -9,144 +9,204 @@ const MUTED = '#6b665c';
 const SOFT = '#f7f3eb';
 const DANGER = '#b34732';
 
-const card = { backgroundColor: PAPER, borderWidth: 1, borderColor: BORDER, borderRadius: 22, padding: 14 } as const;
-const textInput = { minHeight: 44, borderWidth: 1, borderColor: '#ded3c1', borderRadius: 13, paddingHorizontal: 12, paddingVertical: 8, color: INK, backgroundColor: PAPER, fontSize: 15 } as const;
+const card = { backgroundColor: PAPER, borderWidth: 1, borderColor: BORDER, borderRadius: 22 } as const;
+
+type SectionItem = MobileView['secciones']['items'][number];
+type ActionTarget = SectionItem | null;
+type EditorState = { mode: 'new' | 'edit'; id?: number; originalName?: string } | null;
 
 export function Secciones({ v }: { v: MobileView }) {
-  const [newName, setNewName] = useState('');
-  const [names, setNames] = useState<Record<number, string>>({});
+  const [actions, setActions] = useState<ActionTarget>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ActionTarget>(null);
+  const [editor, setEditor] = useState<EditorState>(null);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  const saveNew = async () => {
-    const name = newName.trim();
-    if (!name) return;
-    try {
-      await v.secciones.add(name);
-      setNewName('');
-    } catch (e) {
-      Alert.alert('No se pudo crear', e instanceof Error ? e.message : 'Intentá de nuevo.');
-    }
+  const openCreate = () => {
+    setActions(null);
+    setDraft('');
+    setEditor({ mode: 'new' });
   };
 
-  const saveName = async (id: number, originalName: string) => {
-    const name = (names[id] ?? originalName).trim();
-    if (!name || name === originalName.trim()) return;
+  const openEdit = (section: SectionItem) => {
+    setActions(null);
+    setDraft(section.name);
+    setEditor({ mode: 'edit', id: section.id, originalName: section.name });
+  };
+
+  const closeEditor = () => {
+    if (!saving) setEditor(null);
+  };
+
+  const saveEditor = async () => {
+    const name = draft.trim();
+    if (!name) {
+      Alert.alert('Nombre requerido', 'Ingresá un nombre para la sección.');
+      return;
+    }
+    if (editor?.mode === 'edit' && name === editor.originalName?.trim()) {
+      setEditor(null);
+      return;
+    }
+    setSaving(true);
     try {
-      await v.secciones.rename(id, name);
-      setNames((current) => {
-        const next = { ...current };
-        delete next[id];
-        return next;
-      });
+      if (editor?.mode === 'edit' && editor.id != null) await v.secciones.rename(editor.id, name);
+      else await v.secciones.add(name);
+      setEditor(null);
     } catch (e) {
       Alert.alert('No se pudo guardar', e instanceof Error ? e.message : 'Intentá de nuevo.');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const removeSection = (id: number, name: string) => {
-    Alert.alert(
-      'Eliminar sección',
-      `Los vehículos de “${name}” quedarán sin sección.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: () => {
-            void v.secciones.remove(id).catch((e: unknown) => Alert.alert('No se pudo eliminar', e instanceof Error ? e.message : 'Intentá de nuevo.'));
-          },
-        },
-      ],
-    );
+  const removeSection = (section: SectionItem) => {
+    setActions(null);
+    setDeleteTarget(section);
+  };
+
+  const confirmRemove = async () => {
+    if (!deleteTarget) return;
+    const section = deleteTarget;
+    setDeleteTarget(null);
+    try {
+      await v.secciones.remove(section.id);
+    } catch (e) {
+      Alert.alert('No se pudo eliminar', e instanceof Error ? e.message : 'Intentá de nuevo.');
+    }
   };
 
   return (
     <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 18, gap: 12 }}>
       <View style={{ paddingHorizontal: 4, gap: 3 }}>
         <Text style={{ color: INK, fontSize: 15, fontWeight: '700' }}>Organizá tu flota</Text>
-        <Text style={{ color: MUTED, fontSize: 13, lineHeight: 18 }}>Creá grupos, cambiales el nombre y ordenalos como prefieras.</Text>
+        <Text style={{ color: MUTED, fontSize: 13, lineHeight: 18 }}>Agrupá tus vehículos y mantené tu flota al día.</Text>
       </View>
 
-      <View style={[card, { gap: 10 }]}>
-        {v.secciones.items.map((section, index) => {
-          const draft = names[section.id] ?? section.name;
-          const canSave = draft.trim().length > 0 && draft.trim() !== section.name.trim();
-          const isFirst = index === 0;
-          const isLast = index === v.secciones.items.length - 1;
-          return (
-            <View key={section.id} style={{ backgroundColor: SOFT, borderWidth: 1, borderColor: BORDER, borderRadius: 16, padding: 11, gap: 10 }}>
-              <TextInput
-                value={draft}
-                onChangeText={(name) => setNames((current) => ({ ...current, [section.id]: name }))}
-                placeholder="Nombre de la sección"
-                placeholderTextColor="#a39b8e"
-                style={textInput}
-                accessibilityLabel={`Nombre de ${section.name}`}
-              />
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                <View style={{ flexDirection: 'row', gap: 6 }}>
-                  <Pressable
-                    disabled={isFirst}
-                    onPress={() => void v.secciones.move(section.id, -1)}
-                    accessibilityLabel={`Subir ${section.name}`}
-                    style={{ width: 36, height: 34, borderRadius: 10, borderWidth: 1, borderColor: isFirst ? '#e1d9cd' : '#d7cbb9', backgroundColor: isFirst ? '#f1ece4' : PAPER, alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    <Text style={{ color: isFirst ? '#bdb4a6' : INK, fontSize: 18, lineHeight: 20 }}>↑</Text>
-                  </Pressable>
-                  <Pressable
-                    disabled={isLast}
-                    onPress={() => void v.secciones.move(section.id, 1)}
-                    accessibilityLabel={`Bajar ${section.name}`}
-                    style={{ width: 36, height: 34, borderRadius: 10, borderWidth: 1, borderColor: isLast ? '#e1d9cd' : '#d7cbb9', backgroundColor: isLast ? '#f1ece4' : PAPER, alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    <Text style={{ color: isLast ? '#bdb4a6' : INK, fontSize: 18, lineHeight: 20 }}>↓</Text>
-                  </Pressable>
-                </View>
-                <View style={{ flexDirection: 'row', gap: 6 }}>
-                  <Pressable
-                    disabled={!canSave}
-                    onPress={() => void saveName(section.id, section.name)}
-                    accessibilityLabel={`Guardar ${section.name}`}
-                    style={{ minHeight: 34, borderRadius: 10, paddingHorizontal: 11, backgroundColor: canSave ? INK : '#e7e0d5', alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    <Text style={{ color: canSave ? PAPER : '#a39b8e', fontSize: 12, fontWeight: '800' }}>Guardar</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => removeSection(section.id, section.name)}
-                    accessibilityLabel={`Eliminar ${section.name}`}
-                    style={{ minHeight: 34, borderRadius: 10, paddingHorizontal: 10, borderWidth: 1, borderColor: '#e2b9ae', backgroundColor: '#fff8f5', alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    <Text style={{ color: DANGER, fontSize: 12, fontWeight: '800' }}>Eliminar</Text>
-                  </Pressable>
-                </View>
-              </View>
-            </View>
-          );
-        })}
+      <View style={[card, { padding: 10, gap: 8 }]}>
+        {v.secciones.items.length === 0 ? (
+          <View style={{ minHeight: 150, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18, gap: 5 }}>
+            <Text style={{ color: INK, fontSize: 16, fontWeight: '800' }}>No hay secciones</Text>
+            <Text style={{ color: MUTED, fontSize: 13, textAlign: 'center' }}>Creá una sección para organizar tus vehículos.</Text>
+          </View>
+        ) : (
+          v.secciones.items.map((section) => <SectionCard key={section.id} section={section} onActions={() => setActions(section)} />)
+        )}
 
-        <View style={{ height: 1, backgroundColor: BORDER, marginVertical: 2 }} />
-        <View style={{ gap: 8 }}>
-          <Text style={{ color: MUTED, fontSize: 10, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase' }}>Nueva sección</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <TextInput
-              value={newName}
-              onChangeText={setNewName}
-              placeholder="Ej. Vehículos nuevos"
-              placeholderTextColor="#a39b8e"
-              style={[textInput, { flex: 1 }]}
-              accessibilityLabel="Nombre de la nueva sección"
-              onSubmitEditing={() => void saveNew()}
-              returnKeyType="done"
-            />
-            <Pressable
-              disabled={!newName.trim()}
-              onPress={() => void saveNew()}
-              style={{ minHeight: 44, borderRadius: 13, paddingHorizontal: 13, backgroundColor: newName.trim() ? INK : '#e7e0d5', alignItems: 'center', justifyContent: 'center' }}
-            >
-              <Text style={{ color: newName.trim() ? PAPER : '#a39b8e', fontSize: 13, fontWeight: '800' }}>Agregar</Text>
+        <Pressable
+          onPress={openCreate}
+          accessibilityRole="button"
+          accessibilityLabel="Agregar sección"
+          style={{ minHeight: 46, borderRadius: 14, borderWidth: 1, borderColor: '#d8cbb9', backgroundColor: SOFT, alignItems: 'center', justifyContent: 'center', marginTop: 2 }}
+        >
+          <Text style={{ color: INK, fontSize: 14, fontWeight: '800' }}>＋ Agregar sección</Text>
+        </Pressable>
+      </View>
+
+      <ActionsModal section={actions} onClose={() => setActions(null)} onEdit={() => actions && openEdit(actions)} onDelete={() => actions && removeSection(actions)} />
+      <DeleteSectionModal section={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={() => void confirmRemove()} />
+      <EditorModal editor={editor} draft={draft} saving={saving} onChange={setDraft} onClose={closeEditor} onSave={() => void saveEditor()} />
+    </View>
+  );
+}
+
+function SectionCard({ section, onActions }: { section: SectionItem; onActions: () => void }) {
+  const countLabel = section.vehicleCount === 1 ? '1 vehículo' : `${section.vehicleCount} vehículos`;
+  return (
+    <View style={{ minHeight: 72, borderRadius: 16, borderWidth: 1, borderColor: BORDER, backgroundColor: SOFT, paddingHorizontal: 13, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+        <Text numberOfLines={1} ellipsizeMode="tail" style={{ color: INK, fontSize: 15, fontWeight: '800' }}>{section.name}</Text>
+        <Text style={{ color: MUTED, fontSize: 12 }}>{countLabel}</Text>
+      </View>
+      <Pressable
+        onPress={onActions}
+        accessibilityRole="button"
+        accessibilityLabel={`Acciones de ${section.name}`}
+        hitSlop={8}
+        style={{ width: 40, height: 40, borderRadius: 12, borderWidth: 1, borderColor: '#d8cbb9', backgroundColor: PAPER, alignItems: 'center', justifyContent: 'center' }}
+      >
+        <Text style={{ color: INK, fontSize: 21, lineHeight: 22, marginTop: -5 }}>⋯</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function ActionsModal({ section, onClose, onEdit, onDelete }: { section: ActionTarget; onClose: () => void; onEdit: () => void; onDelete: () => void }) {
+  return (
+    <Modal visible={section != null} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(22,21,15,0.32)', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <Pressable onPress={onClose} style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }} accessibilityLabel="Cerrar menú" />
+        <View style={{ width: '100%', maxWidth: 360, backgroundColor: PAPER, borderRadius: 22, borderWidth: 1, borderColor: BORDER, padding: 16, gap: 10 }}>
+          <Text numberOfLines={1} style={{ color: INK, fontSize: 17, fontWeight: '800' }}>{section?.name ?? ''}</Text>
+          <Pressable onPress={onEdit} style={{ minHeight: 44, borderRadius: 13, backgroundColor: INK, alignItems: 'center', justifyContent: 'center' }} accessibilityRole="button" accessibilityLabel="Editar sección">
+            <Text style={{ color: PAPER, fontWeight: '800' }}>Editar</Text>
+          </Pressable>
+          <Pressable onPress={onDelete} style={{ minHeight: 44, borderRadius: 13, borderWidth: 1, borderColor: '#e2b9ae', backgroundColor: '#fff8f5', alignItems: 'center', justifyContent: 'center' }} accessibilityRole="button" accessibilityLabel="Eliminar sección">
+            <Text style={{ color: DANGER, fontWeight: '800' }}>Eliminar</Text>
+          </Pressable>
+          <Pressable onPress={onClose} style={{ minHeight: 40, alignItems: 'center', justifyContent: 'center' }} accessibilityRole="button" accessibilityLabel="Cancelar">
+            <Text style={{ color: MUTED, fontWeight: '700' }}>Cancelar</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function DeleteSectionModal({ section, onCancel, onConfirm }: { section: ActionTarget; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <Modal visible={section != null} transparent animationType="fade" onRequestClose={onCancel}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(22,21,15,0.32)', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <Pressable onPress={onCancel} style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }} accessibilityLabel="Cerrar confirmación" />
+        <View style={{ width: '100%', maxWidth: 360, backgroundColor: PAPER, borderRadius: 22, borderWidth: 1, borderColor: BORDER, padding: 18, gap: 14 }}>
+          <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: '#fbe9e5', alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: DANGER, fontSize: 22, fontWeight: '800' }}>!</Text>
+          </View>
+          <View style={{ gap: 6 }}>
+            <Text style={{ color: INK, fontSize: 19, fontWeight: '800' }}>Eliminar sección</Text>
+            <Text style={{ color: MUTED, fontSize: 14, lineHeight: 20 }}>
+              Los vehículos de “{section?.name ?? ''}” quedarán sin sección.
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 2 }}>
+            <Pressable onPress={onCancel} style={{ minHeight: 42, borderRadius: 12, paddingHorizontal: 14, borderWidth: 1, borderColor: BORDER, backgroundColor: SOFT, alignItems: 'center', justifyContent: 'center' }} accessibilityRole="button" accessibilityLabel="Cancelar eliminación">
+              <Text style={{ color: MUTED, fontWeight: '800' }}>Cancelar</Text>
+            </Pressable>
+            <Pressable onPress={onConfirm} style={{ minHeight: 42, borderRadius: 12, paddingHorizontal: 16, backgroundColor: DANGER, alignItems: 'center', justifyContent: 'center' }} accessibilityRole="button" accessibilityLabel="Confirmar eliminación">
+              <Text style={{ color: PAPER, fontWeight: '800' }}>Eliminar</Text>
             </Pressable>
           </View>
         </View>
       </View>
-    </View>
+    </Modal>
+  );
+}
+
+function EditorModal({ editor, draft, saving, onChange, onClose, onSave }: { editor: EditorState; draft: string; saving: boolean; onChange: (value: string) => void; onClose: () => void; onSave: () => void }) {
+  const title = editor?.mode === 'edit' ? 'Editar sección' : 'Nueva sección';
+  return (
+    <Modal visible={editor != null} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(22,21,15,0.32)', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <Pressable onPress={onClose} style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }} accessibilityLabel="Cerrar editor" />
+        <View style={{ width: '100%', maxWidth: 360, backgroundColor: PAPER, borderRadius: 22, borderWidth: 1, borderColor: BORDER, padding: 18, gap: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={{ color: INK, fontSize: 18, fontWeight: '800' }}>{title}</Text>
+            <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Cerrar" hitSlop={8} style={{ width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: BORDER, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ color: MUTED, fontSize: 18 }}>×</Text>
+            </Pressable>
+          </View>
+          <Text style={{ color: MUTED, fontSize: 12, fontWeight: '700' }}>Nombre</Text>
+          <TextInput value={draft} onChangeText={onChange} autoFocus maxLength={50} placeholder="Ej. Toyota" placeholderTextColor="#a39b8e" style={{ minHeight: 46, borderWidth: 1, borderColor: '#ded3c1', borderRadius: 13, paddingHorizontal: 12, paddingVertical: 8, color: INK, backgroundColor: PAPER, fontSize: 15 }} accessibilityLabel="Nombre de la sección" returnKeyType="done" onSubmitEditing={onSave} />
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 2 }}>
+            <Pressable onPress={onClose} disabled={saving} style={{ minHeight: 42, borderRadius: 12, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' }} accessibilityRole="button" accessibilityLabel="Cancelar">
+              <Text style={{ color: MUTED, fontWeight: '700' }}>Cancelar</Text>
+            </Pressable>
+            <Pressable onPress={onSave} disabled={saving} style={{ minHeight: 42, borderRadius: 12, paddingHorizontal: 16, backgroundColor: saving ? '#bdb4a6' : INK, alignItems: 'center', justifyContent: 'center' }} accessibilityRole="button" accessibilityLabel="Guardar sección">
+              <Text style={{ color: PAPER, fontWeight: '800' }}>{saving ? 'Guardando…' : 'Guardar'}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }

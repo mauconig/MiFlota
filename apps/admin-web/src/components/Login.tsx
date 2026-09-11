@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { TruckLogo } from '../icons';
+import { EyeIcon, TruckLogo } from '../icons';
 import { btnPrimary, btnPrimaryHover, fieldInput, fieldLabel, fieldLabelText } from '../styles';
 
 export function Login({ onEntrar }: { onEntrar: (usuario: string, password: string) => Promise<void> }) {
@@ -9,6 +9,7 @@ export function Login({ onEntrar }: { onEntrar: (usuario: string, password: stri
   const [error, setError] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [hover, setHover] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -64,7 +65,25 @@ export function Login({ onEntrar }: { onEntrar: (usuario: string, password: stri
           </label>
           <label style={fieldLabel}>
             <span style={fieldLabelText}>Contraseña</span>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" style={fieldInput} />
+            <span style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, ...fieldInput, padding: '0 10px 0 14px' }}>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                style={{ flex: 1, minWidth: 0, width: '100%', border: 'none', outline: 'none', background: 'none', fontSize: 14, color: '#1a1a18' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((visible) => !visible)}
+                aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                aria-pressed={showPassword}
+                title={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                style={{ border: 'none', background: 'none', color: '#6b665c', width: 32, height: 32, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flex: 'none' }}
+              >
+                <EyeIcon size={18} />
+              </button>
+            </span>
           </label>
         </div>
 

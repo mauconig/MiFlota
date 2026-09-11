@@ -323,6 +323,7 @@ export interface MovementDetailView {
   vehicle: string;
   driver: string;
   section: string;
+  gpsTag: string;
   category: string;
   medio: string;
   note: string;
@@ -477,6 +478,12 @@ interface AlertView {
   sev: number;
   searchText: string;
   open: () => void;
+}
+
+export interface SectionCardView {
+  id: number;
+  name: string;
+  vehicleCount: number;
 }
 
 interface ChoferView {
@@ -643,7 +650,7 @@ export interface MobileView {
     rows: IngresoRowView[];
   };
 
-  flota: { filters: Chip[]; sectionFilters: Chip[]; cars: CarCardView[]; sections: import('./api').FleetSection[]; addSection: (name: string) => Promise<void>; renameSection: (id: number, name: string) => Promise<void>; deleteSection: (id: number) => Promise<void>; moveSection: (id: number, direction: -1 | 1) => Promise<void> };
+  flota: { filters: Chip[]; sectionFilters: Chip[]; cars: CarCardView[]; sections: import('./api').FleetSection[]; addSection: (name: string) => Promise<void>; renameSection: (id: number, name: string) => Promise<void>; deleteSection: (id: number) => Promise<void> };
 
   gastos: {
     step: 'period' | 'vehicle' | 'category' | 'results';
@@ -665,7 +672,7 @@ export interface MobileView {
   };
 
   mas: { alertCount: number; driverCount: number; navFlota: () => void; navAlertas: () => void; navChoferes: () => void; navReportes: () => void; navSecciones: () => void; goPerfil: () => void };
-  secciones: { items: import('./api').FleetSection[]; add: (name: string) => Promise<void>; rename: (id: number, name: string) => Promise<void>; remove: (id: number) => Promise<void>; move: (id: number, direction: -1 | 1) => Promise<void> };
+  secciones: { items: SectionCardView[]; add: (name: string) => Promise<void>; rename: (id: number, name: string) => Promise<void>; remove: (id: number) => Promise<void> };
   alertas: { items: AlertView[] };
   choferes: { items: ChoferView[] };
 
@@ -888,7 +895,7 @@ export function useMobileView(
   locations: CarLocation[],
   state: MobileState,
   update: (patch: Partial<MobileState> | ((s: MobileState) => Partial<MobileState>)) => void,
-  persist: Pick<FleetStore, 'sections' | 'patchCar' | 'previewDriverCredentials' | 'assignDriver' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller' | 'updateReporte' | 'exportReport' | 'addSection' | 'renameSection' | 'deleteSection' | 'reorderSections'>,
+  persist: Pick<FleetStore, 'sections' | 'patchCar' | 'previewDriverCredentials' | 'assignDriver' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller' | 'updateReporte' | 'exportReport' | 'addSection' | 'renameSection' | 'deleteSection'>,
   cambiarPassword: (actual: string, nueva: string) => Promise<void>,
 ): MobileView {
   const toast = (msg: string) => update({ toast: msg });
@@ -1248,12 +1255,22 @@ export function useMobileView(
     return true;
   };
 
+  // Los colores de sección no deben depender del orden que quedó persistido.
+  // La misma secuencia alfabética se usa para asignar la paleta en todos los
+  // gráficos y para resolver empates de importe de forma determinista.
+  const sectionOrder = [...persist.sections]
+    .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }) || a.id - b.id);
+  const sectionColorById = new Map<number, string>(sectionOrder.map((section, index) => [section.id, SECTION_COLORS[index % SECTION_COLORS.length]]));
+  const unassignedSectionColor = SECTION_COLORS[sectionOrder.length % SECTION_COLORS.length];
+  const sortSectionValues = (a: { label: string; n: number }, b: { label: string; n: number }) => b.n - a.n || a.label.localeCompare(b.label, 'es', { sensitivity: 'base' });
+
   // ---- dashboard -------------------------------------------------------
-  const sectionDonut = persist.sections
-    .map((section, index) => ({ label: section.name, v: sectionExpenseTotals.get(section.id) ?? 0, color: SECTION_COLORS[index % SECTION_COLORS.length] }))
+  const sectionDonut = sectionOrder
+    .map((section) => ({ label: section.name, v: sectionExpenseTotals.get(section.id) ?? 0, color: sectionColorById.get(section.id) ?? SECTION_COLORS[0] }))
     .filter((x) => x.v > 0);
   const unassignedExpense = sectionExpenseTotals.get(null) ?? 0;
-  if (unassignedExpense > 0) sectionDonut.push({ label: 'Sin sección', v: unassignedExpense, color: SECTION_COLORS[persist.sections.length % SECTION_COLORS.length] });
+  if (unassignedExpense > 0) sectionDonut.push({ label: 'Sin sección', v: unassignedExpense, color: unassignedSectionColor });
+  sectionDonut.sort((a, b) => sortSectionValues({ label: a.label, n: a.v }, { label: b.label, n: b.v }));
   const categoryDonut = CATS.map((cat) => ({ label: cat, v: tot.byCat[cat] || 0, color: CATCOLORS[cat] }))
     .filter((x) => x.v > 0)
     .sort((a, b) => b.v - a.v);
@@ -1270,12 +1287,15 @@ export function useMobileView(
     return { slices, total };
   };
   const { slices: donut, total: donutTotalValue } = buildDonut(donutSource);
-  const sectionBars: { id: number | null; label: string; n: number }[] = persist.sections.flatMap((section) => {
+  const sectionBars: { id: number | null; label: string; n: number }[] = sectionOrder.flatMap((section) => {
     const totals = sectionNetTotals.get(section.id);
     return totals === undefined ? [] : [{ id: section.id, label: section.name, n: totals }];
-  }).sort((a, b) => b.n - a.n);
+  }).sort(sortSectionValues);
   const unassignedNet = sectionNetTotals.get(null);
-  if (unassignedNet !== undefined) sectionBars.push({ id: null, label: 'Sin sección', n: unassignedNet });
+  if (unassignedNet !== undefined) {
+    sectionBars.push({ id: null, label: 'Sin sección', n: unassignedNet });
+    sectionBars.sort(sortSectionValues);
+  }
   const barMode = state.dashboardSectionId == null ? 'section' as const : 'vehicle' as const;
   const barSource = barMode === 'section' ? sectionBars : dashboardSorted.map((x) => ({ label: x.c.plate, n: x.n }));
   const maxAbs = Math.max(...barSource.map((x) => Math.abs(x.n)), 1);
@@ -1292,11 +1312,12 @@ export function useMobileView(
     if (c) collectedByCar.set(c.id, (collectedByCar.get(c.id) ?? 0) + p.monto);
     else collectedWithoutCar += p.monto;
   });
-  const incomeSectionDonut = persist.sections
-    .map((section, index) => ({ label: section.name, v: sectionIncomeTotals.get(section.id) ?? 0, color: SECTION_COLORS[index % SECTION_COLORS.length] }))
+  const incomeSectionDonut = sectionOrder
+    .map((section) => ({ label: section.name, v: sectionIncomeTotals.get(section.id) ?? 0, color: sectionColorById.get(section.id) ?? SECTION_COLORS[0] }))
     .filter((x) => x.v > 0);
   const unassignedIncome = sectionIncomeTotals.get(null) ?? 0;
-  if (unassignedIncome > 0) incomeSectionDonut.push({ label: 'Sin sección', v: unassignedIncome, color: SECTION_COLORS[persist.sections.length % SECTION_COLORS.length] });
+  if (unassignedIncome > 0) incomeSectionDonut.push({ label: 'Sin sección', v: unassignedIncome, color: unassignedSectionColor });
+  incomeSectionDonut.sort((a, b) => sortSectionValues({ label: a.label, n: a.v }, { label: b.label, n: b.v }));
   const incomeVehicleDonut = dashboardSorted
     .map((item, index) => ({ label: item.c.plate, v: collectedByCar.get(item.c.id) ?? 0, color: SECTION_COLORS[index % SECTION_COLORS.length] }))
     .filter((x) => x.v > 0)
@@ -1350,17 +1371,21 @@ export function useMobileView(
       return { id: 'section:' + section.label, label: section.label, sub: 'Ganancia neta del período', n: section.n, color: statusColor(section.n, UMBRAL_VERDE), onPress: sectionId == null ? undefined : () => openGananciaForSection(sectionId) };
     })
     : dashboardSorted.map((x) => ({ id: x.c.id, label: x.c.plate, sub: x.c.model + ' · ' + x.c.driver, n: x.n, color: statusColor(x.n, UMBRAL_VERDE), onPress: () => push('detalle', { carId: x.c.id }) }));
-  const incomeSectionRows: DashboardDetailValue[] = persist.sections
-    .map((section, index) => ({
+  const incomeSectionRows: DashboardDetailValue[] = sectionOrder
+    .map((section) => ({
       id: 'income-section:' + section.id,
       label: section.name,
       sub: 'Ingresos de la sección',
       n: sectionIncomeTotals.get(section.id) ?? 0,
-      color: SECTION_COLORS[index % SECTION_COLORS.length],
+      color: sectionColorById.get(section.id) ?? SECTION_COLORS[0],
       onPress: () => openIngresosForSection(section.id),
     }))
-    .filter((row) => row.n > 0);
-  if (unassignedIncome > 0) incomeSectionRows.push({ id: 'income-section:none', label: 'Sin sección', sub: 'Ingresos sin sección', n: unassignedIncome, color: SECTION_COLORS[persist.sections.length % SECTION_COLORS.length] });
+    .filter((row) => row.n > 0)
+    .sort((a, b) => sortSectionValues({ label: a.label, n: a.n }, { label: b.label, n: b.n }));
+  if (unassignedIncome > 0) {
+    incomeSectionRows.push({ id: 'income-section:none', label: 'Sin sección', sub: 'Ingresos sin sección', n: unassignedIncome, color: unassignedSectionColor });
+    incomeSectionRows.sort((a, b) => sortSectionValues({ label: a.label, n: a.n }, { label: b.label, n: b.n }));
+  }
   const incomeDetailRows = state.dashboardSectionId == null ? incomeSectionRows : collectedRows;
   const gananciasSection = state.gananciasSectionId == null
     ? undefined
@@ -1460,6 +1485,16 @@ export function useMobileView(
   const nLossCars = dashboardSorted.filter((x) => x.n <= 0).length;
   const health = Math.max(20, 100 - nAlertCars * 4 - nLossCars * 9);
   const healthLbl = health >= 80 ? 'Buena' : health >= 60 ? 'Atención' : 'Crítica';
+
+  // La administración de secciones no depende del orden persistido. Se muestra
+  // alfabéticamente y el conteo incluye toda la flota, incluso vehículos dados
+  // de baja, para que la tarjeta refleje las asignaciones reales.
+  const sectionCards: SectionCardView[] = sectionOrder
+    .map((section) => ({
+      id: section.id,
+      name: section.name,
+      vehicleCount: cars.filter((car) => car.sectionId === section.id).length,
+    }));
 
   // ---- flota -------------------------------------------------------
   const fleetFiltered = cars.filter((c) => {
@@ -1908,6 +1943,7 @@ export function useMobileView(
           vehicle: car.plate,
           driver: selectedPago.driver || car.driver,
           section: persist.sections.find((candidate) => candidate.id === car.sectionId)?.name ?? 'Sin sección',
+          gpsTag: car.gpsTag.trim() || 'Sin GPS',
           category: ajuste ? 'Ajuste' : 'Pago',
           medio: selectedPago.medio || 'Sin especificar',
           note: selectedPago.nota || '',
@@ -1931,6 +1967,7 @@ export function useMobileView(
         vehicle: car.plate,
         driver: selectedGasto.driver || car.driver || 'Sin chofer',
         section: persist.sections.find((candidate) => candidate.id === car.sectionId)?.name ?? 'Sin sección',
+        gpsTag: car.gpsTag.trim() || 'Sin GPS',
         category: selectedGasto.cat || 'Otros',
         medio: 'Sin especificar',
         note: selectedGasto.desc,
@@ -2065,6 +2102,7 @@ export function useMobileView(
         vehicle: movementCar?.plate ?? 'Sin vehículo',
         driver: selectedPago.driver || movementCar?.driver || 'Sin chofer',
         section: persist.sections.find((candidate) => candidate.id === movementCar?.sectionId)?.name ?? 'Sin sección',
+        gpsTag: movementCar?.gpsTag.trim() || 'Sin GPS',
         category: ajuste ? 'Ajuste' : 'Pago',
         medio: selectedPago.medio || 'Sin especificar',
         note: selectedPago.nota || '',
@@ -2088,6 +2126,7 @@ export function useMobileView(
         vehicle: movementCar?.plate ?? 'Vehículo eliminado',
         driver: selectedGasto.driver || movementCar?.driver || 'Sin chofer',
         section: persist.sections.find((candidate) => candidate.id === movementCar?.sectionId)?.name ?? 'Sin sección',
+        gpsTag: movementCar?.gpsTag.trim() || 'Sin GPS',
         category: selectedGasto.cat || 'Otros',
         medio: 'Sin especificar',
         note: selectedGasto.desc,
@@ -2747,7 +2786,6 @@ export function useMobileView(
       addSection: persist.addSection,
       renameSection: persist.renameSection,
       deleteSection: persist.deleteSection,
-      moveSection: async (id, direction) => { const ids = persist.sections.map((s) => s.id); const at = ids.indexOf(id); const to = at + direction; if (to < 0 || to >= ids.length) return; [ids[at], ids[to]] = [ids[to], ids[at]]; await persist.reorderSections(ids); },
     },
 
     gastos: {
@@ -2780,11 +2818,10 @@ export function useMobileView(
       goPerfil: () => push('perfil', { perfil: { actual: '', nueva: '', repetir: '', guardando: false } }),
     },
     secciones: {
-      items: persist.sections,
+      items: sectionCards,
       add: persist.addSection,
       rename: persist.renameSection,
       remove: persist.deleteSection,
-      move: async (id, direction) => { const ids = persist.sections.map((s) => s.id); const at = ids.indexOf(id); const to = at + direction; if (to < 0 || to >= ids.length) return; [ids[at], ids[to]] = [ids[to], ids[at]]; await persist.reorderSections(ids); },
     },
     alertas: { items: alertViews },
     choferes: { items: choferViews },

@@ -131,14 +131,13 @@ export function generateFleetData(): { cars: SeedCar[]; movs: SeedMov[] } {
 
   cars.forEach((c) => {
     if (c.estado === 'baja') return;
-    for (let d = 90; d >= 0; d -= 3) {
+    for (let d = 90; d >= 0; d -= 1) {
       if (c.estado === 'taller' && d < 12) continue;
-      if (R() < 0.08) continue;
       let estado: MovEstado = 'pagado';
       if (d <= 3 && R() < 0.35) estado = 'pendiente';
       else if (R() < 0.06) estado = 'parcial';
       // Se factura siempre la cuota completa; lo que cambia es cuánto entró.
-      const facturado = c.cuota * 3;
+      const facturado = c.cuota;
       movs.push({
         id: id++,
         carId: c.id,
@@ -147,7 +146,7 @@ export function generateFleetData(): { cars: SeedCar[]; movs: SeedMov[] } {
         cobrado: estado === 'pagado' ? facturado : estado === 'parcial' ? Math.round(facturado * 0.5) : 0,
         date: addD(SEED_TODAY, -d),
         estado,
-        desc: 'Cuota diaria × 3 días',
+        desc: 'Cuota diaria',
         driver: c.driver,
       });
     }
