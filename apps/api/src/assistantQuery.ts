@@ -4,10 +4,65 @@ import type { AssistantQueryRequest, AssistantQueryResult, AssistantQueryRow } f
 import { imputar } from './cobranza.js';
 import { localDateISO } from './time.js';
 
-export const entities = ['finanzas', 'vehiculos', 'choferes', 'cuotas', 'pagos', 'ajustes', 'gastos', 'deudas', 'movimientos', 'mantenimiento', 'seguros', 'gps', 'ubicaciones', 'fallas'] as const;
+export const entities = ['finanzas', 'vehiculos', 'choferes', 'cuotas', 'pagos', 'ajustes', 'gastos', 'deudas', 'movimientos', 'mantenimiento', 'seguros', 'gps', 'ubicaciones', 'fallas', 'secciones'] as const;
 export const metrics = ['facturado', 'cobrado', 'gastos', 'ganancia', 'deuda', 'cantidad'] as const;
-export const groups = ['auto', 'modelo', 'chofer', 'categoria', 'fecha', 'estado', 'ninguno'] as const;
+export const groups = ['auto', 'modelo', 'chofer', 'categoria', 'fecha', 'estado', 'seccion', 'ninguno'] as const;
 const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+// El modelo a veces copia palabras de relleno de la pregunta ("toda la flota",
+// "los autos", "en total") dentro de un filtro. Sin esto el filtro no coincide
+// con nada y la consulta devolvía cero como si no hubiera datos.
+const FILLER_FILTERS = new Set(['total', 'totales', 'todos', 'todas', 'todo', 'toda', 'auto', 'autos', 'vehiculo', 'vehiculos', 'flota', 'ninguno', 'ninguna', 'ningun', 'null', 'undefined', 'nan', 'general', 'completo', 'completa', 'cualquiera', 'cualesquiera']);
+const FILLER_FILTER_KEYS = ['vehicle', 'model', 'driver', 'category', 'status', 'section'] as const;
+const ISO_DATE = /\d{4}-\d{2}-\d{2}/g;
+
+/**
+ * Limpia los filtros antes de consultar. El modelo suele mezclar en un mismo
+ * campo cosas que no son filtros:
+ *   - palabras de relleno ("toda la flota", "los autos", "en total"), que hacían
+ *     que el filtro no coincida con nada y la consulta devolviera cero filas;
+ *   - las fechas del período ("auto 2026-07-01 2026-07-31"), que dejaban el
+ *     período personalizado sin from/to y hacían fallar la consulta para siempre.
+ * Las fechas se rescatan como rango y el resto se descarta o se valida después.
+ */
+function sanitizeFilters(r: AssistantQueryRequest): AssistantQueryRequest {
+  const clean = { ...r };
+  const dates: string[] = [];
+  for (const key of FILLER_FILTER_KEYS) {
+    const value = clean[key];
+    if (typeof value !== 'string') continue;
+    const found = value.match(ISO_DATE);
+    if (found) {
+      dates.push(...found);
+      const rest = value.replace(ISO_DATE, ' ').trim();
+      if (rest && !FILLER_FILTERS.has(norm(rest))) clean[key] = rest;
+      else delete clean[key];
+    } else if (!value.trim() || FILLER_FILTERS.has(norm(value))) {
+      delete clean[key];
+    }
+  }
+  if (dates.length) {
+    const sorted = [...new Set(dates)].sort();
+    if (clean.from === undefined) clean.from = sorted[0];
+    if (clean.to === undefined) clean.to = sorted[sorted.length - 1];
+    // Con fechas explícitas el período relativo las ignoraría.
+    if (!clean.period || clean.period === 'personalizado' || clean.period === 'total') clean.period = 'personalizado';
+  }
+  return clean;
+}
+
+/** Completa un período personalizado al que le falta un extremo. */
+function completeCustomRange(r: AssistantQueryRequest, today: string): AssistantQueryRequest {
+  if (r.period !== 'personalizado') return r;
+  const clean = { ...r };
+  if (clean.from && !clean.to && validDate(clean.from)) clean.to = lastDayOfMonth(clean.from, today);
+  if (clean.to && !clean.from && validDate(clean.to)) clean.from = clean.to.slice(0, 7) + '-01';
+  return clean;
+}
+function lastDayOfMonth(iso: string, today: string): string {
+  const [year, month] = iso.split('-').map(Number);
+  const last = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+  return last > today ? today : last;
+}
 const categoryNeedle = (s: string) => {
   const raw = norm(s);
   const withoutExpensePrefix = raw.replace(/^gastos?(?:de)?/, '');
@@ -27,7 +82,14 @@ export function queryRange(r: AssistantQueryRequest, today: string) {
   if (!validDate(to) || to > today) throw Error('Fecha final inválida o futura');
   let from: string | null = null;
   if (r.period === 'personalizado') {
-    if (!r.from || !validDate(r.from) || r.from > to) throw Error('Período personalizado inválido');
+    if (!r.from || !r.to) {
+      // Mensaje accionable: el modelo necesita saber qué mandar para corregir
+      // en vez de rendirse y contestar sin datos.
+      const [year, month] = today.split('-').map(Number);
+      const prevEnd = new Date(Date.UTC(year, month - 1, 0)).toISOString().slice(0, 10);
+      throw Error(`Período personalizado sin fechas: enviá from y to en formato YYYY-MM-DD. Hoy es ${today}; el mes pasado sería from=${prevEnd.slice(0, 7)}-01, to=${prevEnd}. Para todo el historial usá period total.`);
+    }
+    if (!validDate(r.from) || r.from > to) throw Error(`Período personalizado inválido: revisá from y to (YYYY-MM-DD, from no puede ser posterior a to).`);
     from = r.from;
   } else if (r.period === 'mes') from = to.slice(0, 7) + '-01';
   else if (r.period === 'semana' || r.period === '90dias') {
@@ -39,18 +101,22 @@ export function queryRange(r: AssistantQueryRequest, today: string) {
 }
 
 type Driver = { id: number; nombre: string; estado: string; driver_username: string | null; creado: string };
-type Atom = AssistantQueryRow & { date?: string; driver?: string; category?: string; status?: string; model?: string };
+type Section = { id: number; name: string; position: number };
+type Atom = AssistantQueryRow & { date?: string; driver?: string; category?: string; status?: string; model?: string; section?: string };
 
 /** Only fixed, parameterized reads enter this module. Credentials are never selected. */
 export function queryFleetData(db: Database.Database, ownerId: number, r: AssistantQueryRequest, today = localDateISO()): AssistantQueryResult {
   if (!r || !entities.includes(r.entity)) throw Error('Entidad de consulta inválida');
-  const allowedKeys = new Set(['entity','metric','groupBy','period','from','to','vehicle','driver','model','category','status','limit','offset','order','history','assigned']);
+  const allowedKeys = new Set(['entity','metric','groupBy','period','from','to','vehicle','driver','model','category','status','section','limit','offset','order','history','assigned']);
   if (Object.keys(r).some(key => !allowedKeys.has(key))) throw Error('Parámetro de consulta no permitido');
   for (const [key, allowed] of Object.entries({ metric: metrics, groupBy: groups, period: ['semana', 'mes', '90dias', 'total', 'personalizado'], order: ['asc', 'desc'], history: [true, false], assigned: [true, false] })) {
     if (r[key as keyof AssistantQueryRequest] !== undefined && !(allowed as readonly unknown[]).includes(r[key as keyof AssistantQueryRequest])) throw Error('Parámetro inválido: ' + key);
   }
-  for (const key of ['vehicle', 'driver', 'model', 'category', 'status', 'from', 'to'] as const) if (r[key] !== undefined && (typeof r[key] !== 'string' || r[key]!.length > 120)) throw Error('Filtro inválido: ' + key);
+  for (const key of ['vehicle', 'driver', 'model', 'category', 'status', 'section', 'from', 'to'] as const) if (r[key] !== undefined && (typeof r[key] !== 'string' || r[key]!.length > 120)) throw Error('Filtro inválido: ' + key);
   for (const key of ['limit', 'offset'] as const) if (r[key] !== undefined && (!Number.isInteger(r[key]) || r[key]! < (key === 'limit' ? 1 : 0) || r[key]! > (key === 'limit' ? 50 : 10000))) throw Error('Límite inválido');
+  // Los filtros se limpian y se validan antes de que puedan dejar la consulta
+  // en cero o hacerla fallar.
+  r = completeCustomRange(sanitizeFilters(r), today);
   const { entity } = r;
   const defaults: Partial<Record<typeof entity, typeof metrics[number]>> = { finanzas: 'facturado', cuotas: 'facturado', pagos: 'cobrado', ajustes: 'cobrado', gastos: 'gastos', deudas: 'deuda' };
   const metric = r.metric ?? defaults[entity] ?? 'cantidad';
@@ -59,13 +125,27 @@ export function queryFleetData(db: Database.Database, ownerId: number, r: Assist
   const groupBy = r.groupBy ?? (entity === 'deudas' ? 'chofer' : 'ninguno');
   const range = queryRange(r, today);
   const dateAllowed = (s: string) => { const d = dayOf(s); return d <= range.to && (!range.from || d >= range.from); };
-  const cars = db.prepare('SELECT id, owner_id, plate, model, year, driver_id, driver, cuota, estado, gps_tag, service_cada, service_unidad, last_service_date, kilometraje, kilometraje_actualizado, seguro_date, seguro_costo, seguro_periodo, seguro_nombre, seguro_cada FROM cars WHERE owner_id=?').all(ownerId) as CarRow[];
+  const cars = db.prepare('SELECT id, owner_id, section_id, plate, model, year, driver_id, driver, cuota, estado, gps_tag, service_cada, service_unidad, last_service_date, kilometraje, kilometraje_actualizado, seguro_date, seguro_costo, seguro_periodo, seguro_nombre, seguro_cada FROM cars WHERE owner_id=?').all(ownerId) as CarRow[];
   const drivers = db.prepare('SELECT id,nombre,estado,driver_username,creado FROM drivers WHERE owner_id=?').all(ownerId) as Driver[];
+  const sections = db.prepare('SELECT id,name,position FROM sections WHERE owner_id=? ORDER BY position,id').all(ownerId) as Section[];
   const byId = new Map(cars.map(c => [c.id, c]));
   const byDriver = new Map(drivers.map(d => [d.id, d]));
+  const sectionById = new Map(sections.map(s => [s.id, s.name]));
+  const sectionOf = (carId: string | undefined) => (carId ? sectionById.get(byId.get(carId)?.section_id ?? -1) ?? 'Sin sección' : 'Sin sección');
   const matchingDrivers = r.driver ? drivers.filter(d => norm(d.nombre).includes(norm(r.driver!))) : [];
   const exactDriver = matchingDrivers.find(d => norm(d.nombre) === norm(r.driver!));
   if (r.driver && matchingDrivers.length > 1 && !exactDriver) throw Error('Precisá el chofer: ' + matchingDrivers.map(d => d.nombre).join(', '));
+  // Un filtro que no coincide con nada devolvía cero filas y el asistente
+  // contestaba "no hay datos". Ahora se avisa del filtro inválido para que el
+  // modelo lo corrija en vez de afirmar que la flota está vacía.
+  if (r.driver && !matchingDrivers.length) throw Error(`No encontré ningún chofer que coincida con "${r.driver}". Omití el filtro driver para ver todos los choferes.`);
+  if (r.vehicle && !cars.some(c => norm(`${c.id} ${c.plate} ${c.model}`).includes(norm(r.vehicle!)))) throw Error(`No encontré ningún vehículo que coincida con "${r.vehicle}". Omití el filtro vehicle para consultar toda la flota.`);
+  if (r.model && !cars.some(c => norm(c.model).includes(norm(r.model!)))) throw Error(`No encontré ningún modelo que coincida con "${r.model}". Los modelos cargados son: ${[...new Set(cars.map(c => c.model))].slice(0, 12).join(', ')}.`);
+  if (r.section && !sections.some(s => norm(s.name).includes(norm(r.section!)))) throw Error(sections.length ? `No encontré ninguna sección que coincida con "${r.section}". Las secciones son: ${sections.map(s => s.name).join(', ')}.` : 'La flota todavía no tiene secciones cargadas.');
+  if (r.category) {
+    const knownCategories = (db.prepare("SELECT DISTINCT cat c FROM movs WHERE owner_id=? AND cat IS NOT NULL AND trim(cat)<>''").all(ownerId) as { c: string }[]).map(row => row.c);
+    if (!knownCategories.some(c => categoryMatches(c, r.category!)) && !['cuota', 'pago', 'ajuste'].some(c => categoryMatches(c, r.category!))) throw Error(`Categoría desconocida: "${r.category}". Las categorías cargadas son: ${knownCategories.join(', ')}.`);
+  }
   const matchesDriver = (name: string) => !r.driver || (exactDriver ? norm(name) === norm(exactDriver.nombre) : norm(name).includes(norm(r.driver)));
   const driverName = (id: number | null, fallback: string | null) => (id ? byDriver.get(id)?.nombre : null) ?? fallback ?? 'Sin chofer';
   const matchesCar = (id: string | undefined) => {
@@ -75,15 +155,24 @@ export function queryFleetData(db: Database.Database, ownerId: number, r: Assist
   };
   const atoms: Atom[] = [];
   const add = (a: Atom) => {
+    const section = a.section ?? sectionOf(a.carId);
+    if (r.section && !norm(section).includes(norm(r.section))) return;
     if (!matchesCar(a.carId) || !matchesDriver(a.driver ?? 'Sin chofer') || r.category && !categoryMatches(a.category ?? '', r.category) || r.status && norm(a.status ?? '') !== norm(r.status)) return;
-    atoms.push({ ...a, model: a.carId ? byId.get(a.carId)?.model : a.model });
+    atoms.push({ ...a, section, model: a.carId ? byId.get(a.carId)?.model : a.model });
   };
   const vehicleEntities = ['vehiculos', 'mantenimiento', 'seguros', 'gps'];
   if (vehicleEntities.includes(entity)) {
     for (const c of cars) {
       if (r.assigned !== undefined && !!c.driver_id !== r.assigned) continue;
       add({ label: c.plate, carId: c.id, driver: driverName(c.driver_id, c.driver), status: c.estado, value: 1,
-      details: { Modelo: c.model, Año: String(c.year), Chofer: driverName(c.driver_id, c.driver), Estado: c.estado, 'GPS-TAG': c.gps_tag || 'Sin datos', 'Cuota diaria': money(c.cuota), Kilometraje: c.kilometraje_actualizado ? String(c.kilometraje) : 'Sin lectura registrada', 'Kilometraje actualizado': c.kilometraje_actualizado || 'Sin datos', 'Último service': c.last_service_date || 'Sin datos', 'Service cada': c.service_cada ? `${c.service_cada} ${c.service_unidad}` : 'Sin configurar', Seguro: c.seguro_nombre || 'Sin datos', 'Vencimiento seguro': c.seguro_date || 'Sin datos', 'Costo seguro': money(c.seguro_costo), 'Periodicidad seguro': c.seguro_periodo, 'Renovación cada': c.seguro_cada ? `${c.seguro_cada} meses` : 'Sin configurar' } });
+      details: { Sección: sectionOf(c.id), Modelo: c.model, Año: String(c.year), Chofer: driverName(c.driver_id, c.driver), Estado: c.estado, 'GPS-TAG': c.gps_tag || 'Sin datos', 'Cuota diaria': money(c.cuota), Kilometraje: c.kilometraje_actualizado ? String(c.kilometraje) : 'Sin lectura registrada', 'Kilometraje actualizado': c.kilometraje_actualizado || 'Sin datos', 'Último service': c.last_service_date || 'Sin datos', 'Service cada': c.service_cada ? `${c.service_cada} ${c.service_unidad}` : 'Sin configurar', Seguro: c.seguro_nombre || 'Sin datos', 'Vencimiento seguro': c.seguro_date || 'Sin datos', 'Costo seguro': money(c.seguro_costo), 'Periodicidad seguro': c.seguro_periodo, 'Renovación cada': c.seguro_cada ? `${c.seguro_cada} meses` : 'Sin configurar' } });
+    }
+  } else if (entity === 'secciones') {
+    for (const s of sections) {
+      const inSection = cars.filter(c => c.section_id === s.id);
+      if (r.assigned !== undefined && !!inSection.length !== r.assigned) continue;
+      if ((r.vehicle || r.model) && !inSection.some(c => matchesCar(c.id))) continue;
+      add({ label: s.name, section: s.name, value: 1, details: { Sección: s.name, Vehículos: String(inSection.length), Chapas: inSection.map(c => c.plate).join(', ') || 'Sin vehículos', Choferes: inSection.map(c => driverName(c.driver_id, c.driver)).join(', ') || 'Sin chofer' } });
     }
   } else if (entity === 'choferes') {
     for (const d of drivers) {
@@ -129,10 +218,10 @@ export function queryFleetData(db: Database.Database, ownerId: number, r: Assist
       add({ label: p.nota || (p.tipo === 'ajuste' ? 'Ajuste' : 'Pago'), carId: p.car_id ?? undefined, driver: driverName(p.driver_id, p.driver), category: p.tipo, status: p.tipo, date: p.fecha, value: metric === 'cantidad' ? 1 : p.monto, details: { Fecha: p.fecha, Chofer: driverName(p.driver_id, p.driver), Vehículo: p.car_id ? byId.get(p.car_id)!.plate : 'Sin vehículo', Tipo: p.tipo, Medio: p.medio || 'Sin datos', Monto: money(p.monto), Comprobante: p.comprobante_nombre || 'Sin comprobante' } });
     }
   }
-  const numericDetails = ![...vehicleEntities, 'choferes', 'ubicaciones', 'fallas'].includes(entity);
+  const numericDetails = ![...vehicleEntities, 'choferes', 'ubicaciones', 'fallas', 'secciones'].includes(entity);
   const grouped = new Map<string, AssistantQueryRow>();
   if (groupBy !== 'ninguno' || entity === 'finanzas') for (const a of atoms) {
-    const label = groupBy === 'auto' ? a.carId ? byId.get(a.carId)!.plate : 'Sin auto' : groupBy === 'modelo' ? a.model || 'Sin modelo' : groupBy === 'chofer' ? a.driver || 'Sin chofer' : groupBy === 'categoria' ? a.category || 'Sin categoría' : groupBy === 'estado' ? a.status || 'Sin estado' : groupBy === 'fecha' ? a.date || 'Sin fecha' : 'Total';
+    const label = groupBy === 'auto' ? a.carId ? byId.get(a.carId)!.plate : 'Sin auto' : groupBy === 'modelo' ? a.model || 'Sin modelo' : groupBy === 'chofer' ? a.driver || 'Sin chofer' : groupBy === 'categoria' ? a.category || 'Sin categoría' : groupBy === 'estado' ? a.status || 'Sin estado' : groupBy === 'seccion' ? a.section || 'Sin sección' : groupBy === 'fecha' ? a.date || 'Sin fecha' : 'Total';
     if (label === 'Sin fecha') throw Error('Esta entidad no tiene una fecha de evento para agrupar; consultá movimientos o ubicaciones');
     const entry = grouped.get(label) ?? { label, value: 0, ...(groupBy === 'auto' && a.carId ? { carId: a.carId } : {}) };
     entry.value! += a.value ?? 0;
@@ -145,5 +234,19 @@ export function queryFleetData(db: Database.Database, ownerId: number, r: Assist
   const total = atoms.reduce((sum, a) => sum + (a.value ?? 0), 0);
   const offset = r.offset ?? 0;
   const visible = rows.slice(offset, offset + (r.limit ?? 50));
-  return { entity, metric, groupBy, ...range, total, unit, totalRows: rows.length, truncated: offset > 0 || offset + visible.length < rows.length, rows: visible, ...(range.from && vehicleEntities.includes(entity) ? { note: 'Los datos del vehículo describen su estado actual; no hay historial de estos campos.' } : {}) };
+  const notes: string[] = [];
+  if (range.from && vehicleEntities.includes(entity)) notes.push('Los datos del vehículo describen su estado actual; no hay historial de estos campos.');
+  if (!rows.length) {
+    // Explicar el vacío evita que el modelo lo lea como "la flota no tiene datos"
+    // y se ponga a repetir consultas hasta agotar el presupuesto.
+    const explicitFilters = (['vehicle', 'driver', 'model', 'category', 'status', 'section'] as const).filter(key => r[key] !== undefined);
+    const lastActivity = db.prepare('SELECT MAX(d) d FROM (SELECT MAX(date) d FROM movs WHERE owner_id=? UNION ALL SELECT MAX(fecha) d FROM pagos WHERE owner_id=?)').get(ownerId, ownerId) as { d: string | null };
+    notes.push(explicitFilters.length ? `Ningún registro coincide con los filtros aplicados (${explicitFilters.join(', ')}).` : 'No hay registros que coincidan con la consulta.');
+    if (range.from) notes.push(`Período consultado: ${range.from} al ${range.to}.`);
+    if (lastActivity?.d) {
+      notes.push(`El último movimiento registrado de la flota es del ${lastActivity.d}.`);
+      if (range.from && range.from > lastActivity.d) notes.push('El período pedido es posterior al último registro, por eso no hay datos.');
+    }
+  }
+  return { entity, metric, groupBy, ...range, total, unit, totalRows: rows.length, truncated: offset > 0 || offset + visible.length < rows.length, rows: visible, ...(notes.length ? { note: notes.join(' ') } : {}) };
 }
