@@ -70,7 +70,7 @@
 ### Estado actual
 
 - Admin Web y Admin Mobile ya consultan la misma API HTTPS de la VPS:
-  `https://miflota.147-93-180-120.sslip.io`.
+  `https://miflota.qd.je`.
 - La base de datos oficial es la SQLite de la VPS; no se usa ninguna base local
   de `apps/api/.localdata` para el panel de administracion.
 - Las bases de datos de Admin Web y Admin Mobile ya estan sincronizadas al

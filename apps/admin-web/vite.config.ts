@@ -13,7 +13,7 @@ export default defineConfig({
     proxy: {
       // El panel de desarrollo también usa el backend compartido de la VPS.
       // Así no se crean datos en una API local por accidente.
-      '/api': { target: 'https://miflota.147-93-180-120.sslip.io', changeOrigin: true, secure: true },
+      '/api': { target: 'https://miflota.qd.je', changeOrigin: true, secure: true },
     },
   },
 })

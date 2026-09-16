@@ -845,7 +845,7 @@ async function cargarTile(z: number, x: number, y: number, cachePath: string): P
     try {
       const upstream = await fetch(`https://tile.openstreetmap.org/${z}/${x}/${y}.png`, {
         signal: controller.signal,
-        headers: { 'User-Agent': TILE_USER_AGENT, Referer: 'https://miflota.147-93-180-120.sslip.io/' },
+        headers: { 'User-Agent': TILE_USER_AGENT, Referer: 'https://miflota.qd.je/' },
       });
       if (!upstream.ok) throw new Error(`OpenStreetMap respondió ${upstream.status}`);
       const contentType = upstream.headers.get('content-type') ?? '';

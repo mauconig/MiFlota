@@ -238,7 +238,7 @@ HTTPS configurado en la VPS.
 Verificación del servicio:
 
 ```powershell
-Invoke-RestMethod https://miflota.147-93-180-120.sslip.io/api/health
+Invoke-RestMethod https://miflota.qd.je/api/health
 ```
 
 No reconstruir ni eliminar el volumen de datos como parte de un despliegue.

@@ -145,7 +145,7 @@ Tu respuesta final debe ser JSON válido: {"answer":"respuesta breve","queryId":
   for (let round=0; round<MAX_ROUNDS; round++) {
     const response = await (options.fetch ?? fetch)((options.baseUrl ?? 'https://openrouter.ai/api/v1').replace(/\/$/,'') + '/chat/completions', {
       method: 'POST', signal: options.signal,
-      headers: { Authorization: `Bearer ${options.apiKey.trim()}`, 'Content-Type': 'application/json', 'X-Title': 'MiFlota IA', 'HTTP-Referer': 'https://miflota.147-93-180-120.sslip.io' },
+      headers: { Authorization: `Bearer ${options.apiKey.trim()}`, 'Content-Type': 'application/json', 'X-Title': 'MiFlota IA', 'HTTP-Referer': 'https://miflota.qd.je' },
       // Sin `tools` en el turno final: el modelo no puede seguir consultando y
       // tiene que devolver el JSON con lo que ya sabe.
       body: JSON.stringify(forceFinal
