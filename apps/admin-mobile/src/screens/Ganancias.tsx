@@ -7,10 +7,9 @@ const PAPER = '#fffdf8';
 const BORDER = '#ece4d6';
 const INK = '#16150f';
 const MUTED = '#6b665c';
-const TABLE_HEADER_HEIGHT = 46;
-const TABLE_ROW_HEIGHT = 52;
-const TOTAL_ROW_HEIGHT = 46;
-const PAGINATION_HEIGHT = 36;
+const TABLE_HEADER_HEIGHT = 40;
+const TABLE_ROW_HEIGHT = 37;
+const TOTAL_ROW_HEIGHT = 40;
 const BACK_LINK_HEIGHT = 24;
 const RESULT_GAP = 6;
 const MIN_ROWS_PER_PAGE = 1;
@@ -51,7 +50,7 @@ function BackLink({ onPress }: { onPress: () => void }) {
 export function Ganancias({ v }: { v: MobileView }) {
   const g = v.ganancias;
   const [tablePage, setTablePage] = useState(0);
-  const [resultsHeight, setResultsHeight] = useState(0);
+  const [rowsAreaHeight, setRowsAreaHeight] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>('amount');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
@@ -67,14 +66,15 @@ export function Ganancias({ v }: { v: MobileView }) {
     return sorted;
   }, [g.rows, sortKey, sortDirection]);
   const tableRowsKey = useMemo(() => `${sortKey}:${sortDirection}:${tableRows.map((row) => `${row.id}:${row.amountValue}`).join('|')}`, [sortKey, sortDirection, tableRows]);
-  const rowsWithoutPagination = resultsHeight > 0
-    ? Math.max(MIN_ROWS_PER_PAGE, Math.min(MAX_ROWS_PER_PAGE, Math.floor((resultsHeight - TABLE_HEADER_HEIGHT - TOTAL_ROW_HEIGHT - BACK_LINK_HEIGHT - RESULT_GAP) / TABLE_ROW_HEIGHT)))
+  // El alto sale del área de filas ya medida, no de restar estimaciones al alto
+  // total: así no se pierde una fila por el redondeo y el espacio se aprovecha.
+  // Si entran todas las filas, la tarjeta se encoge al contenido en vez de
+  // estirarse y dejar un hueco entre la última fila y el Total.
+  const rowsCapacity = rowsAreaHeight > 0
+    ? Math.max(MIN_ROWS_PER_PAGE, Math.min(MAX_ROWS_PER_PAGE, Math.floor(rowsAreaHeight / TABLE_ROW_HEIGHT)))
     : MIN_ROWS_PER_PAGE;
-  const paginationNeeded = tableRows.length > rowsWithoutPagination;
-  const footerHeight = TOTAL_ROW_HEIGHT + BACK_LINK_HEIGHT + RESULT_GAP + (paginationNeeded ? PAGINATION_HEIGHT + RESULT_GAP : 0);
-  const rowsPerPage = resultsHeight > 0
-    ? Math.max(MIN_ROWS_PER_PAGE, Math.min(MAX_ROWS_PER_PAGE, Math.floor((resultsHeight - TABLE_HEADER_HEIGHT - footerHeight) / TABLE_ROW_HEIGHT)))
-    : MIN_ROWS_PER_PAGE;
+  const paginated = tableRows.length > rowsCapacity;
+  const rowsPerPage = paginated ? rowsCapacity : Math.max(MIN_ROWS_PER_PAGE, tableRows.length);
   const pageCount = Math.max(1, Math.ceil(tableRows.length / rowsPerPage));
   const visibleRows = tableRows.slice(tablePage * rowsPerPage, (tablePage + 1) * rowsPerPage);
 
@@ -95,9 +95,9 @@ export function Ganancias({ v }: { v: MobileView }) {
     setSortDirection(key === 'amount' ? 'desc' : 'asc');
   };
 
-  const handleResultsLayout = (event: LayoutChangeEvent) => {
+  const handleRowsLayout = (event: LayoutChangeEvent) => {
     const height = Math.round(event.nativeEvent.layout.height);
-    setResultsHeight((current) => current === height ? current : height);
+    setRowsAreaHeight((current) => current === height ? current : height);
   };
 
   return (
@@ -115,14 +115,14 @@ export function Ganancias({ v }: { v: MobileView }) {
           <BackLink onPress={v.back} />
         </View>
       ) : (
-        <View style={{ flex: 1, minHeight: 0 }} onLayout={handleResultsLayout}>
-          <View style={{ gap: RESULT_GAP }}>
-            <View style={[card, { padding: 0, overflow: 'hidden' }]}>
-              <View style={{ height: TABLE_HEADER_HEIGHT, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, backgroundColor: '#f7f3eb', borderBottomWidth: 1, borderBottomColor: BORDER }}>
-                <SortHeader label="Chapa" sortKey="plate" activeKey={sortKey} direction={sortDirection} onPress={changeSort} width={76} />
-                <SortHeader label="Sección" sortKey="section" activeKey={sortKey} direction={sortDirection} onPress={changeSort} flex={1} />
-                <SortHeader label="Ganancia" sortKey="amount" activeKey={sortKey} direction={sortDirection} onPress={changeSort} width={82} right />
-              </View>
+        <View style={{ flex: 1, minHeight: 0, gap: RESULT_GAP }}>
+          <View style={[card, { padding: 0, overflow: 'hidden' }, paginated ? { flex: 1, minHeight: 0 } : null]}>
+            <View style={{ height: TABLE_HEADER_HEIGHT, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, backgroundColor: '#f7f3eb', borderBottomWidth: 1, borderBottomColor: BORDER }}>
+              <SortHeader label="Chapa" sortKey="plate" activeKey={sortKey} direction={sortDirection} onPress={changeSort} width={76} />
+              <SortHeader label="Sección" sortKey="section" activeKey={sortKey} direction={sortDirection} onPress={changeSort} flex={1} />
+              <SortHeader label="Ganancia" sortKey="amount" activeKey={sortKey} direction={sortDirection} onPress={changeSort} width={82} right />
+            </View>
+            <View style={paginated ? { flex: 1, minHeight: 0 } : undefined} onLayout={handleRowsLayout}>
               {visibleRows.map((row, index) => (
                 <Pressable
                   key={row.id}
@@ -136,15 +136,15 @@ export function Ganancias({ v }: { v: MobileView }) {
                   <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} allowFontScaling={false} style={{ width: 82, color: row.color, fontSize: 13, fontWeight: '800', textAlign: 'right' }}>{row.amount}</Text>
                 </Pressable>
               ))}
-              <View style={{ height: TOTAL_ROW_HEIGHT, borderTopWidth: 1, borderTopColor: '#e5ded2', flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, backgroundColor: '#faf7f0' }}>
-                <Text style={{ width: 76, color: INK, fontSize: 13, fontWeight: '800' }}>Total</Text>
-                <View style={{ flex: 1, minWidth: 0 }} />
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} allowFontScaling={false} style={{ width: 82, color: INK, fontSize: 14, fontWeight: '800', textAlign: 'right' }}>{g.total}</Text>
-              </View>
             </View>
-            <Pagination page={tablePage} pageSize={rowsPerPage} total={tableRows.length} itemLabel="vehículos" onPageChange={setTablePage} compact />
-            <BackLink onPress={v.back} />
+            <View style={{ height: TOTAL_ROW_HEIGHT, borderTopWidth: 1, borderTopColor: '#e5ded2', flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, backgroundColor: '#faf7f0' }}>
+              <Text style={{ width: 76, color: INK, fontSize: 13, fontWeight: '800' }}>Total</Text>
+              <View style={{ flex: 1, minWidth: 0 }} />
+              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} allowFontScaling={false} style={{ width: 82, color: INK, fontSize: 14, fontWeight: '800', textAlign: 'right' }}>{g.total}</Text>
+            </View>
           </View>
+          <Pagination page={tablePage} pageSize={rowsPerPage} total={tableRows.length} itemLabel="vehículos" onPageChange={setTablePage} compact />
+          <BackLink onPress={v.back} />
         </View>
       )}
     </View>

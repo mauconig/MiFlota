@@ -13,12 +13,11 @@ const BORDER = '#ece4d6';
 const INK = '#16150f';
 const MUTED = '#6b665c';
 const RED = '#c0553f';
-const TABLE_HEADER_HEIGHT = 46;
-const TABLE_ROW_HEIGHT = 52;
-const TOTAL_ROW_HEIGHT = 46;
+const TABLE_HEADER_HEIGHT = 40;
+const TABLE_ROW_HEIGHT = 37;
+const TOTAL_ROW_HEIGHT = 40;
 // The results footer is intentionally compact so the table and its controls
 // remain visible together on small screens.
-const PAGINATION_HEIGHT = 36;
 const BACK_LINK_HEIGHT = 24;
 const RESULT_GAP = 6;
 const MIN_ROWS_PER_PAGE = 1;
@@ -82,7 +81,7 @@ function BackLink({ onPress }: { onPress: () => void }) {
 export function Gastos({ v }: { v: MobileView }) {
   const g = v.gastos;
   const [tablePage, setTablePage] = useState(0);
-  const [resultsHeight, setResultsHeight] = useState(0);
+  const [rowsAreaHeight, setRowsAreaHeight] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const vehicleOptions = g.sectionOptions;
@@ -104,14 +103,15 @@ export function Gastos({ v }: { v: MobileView }) {
   }, [allTableRows, sortKey, sortDirection]);
   const tableRowsKey = useMemo(() => `${sortKey}:${sortDirection}:${tableRows.map((row) => `${row.id}:${row.date}:${row.amount}:${row.plate}`).join('|')}`, [sortKey, sortDirection, tableRows]);
   const gastosTotal = useMemo(() => fmt(tableRows.reduce((sum, row) => sum + row.amountValue, 0)), [tableRows]);
-  const rowsWithoutPagination = resultsHeight > 0
-    ? Math.max(MIN_ROWS_PER_PAGE, Math.min(MAX_ROWS_PER_PAGE, Math.floor((resultsHeight - TABLE_HEADER_HEIGHT - TOTAL_ROW_HEIGHT - BACK_LINK_HEIGHT - RESULT_GAP) / TABLE_ROW_HEIGHT)))
+  // El alto sale del área de filas ya medida, no de restar estimaciones al alto
+  // total: así no se pierde una fila por el redondeo y el espacio se aprovecha.
+  // Si entran todas las filas, la tarjeta se encoge al contenido en vez de
+  // estirarse y dejar un hueco entre la última fila y el Total.
+  const rowsCapacity = rowsAreaHeight > 0
+    ? Math.max(MIN_ROWS_PER_PAGE, Math.min(MAX_ROWS_PER_PAGE, Math.floor(rowsAreaHeight / TABLE_ROW_HEIGHT)))
     : MIN_ROWS_PER_PAGE;
-  const paginationNeeded = tableRows.length > rowsWithoutPagination;
-  const footerHeight = TOTAL_ROW_HEIGHT + BACK_LINK_HEIGHT + RESULT_GAP + (paginationNeeded ? PAGINATION_HEIGHT + RESULT_GAP : 0);
-  const rowsPerPage = resultsHeight > 0
-    ? Math.max(MIN_ROWS_PER_PAGE, Math.min(MAX_ROWS_PER_PAGE, Math.floor((resultsHeight - TABLE_HEADER_HEIGHT - footerHeight) / TABLE_ROW_HEIGHT)))
-    : MIN_ROWS_PER_PAGE;
+  const paginated = tableRows.length > rowsCapacity;
+  const rowsPerPage = paginated ? rowsCapacity : Math.max(MIN_ROWS_PER_PAGE, tableRows.length);
   const tablePageCount = Math.max(1, Math.ceil(tableRows.length / rowsPerPage));
   const visibleTableRows = tableRows.slice(tablePage * rowsPerPage, (tablePage + 1) * rowsPerPage);
 
@@ -132,9 +132,9 @@ export function Gastos({ v }: { v: MobileView }) {
     setSortDirection(key === 'date' || key === 'amount' ? 'desc' : 'asc');
   };
 
-  const handleResultsLayout = (event: LayoutChangeEvent) => {
+  const handleRowsLayout = (event: LayoutChangeEvent) => {
     const height = Math.round(event.nativeEvent.layout.height);
-    setResultsHeight((current) => current === height ? current : height);
+    setRowsAreaHeight((current) => current === height ? current : height);
   };
 
   return (
@@ -198,38 +198,38 @@ export function Gastos({ v }: { v: MobileView }) {
               <Pressable onPress={v.registroChoice.gasto} style={{ minHeight: 48, paddingHorizontal: 20, borderRadius: 16, backgroundColor: INK, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: PAPER, fontWeight: '700' }}>Registrar gasto</Text></Pressable>
             </View>
           ) : (
-            <View style={{ flex: 1, minHeight: 0 }} onLayout={handleResultsLayout}>
-              <View style={{ gap: RESULT_GAP }}>
-                <View style={[card, { padding: 0, overflow: 'hidden' }]}>
+            <View style={{ flex: 1, minHeight: 0, gap: RESULT_GAP }}>
+              <View style={[card, { padding: 0, overflow: 'hidden' }, paginated ? { flex: 1, minHeight: 0 } : null]}>
                 <View style={{ height: TABLE_HEADER_HEIGHT, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, backgroundColor: '#f7f3eb', borderBottomWidth: 1, borderBottomColor: BORDER }}>
                   <SortHeader label="Fecha" sortKey="date" activeKey={sortKey} direction={sortDirection} onPress={changeSort} width={68} />
                   <SortHeader label="Chapa" sortKey="plate" activeKey={sortKey} direction={sortDirection} onPress={changeSort} width={66} />
                   <SortHeader label="Tipo" sortKey="tipo" activeKey={sortKey} direction={sortDirection} onPress={changeSort} flex={1} />
                   <SortHeader label="Monto" sortKey="amount" activeKey={sortKey} direction={sortDirection} onPress={changeSort} width={60} right />
                 </View>
-                {visibleTableRows.map((row, index) => (
-                  <Pressable
-                    key={row.id}
-                    onPress={row.open}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Ver detalle del movimiento de ${row.plate}`}
-                    style={{ height: TABLE_ROW_HEIGHT, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, borderBottomWidth: index === visibleTableRows.length - 1 ? 0 : 1, borderBottomColor: '#f0ebe0' }}
-                  >
-                    <Text numberOfLines={1} style={{ width: 68, color: MUTED, fontSize: 11 }}>{row.date}</Text>
-                    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} allowFontScaling={false} style={{ width: 66, color: INK, fontSize: 12, fontWeight: '700' }}>{row.plate}</Text>
-                    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} allowFontScaling={false} style={{ flex: 1, minWidth: 0, color: MUTED, fontSize: 11, fontWeight: '600' }}>{row.cat}</Text>
-                    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} allowFontScaling={false} style={{ width: 60, color: RED, fontSize: 13, fontWeight: '800', textAlign: 'right' }}>{row.amount}</Text>
-                  </Pressable>
-                ))}
+                <View style={paginated ? { flex: 1, minHeight: 0 } : undefined} onLayout={handleRowsLayout}>
+                  {visibleTableRows.map((row, index) => (
+                    <Pressable
+                      key={row.id}
+                      onPress={row.open}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Ver detalle del movimiento de ${row.plate}`}
+                      style={{ height: TABLE_ROW_HEIGHT, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, borderBottomWidth: index === visibleTableRows.length - 1 ? 0 : 1, borderBottomColor: '#f0ebe0' }}
+                    >
+                      <Text numberOfLines={1} style={{ width: 68, color: MUTED, fontSize: 11 }}>{row.date}</Text>
+                      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} allowFontScaling={false} style={{ width: 66, color: INK, fontSize: 12, fontWeight: '700' }}>{row.plate}</Text>
+                      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} allowFontScaling={false} style={{ flex: 1, minWidth: 0, color: MUTED, fontSize: 11, fontWeight: '600' }}>{row.cat}</Text>
+                      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} allowFontScaling={false} style={{ width: 60, color: RED, fontSize: 13, fontWeight: '800', textAlign: 'right' }}>{row.amount}</Text>
+                    </Pressable>
+                  ))}
+                </View>
                 <View style={{ height: TOTAL_ROW_HEIGHT, borderTopWidth: 1, borderTopColor: '#e5ded2', flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, backgroundColor: '#faf7f0' }}>
                   <Text style={{ width: 68, color: INK, fontSize: 13, fontWeight: '800' }}>Total</Text>
                   <View style={{ flex: 1, minWidth: 0 }} />
                   <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} allowFontScaling={false} style={{ width: 60, color: RED, fontSize: 14, fontWeight: '800', textAlign: 'right' }}>{gastosTotal}</Text>
                 </View>
-                </View>
-                <Pagination page={tablePage} pageSize={rowsPerPage} total={tableRows.length} itemLabel="movimientos" onPageChange={setTablePage} compact />
-                <BackLink onPress={g.back} />
               </View>
+              <Pagination page={tablePage} pageSize={rowsPerPage} total={tableRows.length} itemLabel="movimientos" onPageChange={setTablePage} compact />
+              <BackLink onPress={g.back} />
             </View>
           )}
           {g.empty && <BackLink onPress={g.back} />}
