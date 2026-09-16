@@ -4,7 +4,7 @@ import type { AdminNotificationRoute, Car, Mov, Pago, Reporte, MobileState, Scre
 import { imputar, type Aplicacion } from './cobranza';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, daysBetween, durLbl, dLbl, dLblFull, fmt, fmtShort, initials, statusColor, numFromInput, miles, isoLocal } from './format';
-import { getAuthHeaders, type FleetStore, type NuevoCarPayload } from './api';
+import { getAuthHeaders, type FleetStore, type NuevoCarPayload, type ReportPeriodType } from './api';
 import { API_BASE } from './config';
 import { dateTextFromIso, maskDateInput, validateDateRange } from './dateRange';
 
@@ -87,6 +87,24 @@ function range(period: MobileState['period'], cFrom: string, cTo: string) {
     return { start, end: finMes(start), label: etiquetaMes(start), short: 'mes anterior' };
   }
   if (period === 'd90') return { start: addD(TODAY, -89), end: finDia(TODAY), label: 'Últimos 90 días', short: '90 días' };
+  if (period === 'q1' || period === 'q2' || period === 'q1ant' || period === 'q2ant') {
+    const half = period === 'q1' || period === 'q1ant' ? 1 : 2;
+    const previousMonth = period === 'q1ant' || period === 'q2ant';
+    const base = new Date(TODAY.getFullYear(), TODAY.getMonth() + (previousMonth ? -1 : 0), 1, 12);
+    const start = new Date(base.getFullYear(), base.getMonth(), half === 1 ? 1 : 16, 12);
+    const naturalEnd = half === 1 ? new Date(base.getFullYear(), base.getMonth(), 15, 23, 59, 59) : finMes(base);
+    // La quincena en curso no puede terminar en el futuro; y si todavía no
+    // empezó, el rango queda en el día de hoy para no inventar datos.
+    const notStarted = start > TODAY;
+    const end = naturalEnd > TODAY ? finDia(TODAY) : naturalEnd;
+    const month = etiquetaMes(base);
+    return {
+      start: notStarted ? end : start,
+      end,
+      label: notStarted ? `${half}ª quincena de ${month} (sin empezar)` : `${half}ª quincena de ${month}`,
+      short: `${half}ª quincena${previousMonth ? ' pasada' : ''}`,
+    };
+  }
   if (period === 'custom') {
     let start = new Date(cFrom + 'T00:00:00');
     let end = new Date(cTo + 'T23:59:59');
@@ -1224,7 +1242,14 @@ export function useMobileView(
   })();
 
   // ---- period sheet --------------------------------------------------------
+  // Este selector alimenta el dashboard, Ingresos, Gastos y Reportes. Las
+  // quincenas van primero porque son el corte con el que el dueño manda el
+  // resumen cada dos semanas; después quedan los presets de siempre.
   const periodOpts: [MobileState['period'], string][] = [
+    ['q1', '1ª quincena'],
+    ['q2', '2ª quincena'],
+    ['q1ant', '1ª quincena pasada'],
+    ['q2ant', '2ª quincena pasada'],
     ['semana', '7 días'],
     ['mes', capitalizar(MESES_LARGO[TODAY.getMonth()])],
     ['jul', capitalizar(MESES_LARGO[(TODAY.getMonth() + 11) % 12])],
@@ -2552,8 +2577,11 @@ export function useMobileView(
       return;
     }
     update({ reportesExportando: true, reportesError: '' });
+    // Las quincenas no son un tipo de período del servidor: viajan como rango
+    // explícito, que es lo que ya sabe resolver.
+    const exportPeriodType: ReportPeriodType = state.period === 'q1' || state.period === 'q2' || state.period === 'q1ant' || state.period === 'q2ant' ? 'custom' : state.period;
     persist.exportReport({
-      period: { type: state.period, from: isoLocal(r.start), to: isoLocal(r.end) },
+      period: { type: exportPeriodType, from: isoLocal(r.start), to: isoLocal(r.end) },
       include,
       carIds: state.reportesCarIds,
       ...(reportIncludeExpenses ? { categories: state.reportesCategories } : {}),
@@ -2708,7 +2736,9 @@ export function useMobileView(
         ? 'Personalizado'
         : state.period === 'mes' || state.period === 'jul'
           ? capitalizar(MESES_LARGO[r.start.getMonth()]) + ' ' + r.start.getFullYear()
-          : r.label,
+          : state.period === 'q1' || state.period === 'q2' || state.period === 'q1ant' || state.period === 'q2ant'
+            ? r.short
+            : r.label,
       short: r.short,
       days: days + ' d',
       chips: periodOpts.map(([k, label]) => ({ label, ...chipStyle(state.period === k), pick: () => selectPeriodPreset(k) })),

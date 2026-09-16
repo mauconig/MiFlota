@@ -330,6 +330,22 @@ function reportMoney(value: number): string {
   return 'Gs. ' + new Intl.NumberFormat('es-PY').format(Math.round(value));
 }
 
+const REPORT_MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+/** Rango legible. Si las fechas coinciden con una quincena, la nombra. */
+function reportPeriodLabel(from: string, to: string): string {
+  const day = (iso: string) => iso.slice(8, 10);
+  const month = (iso: string) => iso.slice(5, 7);
+  const range = `${day(from)}/${month(from)} al ${day(to)}/${month(to)}/${to.slice(0, 4)}`;
+  if (from.slice(0, 7) !== to.slice(0, 7)) return range;
+  const year = to.slice(0, 4);
+  const monthNumber = Number(month(to));
+  const lastDay = String(new Date(Date.UTC(Number(year), monthNumber, 0)).getUTCDate()).padStart(2, '0');
+  const monthName = REPORT_MONTHS[monthNumber - 1];
+  if (day(from) === '01' && day(to) === '15') return `1ª quincena de ${monthName} ${year} · ${range}`;
+  if (day(from) === '16' && day(to) === lastDay) return `2ª quincena de ${monthName} ${year} · ${range}`;
+  return range;
+}
+
 const reportFilterNorm = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 const reportCategoryMatches = (value: string, filter: string) => {
   const candidate = reportFilterNorm(value).replace(/[^a-z0-9]/g, '');
@@ -337,6 +353,49 @@ const reportCategoryMatches = (value: string, filter: string) => {
   const needle = raw.replace(/^gastos?(?:de)?/, '') || raw;
   return !!needle && (candidate.includes(needle) || needle.includes(candidate));
 };
+
+/** Categorías que el dueño cuenta como "gastos de talleres"; el resto del
+ *  egreso va a "Otros gastos". Es el corte con el que arma su reporte quincenal.
+ *  OJO: "Repuestos" queda afuera a propósito. Un trabajo de taller se carga como
+ *  "Taller" (con los repuestos adentro como ítems y la mano de obra aparte),
+ *  mientras que "Repuestos" se usa para compras y stock —por ejemplo el
+ *  prorrateo de importación de los GPS—, que en su reporte va a
+ *  "Otros gastos / Repuestos para stock", no a talleres. */
+const REPORT_WORKSHOP_CATEGORIES = new Set(['taller', 'service']);
+const reportCategoryKey = (value: string) => reportFilterNorm(value).replace(/[^a-z0-9]/g, '');
+
+interface FleetReportVehicleRef { vehiculo: string; seccion: string; modelo: string; gpsTag: string }
+interface FleetReportGroup<T> { name: string; total: number; vehicles: { label: string; total: number; rows: T[] }[] }
+
+/** Rótulo del vehículo tal como lo escribe el dueño: el `gps_tag` de esta flota
+ *  guarda el color y la letra que distingue dos autos iguales ("Gris B"). */
+function reportVehicleLabel(row: FleetReportVehicleRef): string {
+  const parts = [row.modelo, row.gpsTag, row.vehiculo].map((part) => String(part ?? '').trim()).filter(Boolean);
+  return parts.join(' · ') || 'Vehículo eliminado';
+}
+
+/** Agrupa por sección y, dentro de cada sección, por vehículo. */
+function groupReportRows<T extends FleetReportVehicleRef>(rows: T[], amountOf: (row: T) => number, sectionOrder: string[]): FleetReportGroup<T>[] {
+  const order = new Map(sectionOrder.map((name, index) => [name.trim().toLowerCase(), index]));
+  const bySection = new Map<string, Map<string, T[]>>();
+  for (const row of rows) {
+    const section = row.seccion?.trim() || 'Sin sección';
+    const vehicles = bySection.get(section) ?? new Map<string, T[]>();
+    const label = reportVehicleLabel(row);
+    vehicles.set(label, [...(vehicles.get(label) ?? []), row]);
+    bySection.set(section, vehicles);
+  }
+  // Las secciones respetan el orden del panel; lo que no está definido va al final.
+  const rank = (name: string) => order.get(name.trim().toLowerCase()) ?? (name === 'Sin sección' ? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER - 1);
+  return [...bySection.entries()]
+    .sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0], 'es'))
+    .map(([name, vehicles]) => {
+      const list = [...vehicles.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0], 'es'))
+        .map(([label, vehicleRows]) => ({ label, rows: vehicleRows, total: vehicleRows.reduce((sum, row) => sum + amountOf(row), 0) }));
+      return { name, vehicles: list, total: list.reduce((sum, vehicle) => sum + vehicle.total, 0) };
+    });
+}
 
 /** Nombre legible y único para las descargas. Se usa la hora de Paraguay
  * aunque el proceso de la API esté corriendo en UTC en la VPS. */
@@ -361,6 +420,8 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
   const { from, to } = assistantReportRange(request, hoyISO());
   const cars = selCars.all(ownerId) as CarRow[];
   const carById = new Map(cars.map((car) => [car.id, car]));
+  const sections = selSections.all(ownerId) as SectionRow[];
+  const sectionById = new Map(sections.map((section) => [section.id, section.name]));
   const movements = (selMovs.all(ownerId) as MovRow[]).filter((mov) => {
     if (mov.type !== 'egreso' || mov.date > to || (from && mov.date < from)) return false;
     const car = carById.get(mov.car_id);
@@ -375,6 +436,9 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
     return {
       fecha: mov.date,
       vehiculo: car?.plate ?? 'Vehículo eliminado',
+      seccion: sectionById.get(car?.section_id ?? -1) ?? 'Sin sección',
+      modelo: car?.model ?? '',
+      gpsTag: car?.gps_tag ?? '',
       categoria: mov.cat ?? 'Otro',
       detalle: mov.descripcion,
       repuestos,
@@ -404,6 +468,9 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
       expenseRows: rows.map((row) => ({
         fecha: row.fecha,
         vehiculo: row.vehiculo,
+        seccion: row.seccion,
+        modelo: row.modelo,
+        gpsTag: row.gpsTag,
         categoria: row.categoria,
         detalle: row.detalle,
         items: row.itemRows,
@@ -414,6 +481,7 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
       incomeTotal: 0,
       expenseTotal: rows.reduce((sum, row) => sum + row.total, 0),
       resultTotal: -rows.reduce((sum, row) => sum + row.total, 0),
+      sectionOrder: sections.map((section) => section.name),
     });
   }
   await writeFile(path, data);
@@ -443,6 +511,10 @@ interface FleetReportExportBody {
 interface FleetReportExpenseRow {
   fecha: string;
   vehiculo: string;
+  /** Sección del vehículo: es el título con el que se agrupa en el PDF. */
+  seccion: string;
+  modelo: string;
+  gpsTag: string;
   categoria: string;
   detalle: string;
   items: GastoItemRow[];
@@ -454,6 +526,9 @@ interface FleetReportExpenseRow {
 interface FleetReportIncomeRow {
   fecha: string;
   vehiculo: string;
+  seccion: string;
+  modelo: string;
+  gpsTag: string;
   chofer: string;
   monto: number;
   nota: string;
@@ -470,11 +545,6 @@ const REPORT_COLORS = {
   red: '#c85c45',
 };
 
-function pdfCell(value: string | number | null | undefined, maxLength = 42): string {
-  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
-  return text.length > maxLength ? `${text.slice(0, Math.max(0, maxLength - 1))}…` : text;
-}
-
 async function pdfFromFleetReport(data: {
   periodLabel: string;
   generatedAt: string;
@@ -483,6 +553,7 @@ async function pdfFromFleetReport(data: {
   incomeTotal: number;
   expenseTotal: number;
   resultTotal: number;
+  sectionOrder: string[];
 }): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 36 });
@@ -509,45 +580,50 @@ async function pdfFromFleetReport(data: {
       pageHeader();
     };
 
-    const sectionTitle = (title: string, subtitle?: string) => {
-      ensureSpace(42);
-      doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(16).text(title, margin, doc.y);
-      if (subtitle) doc.fillColor(REPORT_COLORS.muted).font('Helvetica').fontSize(9).text(subtitle, margin, doc.y + 4);
-      doc.moveTo(margin, doc.y + 11).lineTo(margin + width, doc.y + 11).lineWidth(1).strokeColor(REPORT_COLORS.line).stroke();
-      doc.y += subtitle ? 27 : 22;
+    /** Fila "concepto → monto": el monto siempre alineado a la derecha. */
+    const amountRow = (label: string, amount: number, indent: number, emphasis: 'normal' | 'bold' | 'muted' = 'normal') => {
+      const font = emphasis === 'bold' ? 'Helvetica-Bold' : 'Helvetica';
+      const textWidth = width - indent - 148;
+      const height = doc.font(font).fontSize(9).heightOfString(label, { width: textWidth });
+      ensureSpace(height + 5);
+      const y = doc.y;
+      doc.fillColor(emphasis === 'muted' ? REPORT_COLORS.muted : REPORT_COLORS.ink).font(font).fontSize(9).text(label, margin + indent, y, { width: textWidth });
+      doc.fillColor(REPORT_COLORS.ink).font(font).fontSize(9).text(reportMoney(amount), margin + width - 144, y, { width: 138, align: 'right', lineBreak: false });
+      doc.y = y + height + 4;
     };
 
-    const drawTable = (headers: string[], rows: string[][], columnWidths: number[], alignments: ('left' | 'right')[] = []) => {
-      const rowHeight = 23;
-      const drawHeader = () => {
-        const headerY = doc.y;
-        doc.roundedRect(margin, headerY, width, rowHeight, 5).fill(REPORT_COLORS.orange);
-        let x = margin;
-        headers.forEach((header, index) => {
-          doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(8).text(header, x + 7, headerY + 7, { width: columnWidths[index] - 14, align: alignments[index] ?? 'left', lineBreak: false });
-          x += columnWidths[index];
-        });
-        doc.y = headerY + rowHeight;
-      };
-      ensureSpace(rowHeight + 5);
-      drawHeader();
-      rows.forEach((row, rowIndex) => {
-        if (doc.y + rowHeight > doc.page.height - margin) {
-          doc.addPage();
-          pageHeader();
-          drawHeader();
-        }
-        const rowY = doc.y;
-        if (rowIndex % 2 === 0) doc.rect(margin, rowY, width, rowHeight).fill(REPORT_COLORS.orangeLight);
-        let x = margin;
-        row.forEach((cell, index) => {
-          doc.fillColor(REPORT_COLORS.ink).font('Helvetica').fontSize(8).text(pdfCell(cell, 34), x + 7, rowY + 7, { width: columnWidths[index] - 14, align: alignments[index] ?? 'left', lineBreak: false });
-          x += columnWidths[index];
-        });
-        doc.moveTo(margin, rowY + rowHeight).lineTo(margin + width, rowY + rowHeight).lineWidth(0.5).strokeColor(REPORT_COLORS.line).stroke();
-        doc.y = rowY + rowHeight;
-      });
-      doc.y += 12;
+    /** Barra del bloque principal: GASTOS DE TALLERES, OTROS GASTOS, COBROS. */
+    const blockHeader = (title: string, color: string) => {
+      ensureSpace(48);
+      const y = doc.y;
+      doc.roundedRect(margin, y, width, 30, 8).fill(color);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(11).text(title, margin + 12, y + 9, { width: width - 24, lineBreak: false });
+      doc.y = y + 42;
+    };
+
+    /** Sección dentro de un bloque, con su subtotal. */
+    const groupHeader = (name: string, total: number) => {
+      ensureSpace(32);
+      const y = doc.y;
+      doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(10).text(name, margin + 8, y, { width: width - 184, lineBreak: false });
+      doc.fillColor(REPORT_COLORS.muted).font('Helvetica').fontSize(9).text(reportMoney(total), margin + width - 176, y + 2, { width: 168, align: 'right', lineBreak: false });
+      doc.moveTo(margin + 8, y + 16).lineTo(margin + width, y + 16).lineWidth(0.7).strokeColor(REPORT_COLORS.line).stroke();
+      doc.y = y + 26;
+    };
+
+    /** Vehículo dentro de una sección: modelo · etiqueta GPS · chapa. */
+    const vehicleHeader = (label: string) => {
+      const textWidth = width - 34;
+      const height = doc.font('Helvetica-Bold').fontSize(9).heightOfString(label, { width: textWidth });
+      ensureSpace(height + 14);
+      doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(9).text(label, margin + 18, doc.y + 5, { width: textWidth });
+      doc.y += height + 11;
+    };
+
+    /** Subtotal de un auto o de un bloque. */
+    const totalRow = (label: string, amount: number, padAfter = 8) => {
+      amountRow(label, amount, 18, 'bold');
+      doc.y += padAfter;
     };
 
     pageHeader();
@@ -569,23 +645,50 @@ async function pdfFromFleetReport(data: {
     doc.fillColor(REPORT_COLORS.muted).font('Helvetica').fontSize(9).text(`${data.incomeRows.length + data.expenseRows.length} movimientos incluidos · datos filtrados según la selección`, margin, doc.y);
     doc.y += 22;
 
+    // El reporte se agrupa por sección, como lo manda el dueño: primero los
+    // gastos de taller, después el resto de los gastos y al final los cobros.
+    const workshopRows = data.expenseRows.filter((row) => REPORT_WORKSHOP_CATEGORIES.has(reportCategoryKey(row.categoria)));
+    const otherRows = data.expenseRows.filter((row) => !REPORT_WORKSHOP_CATEGORIES.has(reportCategoryKey(row.categoria)));
+
+    const renderExpenseGroups = (groups: FleetReportGroup<FleetReportExpenseRow>[]) => {
+      for (const group of groups) {
+        groupHeader(group.name, group.total);
+        for (const vehicle of group.vehicles) {
+          vehicleHeader(vehicle.label);
+          for (const row of vehicle.rows) {
+            amountRow(row.detalle, row.total, 30);
+            for (const item of row.items) amountRow(`${item.cantidad} × ${item.nombre}`, item.subtotal, 42, 'muted');
+            if (row.manoObra > 0) amountRow('Mano de obra', row.manoObra, 42, 'muted');
+          }
+          totalRow('Total del auto', vehicle.total, 10);
+        }
+      }
+    };
+
+    const renderIncomeGroups = (groups: FleetReportGroup<FleetReportIncomeRow>[]) => {
+      for (const group of groups) {
+        groupHeader(group.name, group.total);
+        for (const vehicle of group.vehicles) {
+          vehicleHeader(vehicle.label);
+          for (const row of vehicle.rows) amountRow(`${row.fecha}${row.nota ? ` · ${row.nota}` : ''}`, row.monto, 30);
+          totalRow('Total del auto', vehicle.total, 10);
+        }
+      }
+    };
+
+    const block = (title: string, total: number, color: string, groups: FleetReportGroup<FleetReportExpenseRow>[]) => {
+      blockHeader(title, color);
+      renderExpenseGroups(groups);
+      totalRow(`TOTAL ${title}`, total, 18);
+    };
+
+    if (workshopRows.length) block('GASTOS DE TALLERES', workshopRows.reduce((sum, row) => sum + row.total, 0), REPORT_COLORS.ink, groupReportRows(workshopRows, (row) => row.total, data.sectionOrder));
+    if (otherRows.length) block('OTROS GASTOS', otherRows.reduce((sum, row) => sum + row.total, 0), REPORT_COLORS.orange, groupReportRows(otherRows, (row) => row.total, data.sectionOrder));
     if (data.incomeRows.length) {
-      sectionTitle('Ingresos cobrados', `${data.incomeRows.length} cobro(s)`);
-      drawTable(
-        ['Fecha', 'Vehículo', 'Chofer', 'Monto', 'Nota'],
-        data.incomeRows.map((row) => [row.fecha, row.vehiculo, row.chofer, reportMoney(row.monto), row.nota]),
-        [59, 92, 118, 82, width - 351],
-        ['left', 'left', 'left', 'right', 'left'],
-      );
-    }
-    if (data.expenseRows.length) {
-      sectionTitle('Gastos', `${data.expenseRows.length} gasto(s)`);
-      drawTable(
-        ['Fecha', 'Vehículo', 'Categoría', 'Descripción', 'Total'],
-        data.expenseRows.map((row) => [row.fecha, row.vehiculo, row.categoria, row.detalle, reportMoney(row.total)]),
-        [62, 100, 86, width - 350, 102],
-        ['left', 'left', 'left', 'left', 'right'],
-      );
+      const incomeTotal = data.incomeRows.reduce((sum, row) => sum + row.monto, 0);
+      blockHeader('COBROS', REPORT_COLORS.green);
+      renderIncomeGroups(groupReportRows(data.incomeRows, (row) => row.monto, data.sectionOrder));
+      totalRow('TOTAL COBROS', incomeTotal, 18);
     }
     if (!data.incomeRows.length && !data.expenseRows.length) {
       doc.roundedRect(margin, doc.y, width, 60, 10).fill(REPORT_COLORS.orangeLight);
@@ -630,6 +733,13 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
 
   const cars = selCars.all(ownerId) as CarRow[];
   const carById = new Map(cars.map((car) => [car.id, car]));
+  const sections = selSections.all(ownerId) as SectionRow[];
+  const sectionById = new Map(sections.map((section) => [section.id, section.name]));
+  // El PDF quincenal se agrupa por sección y rotula cada vehículo con modelo,
+  // etiqueta GPS (en esta flota guarda el color, "Gris B") y chapa.
+  const carSection = (carId: string | null) => sectionById.get(carById.get(carId ?? '')?.section_id ?? -1) ?? 'Sin sección';
+  const carModel = (carId: string | null) => carById.get(carId ?? '')?.model ?? '';
+  const carGpsTag = (carId: string | null) => carById.get(carId ?? '')?.gps_tag ?? '';
   const selectedCars = reportSelection(body.carIds);
   if (selectedCars !== 'todos' && [...selectedCars].some((id) => !carById.has(id))) throw new Error('Uno de los vehículos no pertenece a tu flota');
   const selectedCategories = body.categories === 'todas' ? 'todos' : reportSelection(body.categories);
@@ -641,7 +751,7 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
   const incomeRows: FleetReportIncomeRow[] = include === 'gastos' ? [] : (selPagos.all(ownerId) as PagoRow[])
     .filter((pago) => pago.tipo === 'pago' && pago.fecha >= range.from && pago.fecha <= range.to && carAllowed(pago.car_id))
     .filter((pago) => matchesSearch('Pago recibido', 'Pago', carById.get(pago.car_id ?? '')?.plate, carById.get(pago.car_id ?? '')?.model, pago.driver, pago.nota, pago.medio))
-    .map((pago) => ({ fecha: pago.fecha, vehiculo: carById.get(pago.car_id ?? '')?.plate ?? 'Sin vehículo', chofer: pago.driver || 'Sin chofer', monto: pago.monto, nota: pago.nota || '' }));
+    .map((pago) => ({ fecha: pago.fecha, vehiculo: carById.get(pago.car_id ?? '')?.plate ?? 'Sin vehículo', seccion: carSection(pago.car_id), modelo: carModel(pago.car_id), gpsTag: carGpsTag(pago.car_id), chofer: pago.driver || 'Sin chofer', monto: pago.monto, nota: pago.nota || '' }));
 
   const expenseRows: FleetReportExpenseRow[] = include === 'ingresos' ? [] : (selMovs.all(ownerId) as MovRow[])
     .filter((mov) => mov.type === 'egreso' && mov.date >= range.from && mov.date <= range.to && carAllowed(mov.car_id) && categoryAllowed(mov.cat || 'Otros'))
@@ -653,7 +763,7 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
       const items = selItems.all(mov.id) as GastoItemRow[];
       const repuestos = items.reduce((sum, item) => sum + item.subtotal, 0);
       const manoObra = mov.mano_obra ?? 0;
-      return { fecha: mov.date, vehiculo: carById.get(mov.car_id)?.plate ?? 'Vehículo eliminado', categoria: mov.cat || 'Otros', detalle: mov.descripcion, items, repuestos, manoObra, total: items.length ? repuestos + manoObra : mov.amount };
+      return { fecha: mov.date, vehiculo: carById.get(mov.car_id)?.plate ?? 'Vehículo eliminado', seccion: carSection(mov.car_id), modelo: carModel(mov.car_id), gpsTag: carGpsTag(mov.car_id), categoria: mov.cat || 'Otros', detalle: mov.descripcion, items, repuestos, manoObra, total: items.length ? repuestos + manoObra : mov.amount };
     });
 
   const counts = { ingresos: incomeRows.length, gastos: expenseRows.length, total: incomeRows.length + expenseRows.length };
@@ -662,7 +772,7 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
   const incomeTotal = incomeRows.reduce((sum, row) => sum + row.monto, 0);
   const expenseTotal = expenseRows.reduce((sum, row) => sum + row.total, 0);
   const resultTotal = incomeTotal - expenseTotal;
-  const periodLabel = `${range.from} a ${range.to}`;
+  const periodLabel = reportPeriodLabel(range.from, range.to);
   const extension = format === 'xlsx' ? 'xlsx' : 'pdf';
   const id = randomUUID();
   const name = `MiFlota-reporte-${reportFileTimestamp()}-${id.slice(0, 8)}.${extension}`;
@@ -701,6 +811,7 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
       incomeTotal,
       expenseTotal,
       resultTotal,
+      sectionOrder: sections.map((section) => section.name),
     });
   }
 
