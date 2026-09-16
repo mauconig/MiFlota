@@ -53,7 +53,7 @@ export function Shell({ v, nombre, usuario, onLogout, onRefresh, refreshing, syn
         {v.isAssistant ? (
           // El chat necesita su propio scroll para que los mensajes y el
           // compositor se acomoden bien al teclado.
-          <Assistant onSinSesion={onLogout} onOpenCar={v.goDetalle} />
+          <Assistant onSinSesion={onLogout} onOpenCar={v.goDetalle} usuario={usuario} />
         ) : v.screen === 'reportes' ? (
           <View style={{ flex: 1, minHeight: 0 }}>
             <Reportes v={v} />

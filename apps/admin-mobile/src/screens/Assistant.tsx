@@ -3,25 +3,13 @@ import { ActivityIndicator, Keyboard, Linking, Modal, Pressable, ScrollView, Sty
 import { KeyboardChatScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useSharedValue } from 'react-native-reanimated';
 import Svg, { Circle, Line, Path, Polyline, Text as SvgText } from 'react-native-svg';
-import { askAssistant, SinSesion, type AssistantAction, type AssistantCard, type AssistantChart, type AssistantFollowUp, type AssistantHistoryItem, type AssistantTable } from '../api';
+import { askAssistant, SinSesion, type AssistantAction, type AssistantCard, type AssistantChart, type AssistantHistoryItem, type AssistantTable } from '../api';
 import { API_BASE } from '../config';
 import { Pagination } from '../components/Pagination';
+import { clearAssistantChat, loadAssistantChat, saveAssistantChat, type AssistantChatMessage } from '../assistantChat';
 
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  text: string;
-  cards?: AssistantCard[];
-  chart?: AssistantChart;
-  table?: AssistantTable;
-  followUps?: AssistantFollowUp[];
-  filters?: { label: string; question: string }[];
-  asOf?: string;
-  notice?: string;
-  files?: { name: string; url: string; mimeType: string }[];
-  error?: boolean;
-  retryQuestion?: string;
-}
+/** El mensaje del chat es el mismo objeto que se persiste en disco. */
+type ChatMessage = AssistantChatMessage;
 
 const INTRO: ChatMessage = {
   id: 'intro',
@@ -269,8 +257,9 @@ function AssistantTableSheet({ table, onAction, onClose }: { table: TableSheetSt
   );
 }
 
-export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void; onOpenCar: (carId: string) => void }) {
+export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: () => void; onOpenCar: (carId: string) => void; usuario: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([INTRO]);
+  const [hydrated, setHydrated] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [tableSheet, setTableSheet] = useState<TableSheetState | null>(null);
@@ -279,8 +268,38 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
   const nextId = useRef(1);
   const previousMessageCount = useRef(messages.length);
   const controller = useRef<AbortController | null>(null);
+  // La pantalla se desmonta al navegar, así que el estado en memoria no alcanza:
+  // la conversación se guarda en disco y se recupera al volver a entrar.
+  const inFlight = useRef(false);
 
   useEffect(() => () => controller.current?.abort(), []);
+
+  // Recupera la conversación guardada de este usuario.
+  useEffect(() => {
+    let active = true;
+    void loadAssistantChat(usuario).then((stored) => {
+      if (!active) return;
+      if (stored.length) {
+        // Los ids vienen de un contador que se reinicia con la pantalla: hay que
+        // continuar desde el mayor guardado para no repetir claves de React.
+        const maxId = stored.reduce((max, message) => {
+          const value = Number(message.id.replace(/^m/, ''));
+          return Number.isFinite(value) && value > max ? value : max;
+        }, 0);
+        nextId.current = maxId + 1;
+        previousMessageCount.current = stored.length + 1;
+        setMessages([INTRO, ...stored]);
+      }
+      setHydrated(true);
+    });
+    return () => { active = false; };
+  }, [usuario]);
+
+  // Guarda cada cambio para que sobreviva la navegación y el reinicio.
+  useEffect(() => {
+    if (!hydrated) return;
+    void saveAssistantChat(usuario, messages.filter((message) => message.id !== INTRO.id));
+  }, [messages, hydrated, usuario]);
 
   useEffect(() => {
     const messageCountIncreased = messages.length > previousMessageCount.current;
@@ -295,7 +314,10 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
 
   const send = async (raw: string) => {
     const question = raw.trim();
-    if (!question || sending) return;
+    // El ref corta el doble toque antes de que React actualice `sending`. Sin
+    // él, dos envíos seguidos agregaban dos respuestas y dos gráficos.
+    if (!question || inFlight.current) return;
+    inFlight.current = true;
 
     Keyboard.dismiss();
     const userMessage: ChatMessage = { id: `m${nextId.current++}`, role: 'user', text: question };
@@ -346,6 +368,7 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
         },
       ]);
     } finally {
+      inFlight.current = false;
       if (controller.current === abort) {
         controller.current = null;
         setSending(false);
@@ -360,9 +383,11 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
 
   const resetConversation = () => {
     if (sending) return;
+    inFlight.current = false;
     setMessages([INTRO]);
     setDraft('');
     setTableSheet(null);
+    void clearAssistantChat(usuario);
   };
 
   const renderMessage = (item: ChatMessage) => {
@@ -440,7 +465,7 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
                 <Text style={styles.suggestionLabel}>PROBÁ PREGUNTANDO</Text>
                 <View style={styles.suggestionGrid}>
                   {SUGGESTIONS.map((suggestion) => (
-                    <Pressable key={suggestion} onPress={() => void send(suggestion)} disabled={sending} style={styles.suggestion}>
+                    <Pressable key={suggestion} onPress={() => void send(suggestion)} disabled={sending || !hydrated} style={styles.suggestion}>
                       <Text style={styles.suggestionText}>{suggestion}</Text>
                     </Pressable>
                   ))}
@@ -470,16 +495,16 @@ export function Assistant({ onSinSesion, onOpenCar }: { onSinSesion: () => void;
           placeholderTextColor="#8b857b"
           multiline
           maxLength={600}
-          editable={!sending}
+          editable={!sending && hydrated}
           style={styles.input}
           accessibilityLabel="Pregunta para el asistente"
         />
         <Pressable
           onPress={() => void send(draft)}
-          disabled={!draft.trim() || sending}
+          disabled={!draft.trim() || sending || !hydrated}
           accessibilityRole="button"
           accessibilityLabel="Enviar pregunta"
-          style={({ pressed }) => [styles.sendButton, (!draft.trim() || sending) && styles.sendDisabled, pressed && styles.sendPressed]}
+          style={({ pressed }) => [styles.sendButton, (!draft.trim() || sending || !hydrated) && styles.sendDisabled, pressed && styles.sendPressed]}
         >
           <Svg viewBox="0 0 24 24" width={20} height={20} fill="none" stroke="#16150f" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
             <Path d="m22 2-7 20-4-9-9-4Z" />
