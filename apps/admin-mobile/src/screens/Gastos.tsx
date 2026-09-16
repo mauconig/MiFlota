@@ -23,7 +23,7 @@ const MIN_ROWS_PER_PAGE = 1;
 const MAX_ROWS_PER_PAGE = 12;
 
 const card = { backgroundColor: PAPER, borderWidth: 1, borderColor: BORDER, borderRadius: 20, padding: 16 } as const;
-type SortKey = 'date' | 'plate' | 'section' | 'amount';
+type SortKey = 'date' | 'plate' | 'tipo' | 'amount';
 type SortDirection = 'asc' | 'desc';
 
 function SortHeader({ label, sortKey, activeKey, direction, onPress, width, flex, right = false }: {
@@ -95,7 +95,7 @@ export function Gastos({ v }: { v: MobileView }) {
       if (sortKey === 'date') comparison = a.dateValue - b.dateValue;
       else if (sortKey === 'amount') comparison = a.amountValue - b.amountValue;
       else if (sortKey === 'plate') comparison = a.plate.localeCompare(b.plate, 'es', { sensitivity: 'base' });
-      else comparison = a.section.localeCompare(b.section, 'es', { sensitivity: 'base' });
+      else comparison = a.cat.localeCompare(b.cat, 'es', { sensitivity: 'base' });
       return (sortDirection === 'asc' ? comparison : -comparison) || a.id.localeCompare(b.id);
     });
     return sorted;
@@ -201,7 +201,7 @@ export function Gastos({ v }: { v: MobileView }) {
                 <View style={{ height: TABLE_HEADER_HEIGHT, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, backgroundColor: '#f7f3eb', borderBottomWidth: 1, borderBottomColor: BORDER }}>
                   <SortHeader label="Fecha" sortKey="date" activeKey={sortKey} direction={sortDirection} onPress={changeSort} width={68} />
                   <SortHeader label="Chapa" sortKey="plate" activeKey={sortKey} direction={sortDirection} onPress={changeSort} width={66} />
-                  <SortHeader label="Sección" sortKey="section" activeKey={sortKey} direction={sortDirection} onPress={changeSort} flex={1} />
+                  <SortHeader label="Tipo" sortKey="tipo" activeKey={sortKey} direction={sortDirection} onPress={changeSort} flex={1} />
                   <SortHeader label="Monto" sortKey="amount" activeKey={sortKey} direction={sortDirection} onPress={changeSort} width={60} right />
                 </View>
                 {visibleTableRows.map((row, index) => (
@@ -214,7 +214,7 @@ export function Gastos({ v }: { v: MobileView }) {
                   >
                     <Text numberOfLines={1} style={{ width: 68, color: MUTED, fontSize: 11 }}>{row.date}</Text>
                     <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} allowFontScaling={false} style={{ width: 66, color: INK, fontSize: 12, fontWeight: '700' }}>{row.plate}</Text>
-                    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} allowFontScaling={false} style={{ flex: 1, minWidth: 0, color: MUTED, fontSize: 11, fontWeight: '600' }}>{row.section}</Text>
+                    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} allowFontScaling={false} style={{ flex: 1, minWidth: 0, color: MUTED, fontSize: 11, fontWeight: '600' }}>{row.cat}</Text>
                     <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} allowFontScaling={false} style={{ width: 60, color: RED, fontSize: 13, fontWeight: '800', textAlign: 'right' }}>{row.amount}</Text>
                   </Pressable>
                 ))}

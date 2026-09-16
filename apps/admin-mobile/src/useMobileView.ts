@@ -1633,12 +1633,13 @@ export function useMobileView(
     })),
   ];
   const selectedGastoCars = state.gastosCarIds === 'todos' ? active : active.filter((c) => state.gastosCarIds.includes(c.id));
-  const gastoSectionLabel = (() => {
-    if (state.gastosCarIds === 'todos') return '';
-    const full = carsBySection(active).filter((g) => g.cars.every((c) => state.gastosCarIds.includes(c.id)));
-    if (!full.length || full.reduce((sum, g) => sum + g.cars.length, 0) !== state.gastosCarIds.length) return '';
-    return full.map((g) => g.name).join(' · ');
-  })();
+  // Secciones enteras seleccionadas: alimenta el rótulo del resumen del paso 2.
+  const gastoSelectedSections = state.gastosCarIds === 'todos'
+    ? []
+    : carsBySection(active).filter((g) => g.cars.every((c) => state.gastosCarIds.includes(c.id)));
+  const gastoSelectionFitsSections = gastoSelectedSections.length > 0
+    && gastoSelectedSections.reduce((sum, g) => sum + g.cars.length, 0) === state.gastosCarIds.length;
+  const gastoSectionLabel = gastoSelectionFitsSections ? gastoSelectedSections.map((g) => g.name).join(' · ') : '';
   const selectedGastoCarLabel = state.gastosCarIds === 'todos'
     ? 'Todos los vehículos'
     : gastoSectionLabel
