@@ -1,9 +1,9 @@
 import { Pressable, Text, View } from 'react-native';
 import { useEffect, useMemo, useState } from 'react';
-import Svg, { Path, Rect } from 'react-native-svg';
 import type { MobileView } from '../useMobileView';
 import { Avatar } from '../components/Avatar';
 import { Pagination } from '../components/Pagination';
+import { PeriodPill } from '../components/PeriodPill';
 
 const PAGE_SIZE = 5;
 
@@ -27,15 +27,7 @@ export function Ranking({ v }: { v: MobileView }) {
   return (
     <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16, gap: 10 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'center', paddingVertical: 2 }}>
-        <Pressable onPress={v.period.openSheet} style={{ flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#e6ded0', borderRadius: 24, paddingVertical: 9, paddingHorizontal: 18 }}>
-          <Svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="#6b665c" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-            <Rect x="3" y="5" width="18" height="16" rx="3" />
-            <Path d="M8 3v4" />
-            <Path d="M16 3v4" />
-            <Path d="M3 11h18" />
-          </Svg>
-          <Text style={{ fontSize: 13, fontWeight: '600', color: '#1a1a18' }}>{v.period.label}</Text>
-        </Pressable>
+        <PeriodPill label={v.period.label} onPress={v.period.openSheet} chevron={false} />
       </View>
       <View style={{ flexDirection: 'row', backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#e6ded0', borderRadius: 24, padding: 4, gap: 2 }}>
         <Pressable onPress={rk.setAuto} style={{ flex: 1, borderRadius: 20, paddingVertical: 9, alignItems: 'center', backgroundColor: segBg(rk.byAuto) }}>
