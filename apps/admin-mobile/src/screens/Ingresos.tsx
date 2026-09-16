@@ -6,6 +6,7 @@ import { Pagination } from '../components/Pagination';
 import { BrandIcon } from '../components/BrandIcon';
 import { DateRangeInputs } from '../components/DateRangeInputs';
 import { ChipRow } from '../components/ChipRow';
+import { BackButton } from '../components/BackButton';
 
 const PAPER = '#fffdf8';
 const BORDER = '#ece4d6';
@@ -14,7 +15,6 @@ const MUTED = '#6b665c';
 const TABLE_HEADER_HEIGHT = 40;
 const TABLE_ROW_HEIGHT = 37;
 const TOTAL_ROW_HEIGHT = 40;
-const BACK_LINK_HEIGHT = 24;
 const RESULT_GAP = 6;
 const MIN_ROWS_PER_PAGE = 1;
 const MAX_ROWS_PER_PAGE = 12;
@@ -47,7 +47,7 @@ function ChoiceCard({ label, brand, selected, onPress }: { label: string; sub?: 
 }
 
 function BackLink({ onPress }: { onPress: () => void }) {
-  return <Pressable onPress={onPress} style={{ minHeight: BACK_LINK_HEIGHT, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: MUTED, fontSize: 12, fontWeight: '700' }}>Atrás</Text></Pressable>;
+  return <BackButton onPress={onPress} label="Atrás" style={{ alignSelf: 'flex-end', marginBottom: 22 }} />;
 }
 
 function SortHeader({ label, sortKey, activeKey, direction, onPress, width, flex, right = false }: {
@@ -141,9 +141,12 @@ export function Ingresos({ v }: { v: MobileView }) {
               {income.sectionOptions.map((option) => <ChoiceCard key={option.id} label={option.label} sub={option.sub} brand={option.brand} selected={option.selected} onPress={option.pick} />)}
             </ScrollView>
             <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}>
-              <Pressable disabled={!income.vehicleSelectionValid} onPress={income.continueVehicles} style={{ minHeight: 52, borderRadius: 18, backgroundColor: income.vehicleSelectionValid ? INK : '#d8d1c5', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: PAPER, fontSize: 15, fontWeight: '700' }}>Continuar</Text>
-              </Pressable>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <BackButton onPress={income.back} />
+                <Pressable disabled={!income.vehicleSelectionValid} onPress={income.continueVehicles} style={{ flex: 1, minHeight: 52, borderRadius: 18, backgroundColor: income.vehicleSelectionValid ? INK : '#d8d1c5', alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ color: PAPER, fontSize: 15, fontWeight: '700' }}>Continuar</Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         </>
@@ -157,9 +160,12 @@ export function Ingresos({ v }: { v: MobileView }) {
               {income.categoryOptions.map((option) => <ChoiceCard key={option.id} label={option.label} sub={option.sub} selected={option.selected} onPress={option.pick} />)}
             </ScrollView>
             <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}>
-              <Pressable disabled={!income.categorySelectionValid} onPress={income.continueCategory} style={{ minHeight: 52, borderRadius: 18, backgroundColor: income.categorySelectionValid ? INK : '#d8d1c5', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: PAPER, fontSize: 15, fontWeight: '700' }}>Continuar</Text>
-              </Pressable>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <BackButton onPress={income.back} />
+                <Pressable disabled={!income.categorySelectionValid} onPress={income.continueCategory} style={{ flex: 1, minHeight: 52, borderRadius: 18, backgroundColor: income.categorySelectionValid ? INK : '#d8d1c5', alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ color: PAPER, fontSize: 15, fontWeight: '700' }}>Continuar</Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         </>

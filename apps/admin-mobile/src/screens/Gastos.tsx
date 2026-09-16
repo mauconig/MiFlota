@@ -6,6 +6,7 @@ import { Pagination } from '../components/Pagination';
 import { BrandIcon } from '../components/BrandIcon';
 import { DateRangeInputs } from '../components/DateRangeInputs';
 import { ChipRow } from '../components/ChipRow';
+import { BackButton } from '../components/BackButton';
 import { fmt } from '../format';
 
 const PAPER = '#fffdf8';
@@ -18,7 +19,6 @@ const TABLE_ROW_HEIGHT = 37;
 const TOTAL_ROW_HEIGHT = 40;
 // The results footer is intentionally compact so the table and its controls
 // remain visible together on small screens.
-const BACK_LINK_HEIGHT = 24;
 const RESULT_GAP = 6;
 const MIN_ROWS_PER_PAGE = 1;
 const MAX_ROWS_PER_PAGE = 12;
@@ -75,7 +75,7 @@ function ChoiceCard({ label, brand, selected, onPress }: { label: string; sub: s
 }
 
 function BackLink({ onPress }: { onPress: () => void }) {
-  return <Pressable onPress={onPress} style={{ minHeight: BACK_LINK_HEIGHT, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: MUTED, fontSize: 12, fontWeight: '700' }}>Atrás</Text></Pressable>;
+  return <BackButton onPress={onPress} label="Atrás" style={{ alignSelf: 'flex-end', marginBottom: 22 }} />;
 }
 
 export function Gastos({ v }: { v: MobileView }) {
@@ -163,9 +163,12 @@ export function Gastos({ v }: { v: MobileView }) {
               {vehicleOptions.map((option) => <ChoiceCard key={option.id} label={option.label} sub={option.sub} brand={option.brand} selected={option.selected} onPress={option.pick} />)}
             </ScrollView>
             <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}>
-              <Pressable disabled={!g.vehicleSelectionValid} onPress={g.continueVehicles} style={{ minHeight: 52, borderRadius: 18, backgroundColor: g.vehicleSelectionValid ? INK : '#d8d1c5', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: PAPER, fontSize: 15, fontWeight: '700' }}>Continuar</Text>
-              </Pressable>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <BackButton onPress={g.back} />
+                <Pressable disabled={!g.vehicleSelectionValid} onPress={g.continueVehicles} style={{ flex: 1, minHeight: 52, borderRadius: 18, backgroundColor: g.vehicleSelectionValid ? INK : '#d8d1c5', alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ color: PAPER, fontSize: 15, fontWeight: '700' }}>Continuar</Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         </>
@@ -179,9 +182,12 @@ export function Gastos({ v }: { v: MobileView }) {
               {g.categoryOptions.map((option) => <ChoiceCard key={option.id} label={option.label} sub={option.sub} selected={option.selected} onPress={option.pick} />)}
             </ScrollView>
             <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}>
-              <Pressable disabled={!g.categorySelectionValid} onPress={g.continueCategory} style={{ minHeight: 52, borderRadius: 18, backgroundColor: g.categorySelectionValid ? INK : '#d8d1c5', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: PAPER, fontSize: 15, fontWeight: '700' }}>Continuar</Text>
-              </Pressable>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <BackButton onPress={g.back} />
+                <Pressable disabled={!g.categorySelectionValid} onPress={g.continueCategory} style={{ flex: 1, minHeight: 52, borderRadius: 18, backgroundColor: g.categorySelectionValid ? INK : '#d8d1c5', alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ color: PAPER, fontSize: 15, fontWeight: '700' }}>Continuar</Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         </>

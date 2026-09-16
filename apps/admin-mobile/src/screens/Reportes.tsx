@@ -4,6 +4,7 @@ import type { MobileView } from '../useMobileView';
 import { BrandIcon } from '../components/BrandIcon';
 import { DateRangeInputs } from '../components/DateRangeInputs';
 import { ChipRow } from '../components/ChipRow';
+import { BackButton } from '../components/BackButton';
 
 const PAPER = '#fffdf8';
 const BORDER = '#e6ded0';
@@ -93,7 +94,12 @@ export function Reportes({ v }: { v: MobileView }) {
             <OptionCard title="Gastos" description="Incluye los egresos registrados" icon="↑" selected={rep.include === 'gastos'} onPress={() => rep.setInclude('gastos')} />
             <OptionCard title="Ingresos y gastos" description="Incluye ambos tipos de movimiento" icon="↕" selected={rep.include === 'ambos'} onPress={() => rep.setInclude('ambos')} />
           </ScrollView>
-          <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}><ContinueButton onPress={rep.next} /></View>
+          <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <BackButton onPress={rep.previous} />
+              <View style={{ flex: 1 }}><ContinueButton onPress={rep.next} /></View>
+            </View>
+          </View>
         </View>
       )}
 
@@ -104,7 +110,12 @@ export function Reportes({ v }: { v: MobileView }) {
             {rep.sectionOptions.map((section) => <OptionCard key={section.id} title={section.label} description={section.sub} brand={section.brand} selected={section.selected} onPress={section.toggle} />)}
             <SelectionLabel value={rep.carSelection} allLabel="Toda la flota" countLabel="vehículo" />
           </ScrollView>
-          <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}><ContinueButton onPress={rep.next} /></View>
+          <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <BackButton onPress={rep.previous} />
+              <View style={{ flex: 1 }}><ContinueButton onPress={rep.next} /></View>
+            </View>
+          </View>
         </View>
       )}
 
@@ -115,7 +126,12 @@ export function Reportes({ v }: { v: MobileView }) {
             {rep.categoryOptions.map((category) => <OptionCard key={category.label} title={category.label} description="Incluir en el reporte" selected={category.selected} onPress={category.toggle} />)}
             <SelectionLabel value={rep.categorySelection} allLabel="Todas las categorías" countLabel="categoría" />
           </ScrollView>
-          <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}><ContinueButton onPress={rep.next} /></View>
+          <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <BackButton onPress={rep.previous} />
+              <View style={{ flex: 1 }}><ContinueButton onPress={rep.next} /></View>
+            </View>
+          </View>
         </View>
       )}
 
