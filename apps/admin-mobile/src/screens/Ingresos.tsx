@@ -13,6 +13,7 @@ const INK = '#16150f';
 const MUTED = '#6b665c';
 const TABLE_HEADER_HEIGHT = 46;
 const TABLE_ROW_HEIGHT = 52;
+const TOTAL_ROW_HEIGHT = 46;
 const PAGINATION_HEIGHT = 36;
 const BACK_LINK_HEIGHT = 24;
 const RESULT_GAP = 6;
@@ -88,10 +89,10 @@ export function Ingresos({ v }: { v: MobileView }) {
   }, [income.rows, sortKey, sortDirection]);
   const tableRowsKey = useMemo(() => `${sortKey}:${sortDirection}:${tableRows.map((row) => `${row.id}:${row.amountValue}`).join('|')}`, [sortKey, sortDirection, tableRows]);
   const rowsWithoutPagination = resultsHeight > 0
-    ? Math.max(MIN_ROWS_PER_PAGE, Math.min(MAX_ROWS_PER_PAGE, Math.floor((resultsHeight - TABLE_HEADER_HEIGHT - BACK_LINK_HEIGHT - RESULT_GAP) / TABLE_ROW_HEIGHT)))
+    ? Math.max(MIN_ROWS_PER_PAGE, Math.min(MAX_ROWS_PER_PAGE, Math.floor((resultsHeight - TABLE_HEADER_HEIGHT - TOTAL_ROW_HEIGHT - BACK_LINK_HEIGHT - RESULT_GAP) / TABLE_ROW_HEIGHT)))
     : MIN_ROWS_PER_PAGE;
   const paginationNeeded = tableRows.length > rowsWithoutPagination;
-  const footerHeight = BACK_LINK_HEIGHT + RESULT_GAP + (paginationNeeded ? PAGINATION_HEIGHT + RESULT_GAP : 0);
+  const footerHeight = TOTAL_ROW_HEIGHT + BACK_LINK_HEIGHT + RESULT_GAP + (paginationNeeded ? PAGINATION_HEIGHT + RESULT_GAP : 0);
   const rowsPerPage = resultsHeight > 0
     ? Math.max(MIN_ROWS_PER_PAGE, Math.min(MAX_ROWS_PER_PAGE, Math.floor((resultsHeight - TABLE_HEADER_HEIGHT - footerHeight) / TABLE_ROW_HEIGHT)))
     : MIN_ROWS_PER_PAGE;
@@ -189,6 +190,11 @@ export function Ingresos({ v }: { v: MobileView }) {
                       <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} allowFontScaling={false} style={{ width: 82, color: row.color, fontSize: 13, fontWeight: '800', textAlign: 'right' }}>{row.amount}</Text>
                     </Pressable>
                   ))}
+                  <View style={{ height: TOTAL_ROW_HEIGHT, borderTopWidth: 1, borderTopColor: '#e5ded2', flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, backgroundColor: '#faf7f0' }}>
+                    <Text style={{ width: 76, color: INK, fontSize: 13, fontWeight: '800' }}>Total</Text>
+                    <View style={{ flex: 1, minWidth: 0 }} />
+                    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} allowFontScaling={false} style={{ width: 82, color: INK, fontSize: 14, fontWeight: '800', textAlign: 'right' }}>{income.total}</Text>
+                  </View>
                 </View>
                 <Pagination page={tablePage} pageSize={rowsPerPage} total={tableRows.length} itemLabel="vehículos" onPageChange={setTablePage} compact />
                 <BackLink onPress={income.back} />

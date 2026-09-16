@@ -6,6 +6,7 @@ import { Pagination } from '../components/Pagination';
 import { BrandIcon } from '../components/BrandIcon';
 import { DateRangeInputs } from '../components/DateRangeInputs';
 import { ChipRow } from '../components/ChipRow';
+import { fmt } from '../format';
 
 const PAPER = '#fffdf8';
 const BORDER = '#ece4d6';
@@ -14,6 +15,7 @@ const MUTED = '#6b665c';
 const RED = '#c0553f';
 const TABLE_HEADER_HEIGHT = 46;
 const TABLE_ROW_HEIGHT = 52;
+const TOTAL_ROW_HEIGHT = 46;
 // The results footer is intentionally compact so the table and its controls
 // remain visible together on small screens.
 const PAGINATION_HEIGHT = 36;
@@ -101,11 +103,12 @@ export function Gastos({ v }: { v: MobileView }) {
     return sorted;
   }, [allTableRows, sortKey, sortDirection]);
   const tableRowsKey = useMemo(() => `${sortKey}:${sortDirection}:${tableRows.map((row) => `${row.id}:${row.date}:${row.amount}:${row.plate}`).join('|')}`, [sortKey, sortDirection, tableRows]);
+  const gastosTotal = useMemo(() => fmt(tableRows.reduce((sum, row) => sum + row.amountValue, 0)), [tableRows]);
   const rowsWithoutPagination = resultsHeight > 0
-    ? Math.max(MIN_ROWS_PER_PAGE, Math.min(MAX_ROWS_PER_PAGE, Math.floor((resultsHeight - TABLE_HEADER_HEIGHT - BACK_LINK_HEIGHT - RESULT_GAP) / TABLE_ROW_HEIGHT)))
+    ? Math.max(MIN_ROWS_PER_PAGE, Math.min(MAX_ROWS_PER_PAGE, Math.floor((resultsHeight - TABLE_HEADER_HEIGHT - TOTAL_ROW_HEIGHT - BACK_LINK_HEIGHT - RESULT_GAP) / TABLE_ROW_HEIGHT)))
     : MIN_ROWS_PER_PAGE;
   const paginationNeeded = tableRows.length > rowsWithoutPagination;
-  const footerHeight = BACK_LINK_HEIGHT + RESULT_GAP + (paginationNeeded ? PAGINATION_HEIGHT + RESULT_GAP : 0);
+  const footerHeight = TOTAL_ROW_HEIGHT + BACK_LINK_HEIGHT + RESULT_GAP + (paginationNeeded ? PAGINATION_HEIGHT + RESULT_GAP : 0);
   const rowsPerPage = resultsHeight > 0
     ? Math.max(MIN_ROWS_PER_PAGE, Math.min(MAX_ROWS_PER_PAGE, Math.floor((resultsHeight - TABLE_HEADER_HEIGHT - footerHeight) / TABLE_ROW_HEIGHT)))
     : MIN_ROWS_PER_PAGE;
@@ -218,6 +221,11 @@ export function Gastos({ v }: { v: MobileView }) {
                     <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} allowFontScaling={false} style={{ width: 60, color: RED, fontSize: 13, fontWeight: '800', textAlign: 'right' }}>{row.amount}</Text>
                   </Pressable>
                 ))}
+                <View style={{ height: TOTAL_ROW_HEIGHT, borderTopWidth: 1, borderTopColor: '#e5ded2', flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, backgroundColor: '#faf7f0' }}>
+                  <Text style={{ width: 68, color: INK, fontSize: 13, fontWeight: '800' }}>Total</Text>
+                  <View style={{ flex: 1, minWidth: 0 }} />
+                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} allowFontScaling={false} style={{ width: 60, color: RED, fontSize: 14, fontWeight: '800', textAlign: 'right' }}>{gastosTotal}</Text>
+                </View>
                 </View>
                 <Pagination page={tablePage} pageSize={rowsPerPage} total={tableRows.length} itemLabel="movimientos" onPageChange={setTablePage} compact />
                 <BackLink onPress={g.back} />
