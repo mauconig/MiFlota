@@ -485,6 +485,7 @@ interface ReportPreviewRow {
   nota: string;
   items: ReportPreviewItem[];
   manoObra: number;
+  open: () => void;
 }
 
 interface AlertView {
@@ -834,6 +835,7 @@ export interface MobileView {
     next: () => void;
     previous: () => void;
     reset: () => void;
+    openPreview: () => void;
     periodLabel: string;
     counts: { ingresos: number; gastos: number; total: number };
     exporting: boolean;
@@ -2529,6 +2531,7 @@ export function useMobileView(
       nota: pago.nota || '',
       items: [],
       manoObra: 0,
+      open: () => update({ movementDetailId: 'pago-' + pago.id }),
     })),
     ...reportExpenses.map((mov) => ({
       id: `gasto-${mov.id}`,
@@ -2543,6 +2546,7 @@ export function useMobileView(
       nota: '',
       items: (mov.items ?? []).map((item) => ({ nombre: item.nombre, cantidad: item.cantidad, costoUnitario: item.costoUnitario, subtotal: item.subtotal })),
       manoObra: mov.manoObra ?? 0,
+      open: () => update({ movementDetailId: 'gasto-' + mov.id }),
     })),
   ];
   const reportSetInclude = (value: ReportInclude) => update({ reportesInclude: value, reportesError: '' });
@@ -2662,6 +2666,7 @@ export function useMobileView(
     assistant: ['MiFlota IA', ''],
     perfil: ['Perfil', ''],
     secciones: ['Secciones', 'Organizá tu flota'],
+    reportePreview: ['Datos del reporte', 'Se van a exportar'],
   };
 
   Object.assign(headerByScreen, {
@@ -2676,7 +2681,7 @@ export function useMobileView(
   });
 
   const isTab = ['dashboard', 'flota', 'gastos', 'mas'].includes(state.screen);
-  const isSub = ['dashboardDetail', 'ganancias', 'ingresos', 'detalle', 'nuevoVehiculo', 'registrar', 'reportes', 'alertas', 'choferes', 'secciones', 'perfil'].includes(state.screen);
+  const isSub = ['dashboardDetail', 'ganancias', 'ingresos', 'detalle', 'nuevoVehiculo', 'registrar', 'reportes', 'reportePreview', 'alertas', 'choferes', 'secciones', 'perfil'].includes(state.screen);
   const isAssistant = state.screen === 'assistant';
 
   return {
@@ -2701,7 +2706,7 @@ export function useMobileView(
       flota: state.screen === 'flota' || state.screen === 'detalle' || state.screen === 'nuevoVehiculo',
       ingresos: (state.screen === 'dashboardDetail' && state.dashboardDetail === 'incomeBreakdown') || state.screen === 'ingresos',
       gastos: state.screen === 'gastos',
-      mas: ['mas', 'alertas', 'choferes', 'secciones', 'reportes', 'perfil'].includes(state.screen),
+      mas: ['mas', 'alertas', 'choferes', 'secciones', 'reportes', 'reportePreview', 'perfil'].includes(state.screen),
     },
     registroChoice: {
       open: state.registroChoice,
@@ -2963,6 +2968,7 @@ export function useMobileView(
       next: reportNext,
       previous: reportPrevious,
       reset: reportReset,
+      openPreview: () => push('reportePreview'),
       periodLabel: r.label,
       counts: reportCounts,
       exporting: state.reportesExportando,

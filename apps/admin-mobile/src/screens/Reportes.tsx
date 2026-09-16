@@ -1,8 +1,6 @@
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import { useEffect, useMemo, useState } from 'react';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type { MobileView } from '../useMobileView';
-import { Pagination } from '../components/Pagination';
 import { BrandIcon } from '../components/BrandIcon';
 import { DateRangeInputs } from '../components/DateRangeInputs';
 import { ChipRow } from '../components/ChipRow';
@@ -12,7 +10,6 @@ const BORDER = '#e6ded0';
 const INK = '#16150f';
 const MUTED = '#6b665c';
 const SOFT = '#f4f0e8';
-const PREVIEW_PAGE_SIZE = 5;
 
 function Check({ active }: { active: boolean }) {
   return (
@@ -49,24 +46,8 @@ function SelectionLabel({ value, allLabel, countLabel }: { value: 'todos' | 'tod
   return <Text style={{ color: MUTED, fontSize: 12 }}>{label}</Text>;
 }
 
-function previewMoney(value: number) {
-  return `Gs. ${new Intl.NumberFormat('es-PY').format(Math.round(value))}`;
-}
-
 export function Reportes({ v }: { v: MobileView }) {
   const rep = v.reportes;
-  const [previewPage, setPreviewPage] = useState(0);
-  const previewKey = useMemo(() => rep.previewRows.map((row) => row.id).join('|'), [rep.previewRows]);
-  const previewPageCount = Math.max(1, Math.ceil(rep.previewRows.length / PREVIEW_PAGE_SIZE));
-  const visiblePreviewRows = rep.previewRows.slice(previewPage * PREVIEW_PAGE_SIZE, (previewPage + 1) * PREVIEW_PAGE_SIZE);
-
-  useEffect(() => {
-    setPreviewPage(0);
-  }, [previewKey]);
-
-  useEffect(() => {
-    setPreviewPage((current) => Math.min(current, previewPageCount - 1));
-  }, [previewPageCount]);
 
   const isPeriod = rep.step === 'period';
   const isInclude = rep.step === 'include';
@@ -163,24 +144,10 @@ export function Reportes({ v }: { v: MobileView }) {
               <Text style={{ color: INK, fontSize: 16, fontWeight: '800' }}>Datos que se van a exportar</Text>
               <Text style={{ color: MUTED, fontSize: 12, marginTop: 3 }}>Esta lista coincide con los filtros elegidos.</Text>
             </View>
-            {visiblePreviewRows.map((row) => (
-              <View key={row.id} style={{ backgroundColor: PAPER, borderWidth: 1, borderColor: BORDER, borderRadius: 15, padding: 13, gap: 5 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                  <Text style={{ color: row.tipo === 'Ingreso' ? '#256b4d' : '#a65b27', fontSize: 10, fontWeight: '800', textTransform: 'uppercase' }}>{row.tipo}</Text>
-                  <Text style={{ color: INK, fontSize: 14, fontWeight: '800' }}>{previewMoney(row.monto)}</Text>
-                </View>
-                <Text style={{ color: MUTED, fontSize: 12 }}>{row.fecha} · {row.vehiculo}</Text>
-                <Text style={{ color: INK, fontSize: 14, fontWeight: '700' }}>{row.detalle}</Text>
-                <Text style={{ color: MUTED, fontSize: 12 }}>{row.tipo === 'Ingreso' ? `Chofer: ${row.chofer} · Medio: ${row.medio}` : `Categoría: ${row.categoria}`}</Text>
-                {!!row.nota && <Text style={{ color: MUTED, fontSize: 12 }}>Nota: {row.nota}</Text>}
-                {!!row.items.length && <View style={{ backgroundColor: SOFT, borderRadius: 10, padding: 9, gap: 3 }}>
-                  <Text style={{ color: MUTED, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' }}>Repuestos</Text>
-                  {row.items.map((item, index) => <Text key={`${row.id}-item-${index}`} style={{ color: INK, fontSize: 11 }}>{item.cantidad} x {item.nombre} · {previewMoney(item.costoUnitario)} c/u · {previewMoney(item.subtotal)}</Text>)}
-                </View>}
-                {!!row.manoObra && <Text style={{ color: MUTED, fontSize: 12 }}>Mano de obra: {previewMoney(row.manoObra)}</Text>}
-              </View>
-            ))}
-            <Pagination page={previewPage} pageSize={PREVIEW_PAGE_SIZE} total={rep.previewRows.length} itemLabel="movimientos" onPageChange={setPreviewPage} />
+            <Pressable onPress={rep.openPreview} accessibilityRole="button" style={{ minHeight: 46, borderRadius: 15, borderWidth: 1, borderColor: BORDER, backgroundColor: PAPER, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <Text style={{ color: INK, fontSize: 14, fontWeight: '700' }}>Ver datos que se van a exportar</Text>
+              <Text style={{ color: MUTED, fontSize: 16, fontWeight: '800' }}>›</Text>
+            </Pressable>
           </View>
 
           <Text style={{ color: MUTED, fontSize: 13 }}>{rep.counts.total ? `Se exportarán ${rep.counts.total} movimientos con detalle completo.` : 'No hay datos para esta selección. Volvé atrás y probá otros filtros.'}</Text>

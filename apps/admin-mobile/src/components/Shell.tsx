@@ -18,6 +18,7 @@ import { Detalle } from '../screens/Detalle';
 import { NuevoVehiculo } from '../screens/NuevoVehiculo';
 import { Registrar } from '../screens/registrar/Registrar';
 import { Reportes } from '../screens/Reportes';
+import { ReportePreview } from '../screens/ReportePreview';
 import { Gastos } from '../screens/Gastos';
 import { Mas } from '../screens/Mas';
 import { Alertas } from '../screens/Alertas';
@@ -57,6 +58,10 @@ export function Shell({ v, nombre, usuario, onLogout, onRefresh, refreshing, syn
         ) : v.screen === 'reportes' ? (
           <View style={{ flex: 1, minHeight: 0 }}>
             <Reportes v={v} />
+          </View>
+        ) : v.screen === 'reportePreview' ? (
+          <View style={{ flex: 1, minHeight: 0 }}>
+            <ReportePreview v={v} />
           </View>
         ) : v.screen === 'gastos' ? (
           <View style={{ flex: 1, minHeight: 0 }}>
