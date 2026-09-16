@@ -163,7 +163,12 @@ function buildAlerts(active: Car[], reportes: Reporte[], cars: Car[]): Alerta[] 
   reportes.forEach((report) => {
     if (report.estado === 'resuelta') return;
     const car = cars.find((candidate) => candidate.id === report.carId);
-    if (car) list.push({ car, kind: 'Reporte', sev: report.urgencia === 'urgente' ? 2 : 1, text: `${report.cat}: ${report.texto}`, report });
+    if (car) {
+      // La gravedad va en el texto: en la lista el color solo no alcanza para
+      // saber si el chofer puede seguir manejando.
+      const gravity = report.urgencia === 'urgente' ? 'No puede manejar' : 'Puede seguir manejando';
+      list.push({ car, kind: 'Reporte', sev: report.urgencia === 'urgente' ? 2 : 1, text: `${gravity} · ${report.cat}: ${report.texto}`, report });
+    }
   });
   list.sort((a, b) => b.sev - a.sev || (b.report?.fecha ?? '').localeCompare(a.report?.fecha ?? ''));
   return list;
@@ -1837,7 +1842,7 @@ export function useMobileView(
       driver: report.driver || reportCar.driver,
       date: dLblFull(new Date(report.fecha + 'T12:00:00')),
       category: report.cat,
-      urgency: report.urgencia === 'urgente' ? 'Urgente' : 'Puede circular',
+      urgency: report.urgencia === 'urgente' ? 'No puede manejar' : 'Puede seguir manejando',
       status: report.estado === 'en_taller' ? 'En taller' : 'Pendiente',
       description: report.texto,
       inWorkshop: reportCar.estado === 'taller',
