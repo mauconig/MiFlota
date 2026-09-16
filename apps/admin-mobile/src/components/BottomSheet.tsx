@@ -36,6 +36,11 @@ export function BottomSheet({ title, onClose, children }: { title: string; onClo
               </Pressable>
             </View>
             <KeyboardAwareScrollView
+              // Sin `flexShrink` el scroll se queda con la altura de su
+              // contenido: como la hoja está topeada en 80%, el sobrante se
+              // dibujaba fuera de la pantalla y no había nada que desplazar
+              // (el detalle del movimiento con muchos ítems quedaba cortado).
+              style={{ flexShrink: 1 }}
               mode="layout"
               bottomOffset={32}
               extraKeyboardSpace={24}
