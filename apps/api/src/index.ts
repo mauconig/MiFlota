@@ -526,6 +526,7 @@ const REPORT_COLORS = {
   muted: '#6b665c',
   blue: '#4a7fb5',
   navy: '#1f3d63',
+  orange: '#e8a13a',
   blueLight: '#dbe7f5',
   paper: '#fffdf8',
   line: '#f0ebe0',
@@ -580,6 +581,12 @@ async function pdfFromFleetReport(data: {
 
     /** Lo que avanza el rótulo de un vehículo (ver `vehicleHeader`). */
     const VEHICLE_LABEL_SIZE = 10;
+    /** Barras: la del tipo de gasto (nivel 1) y la de la sección (nivel 2). */
+    const BLOCK_BAR_H = 30;
+    const BLOCK_BAR_GAP = 12;
+    const SECTION_BAR_H = 24;
+    const SECTION_BAR_GAP = 10;
+    const SECTION_BAR_TOTAL = SECTION_BAR_H + SECTION_BAR_GAP;
     const vehicleHeaderHeight = (label: string) => doc.font('Helvetica-Bold').fontSize(VEHICLE_LABEL_SIZE).heightOfString(label, { width: width - 34 }) + 4;
 
     /** Lo que avanza una fila de subtotal (ver `totalRow`). */
@@ -612,15 +619,25 @@ async function pdfFromFleetReport(data: {
       doc.y = y + height + 4;
     };
 
-    /** Barra del bloque principal: GASTOS DE TALLERES, OTROS GASTOS, COBROS.
-     *  `keepWith` es el alto del bloque que viene abajo: la barra no puede quedar
-     *  sola al pie de una página mientras su contenido sigue en la otra. */
-    const blockHeader = (title: string, color: string, keepWith = 0) => {
-      ensureSpace(48 + keepWith);
+    /** Barra de nivel 1: el tipo de gasto (talleres / otros), COBROS y RESUMEN.
+     *  `keepWith` es el alto del contenido que viene abajo: la barra no puede
+     *  quedar sola al pie de una página mientras su contenido sigue en la otra. */
+    const blockBanner = (title: string, keepWith = 0) => {
+      ensureSpace(BLOCK_BAR_H + 18 + keepWith);
       const y = doc.y;
-      doc.roundedRect(margin, y, width, 30, 8).fill(color);
-      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(11).text(title, margin + 12, y + 9, { width: width - 24, lineBreak: false });
-      doc.y = y + 42;
+      doc.roundedRect(margin, y, width, BLOCK_BAR_H, 8).fill(REPORT_COLORS.navy);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(13).text(title.toUpperCase(), margin + 12, y + 8, { width: width - 24, lineBreak: false });
+      doc.y = y + BLOCK_BAR_H + BLOCK_BAR_GAP;
+    };
+
+    /** Barra de nivel 2: la sección dentro de un tipo de gasto. Más baja y de
+     *  otro color para que la jerarquía se lea de un golpe. */
+    const sectionBanner = (name: string, keepWith = 0) => {
+      ensureSpace(SECTION_BAR_H + SECTION_BAR_GAP + keepWith);
+      const y = doc.y;
+      doc.roundedRect(margin, y, width, SECTION_BAR_H, 7).fill(REPORT_COLORS.orange);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(10).text(name.toUpperCase(), margin + 12, y + 6, { width: width - 24, lineBreak: false });
+      doc.y = y + SECTION_BAR_TOTAL;
     };
 
     /** Vehículo dentro de una sección: MODELO - TAG GPS - CHAPA (ver reportVehicleLabel),
@@ -654,15 +671,6 @@ async function pdfFromFleetReport(data: {
     /** Vehículos de una sección (una sola sección entra acá), con su total. */
     const groupVehicles = <T extends FleetReportVehicleRef>(rows: T[], amountOf: (row: T) => number) => groupReportRows(rows, amountOf, data.sectionOrder)[0]?.vehicles ?? [];
 
-    /** Título grande que abre la página de cada sección. */
-    const sectionBanner = (name: string) => {
-      ensureSpace(44);
-      const y = doc.y;
-      doc.roundedRect(margin, y, width, 30, 8).fill(REPORT_COLORS.navy);
-      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(13).text(name.toUpperCase(), margin + 12, y + 8, { width: width - 24, lineBreak: false });
-      doc.y = y + 40;
-    };
-
     /** El primer auto de una lista, para saber cuánto tiene que acompañar la barra. */
     const firstVehicleBlock = (rows: FleetReportExpenseRow[]) => groupVehicles(rows, (row) => row.total)[0];
 
@@ -689,10 +697,17 @@ async function pdfFromFleetReport(data: {
       });
     };
 
-    pageHeader();
-    // ---- gastos: una página por sección ----
-    const expenseSections = orderedSections(data.expenseRows);
-    if (!expenseSections.length && !data.incomeRows.length) {
+    // ---- gastos: un bloque por tipo de gasto y, adentro, una sección por ----
+    // El orden del informe es tipo de gasto → sección → auto → gasto, así que
+    // primero van TODOS los gastos de talleres (con sus secciones) y después
+    // todos los otros gastos. Un auto con gastos de los dos tipos aparece en
+    // los dos bloques, que es lo correcto con este orden.
+    const expenseBlocks = [
+      { title: 'GASTOS DE TALLERES', rows: data.expenseRows.filter(isWorkshop), total: 'TOTAL TALLERES' },
+      { title: 'OTROS GASTOS', rows: data.expenseRows.filter((row) => !isWorkshop(row)), total: 'TOTAL OTROS GASTOS' },
+    ].filter((block) => block.rows.length > 0);
+
+    if (!expenseBlocks.length && !data.incomeRows.length) {
       pageHeader();
       doc.roundedRect(margin, doc.y, width, 60, 10).fill(REPORT_COLORS.blueLight);
       doc.fillColor(REPORT_COLORS.muted).font('Helvetica-Bold').fontSize(11).text('No hay datos para los filtros elegidos.', margin + 16, doc.y + 23);
@@ -700,35 +715,32 @@ async function pdfFromFleetReport(data: {
       return;
     }
 
-    expenseSections.forEach((section, index) => {
-      const rows = data.expenseRows.filter((row) => sectionOf(row) === section);
-      const taller = rows.filter(isWorkshop);
-      const otros = rows.filter((row) => !isWorkshop(row));
-      if (index > 0) doc.addPage();
+    // Cada bloque arranca en su propia página; la primera del documento ya existe.
+    let paginaUsada = false;
+    const abrirPagina = () => {
+      if (paginaUsada) doc.addPage();
+      paginaUsada = true;
       pageHeader();
-      sectionBanner(section);
-      // `TOTAL GASTOS · SECCIÓN` cierra la sección: viaja con el último bloque
-      // de autos para que no arranque sola la página siguiente.
-      const sectionTotalHeight = totalRowHeight(`TOTAL GASTOS · ${section.toUpperCase()}`, 10);
-      if (taller.length) {
-        blockHeader('GASTOS DE TALLERES', REPORT_COLORS.blue, keepWithBlock(firstVehicleBlock(taller), 48));
-        renderExpenseVehicles(taller, totalRowHeight('TOTAL TALLERES', 18) + (otros.length ? 0 : sectionTotalHeight));
-        totalRow('TOTAL TALLERES', sumExpenses(taller), 18);
+    };
+
+    for (const block of expenseBlocks) {
+      abrirPagina();
+      blockBanner(block.title);
+      for (const section of orderedSections(block.rows)) {
+        const rows = block.rows.filter((row) => sectionOf(row) === section);
+        const subtotal = totalRowHeight('Subtotal de la sección', 16);
+        sectionBanner(section, keepWithBlock(firstVehicleBlock(rows), SECTION_BAR_TOTAL));
+        renderExpenseVehicles(rows, subtotal);
+        totalRow('Subtotal de la sección', sumExpenses(rows), 16);
       }
-      if (otros.length) {
-        blockHeader('OTROS GASTOS', REPORT_COLORS.blue, keepWithBlock(firstVehicleBlock(otros), 48));
-        renderExpenseVehicles(otros, totalRowHeight('TOTAL OTROS GASTOS', 18) + sectionTotalHeight);
-        totalRow('TOTAL OTROS GASTOS', sumExpenses(otros), 18);
-      }
-      ensureSpace(sectionTotalHeight);
-      totalRow(`TOTAL GASTOS · ${section.toUpperCase()}`, sumExpenses(rows), 10);
-    });
+      ensureSpace(totalRowHeight(block.total, 10));
+      totalRow(block.total, sumExpenses(block.rows), 10);
+    }
 
     // ---- cobros: apartado único, resumido por sección y por vehículo ----
     if (data.incomeRows.length) {
-      doc.addPage();
-      pageHeader();
-      sectionBanner('Cobros');
+      abrirPagina();
+      blockBanner('Cobros');
       for (const section of orderedSections(data.incomeRows)) {
         const rows = data.incomeRows.filter((row) => sectionOf(row) === section);
         const vehicles = groupVehicles(rows, (row) => row.monto);
@@ -752,9 +764,8 @@ async function pdfFromFleetReport(data: {
     }
 
     // ---- resumen final: los totales van abajo de todo ----
-    doc.addPage();
-    pageHeader();
-    sectionBanner('Resumen');
+    abrirPagina();
+    blockBanner('Resumen');
 
     const cardGap = 9;
     const cardWidth = (width - cardGap * 2) / 3;
