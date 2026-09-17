@@ -26,7 +26,7 @@ export function ServiceSuccess({ r }: { r: RegistrarView }) {
         <Text allowFontScaling={false} style={{ color: '#fffdf8', fontSize: 14, fontWeight: '700' }}>Volver a Inicio</Text>
       </Pressable>
       <Pressable onPress={r.again} style={{ minHeight: 48, borderRadius: 15, borderWidth: 1, borderColor: '#d9cdb8', alignItems: 'center', justifyContent: 'center' }}>
-        <Text allowFontScaling={false} style={{ color: '#5f5a51', fontSize: 14, fontWeight: '700' }}>Registrar otro service</Text>
+        <Text allowFontScaling={false} style={{ color: '#5f5a51', fontSize: 14, fontWeight: '700' }}>Registrar otro mantenimiento</Text>
       </Pressable>
     </View>
   );
@@ -60,14 +60,14 @@ export function ServiceWizard({ r }: { r: RegistrarView }) {
   } else if (r.step === 3) {
     content = (
       <Pressable onPress={fecha.open} style={{ ...card, minHeight: 62, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text style={{ color: '#6b665c', fontSize: 14 }}>Fecha del service</Text>
+        <Text style={{ color: '#6b665c', fontSize: 14 }}>Fecha del mantenimiento</Text>
         <Text style={{ color: '#16150f', fontSize: 15, fontWeight: '700' }}>{dLblFull(new Date(r.fecha + 'T12:00:00'))}</Text>
       </Pressable>
     );
   } else if (r.step === 4) {
     content = (
       <View style={{ ...card, gap: 8 }}>
-        <Text style={{ color: '#6b665c', fontSize: 13 }}>Kilometraje al hacer el service</Text>
+        <Text style={{ color: '#6b665c', fontSize: 13 }}>Kilometraje al hacer el mantenimiento</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <TextInput value={service.kilometraje} onChangeText={service.setKilometraje} placeholder="Opcional" placeholderTextColor="#a39a8b" keyboardType="numeric" style={{ flex: 1, color: '#16150f', fontSize: 22, fontWeight: '700', paddingVertical: 8 }} />
           <Text style={{ color: '#6b665c', fontSize: 15 }}>km</Text>

@@ -139,7 +139,7 @@ const chipStyle = (active: boolean, tone?: 'amber') => {
 
 interface Alerta {
   car: Car;
-  kind: 'Service' | 'Seguro' | 'Taller' | 'Kilometraje' | 'Reporte';
+  kind: 'Mantenimiento' | 'Seguro' | 'Taller' | 'Kilometraje' | 'Reporte';
   sev: number;
   text: string;
   report?: Reporte;
@@ -150,7 +150,7 @@ function buildAlerts(active: Car[], reportes: Reporte[], cars: Car[]): Alerta[] 
   active.forEach((c) => {
     const dLeft = svcDaysLeft(c);
     if (svcConfigured(c) && dLeft <= SVC_AVISO_DIAS) {
-      list.push({ car: c, kind: 'Service', sev: dLeft < 0 ? 2 : 1, text: 'Service ' + (dLeft < 0 ? 'vencido hace ' + durLbl(dLeft) : dLeft === 0 ? 'vence hoy' : 'vence en ' + durLbl(dLeft)) });
+      list.push({ car: c, kind: 'Mantenimiento', sev: dLeft < 0 ? 2 : 1, text: 'Mantenimiento ' + (dLeft < 0 ? 'vencido hace ' + durLbl(dLeft) : dLeft === 0 ? 'vence hoy' : 'vence en ' + durLbl(dLeft)) });
     }
     const segLeft = daysBetween(TODAY, c.seguroDate);
     if (c.seguroCada > 0 && c.seguroNombre.trim() && c.seguroDate.getFullYear() > 1970 && segLeft === 0) {
@@ -1050,7 +1050,7 @@ export function useMobileView(
     }
     const cada = numFromInput(n.serviceCada);
     if (n.lastService && n.lastService > isoLocal(TODAY)) {
-      toast('El último service no puede ser una fecha futura');
+      toast('El último mantenimiento no puede ser una fecha futura');
       return null;
     }
     const segCada = numFromInput(n.seguroCada);
@@ -1086,8 +1086,8 @@ export function useMobileView(
     ];
     if (n.gpsTag.trim()) rows.push({ label: 'GPS tag', value: n.gpsTag.trim() });
     rows.push({ label: 'Kilometraje', value: n.kilometraje || '—' });
-    rows.push({ label: 'Último service', value: n.lastService ? dLblFull(new Date(n.lastService + 'T12:00:00')) : '—' });
-    rows.push({ label: 'Service cada', value: (n.serviceCada || '—') + ' ' + (n.serviceUnidad === 'dias' ? 'días' : 'meses') });
+    rows.push({ label: 'Último mantenimiento', value: n.lastService ? dLblFull(new Date(n.lastService + 'T12:00:00')) : '—' });
+    rows.push({ label: 'Mantenimiento cada', value: (n.serviceCada || '—') + ' ' + (n.serviceUnidad === 'dias' ? 'días' : 'meses') });
     rows.push({ label: 'Seguro vence', value: n.seguroVence ? dLblFull(new Date(n.seguroVence + 'T12:00:00')) : '—' });
     rows.push({ label: 'Aseguradora', value: n.seguroNombre || '—' });
     rows.push({ label: 'Renovar cada', value: (n.seguroCada || '—') + ' meses' });
@@ -1795,7 +1795,7 @@ export function useMobileView(
     searchText: [a.car.plate, a.car.driver, a.text, a.report?.driver, a.report?.cat, a.report?.texto].filter(Boolean).join(' ').toLowerCase(),
     open: () => {
       if (a.report) return update({ reportDetailId: a.report.id });
-      if (a.kind === 'Service') return goRegistrarService(a.car.id);
+      if (a.kind === 'Mantenimiento') return goRegistrarService(a.car.id);
       if (a.kind === 'Kilometraje') {
         return update({ kilometrajeSheet: { carId: a.car.id, valor: a.car.kilometraje ? miles(String(a.car.kilometraje)) : '' } });
       }
@@ -2143,7 +2143,7 @@ export function useMobileView(
     const resolvedCar = contextCar ?? '';
     const driver = carDe.get(resolvedCar)?.driver ?? '';
     const lockCar = Boolean(contextCar);
-    push('registrar', { registrar: { ...blankRegistrarForm(tab, resolvedCar, driver === 'Sin chofer' ? '' : driver, lockCar, serviceMode), ...(serviceMode ? { cat: 'Service' } : {}) } });
+    push('registrar', { registrar: { ...blankRegistrarForm(tab, resolvedCar, driver === 'Sin chofer' ? '' : driver, lockCar, serviceMode), ...(serviceMode ? { cat: 'Mantenimiento' } : {}) } });
   }
   const goRegistrarCobro = (carId?: string) => goRegistrar('cobro', carId);
   const goRegistrarGasto = (carId?: string) => goRegistrar('gasto', carId);
@@ -2281,7 +2281,7 @@ export function useMobileView(
       if (f.guardando || f.success) return;
       if (f.serviceMode) {
         if (f.step === 0 && !f.carId) return toast('Elegí a qué auto corresponde');
-        if (f.step === 1 && !f.nota.trim()) return toast('Contá qué service se hizo');
+        if (f.step === 1 && !f.nota.trim()) return toast('Contá qué mantenimiento se hizo');
         if (f.step < 5) setF({ step: f.step + 1 });
         return;
       }
@@ -2305,18 +2305,18 @@ export function useMobileView(
       if (f.guardando) return;
       if (f.serviceMode) {
         if (!f.carId) return toast('Elegí a qué auto corresponde');
-        if (!f.nota.trim()) return toast('Contá qué service se hizo');
+        if (!f.nota.trim()) return toast('Contá qué mantenimiento se hizo');
         if (f.fecha > isoLocal(TODAY)) return toast('La fecha no puede ser futura');
         const mileage = numFromInput(f.kilometraje);
         const plate = carDe.get(f.carId)?.plate ?? '';
         setF({ guardando: true });
         const saveExpense = amountNum > 0
-          ? persist.addEgreso(f.carId, { razon: f.nota.trim(), monto: amountNum, cat: 'Service', comprobante: f.comprobante })
+          ? persist.addEgreso(f.carId, { razon: f.nota.trim(), monto: amountNum, cat: 'Mantenimiento', comprobante: f.comprobante })
           : Promise.resolve();
         saveExpense
           .then(() => {
             persist.patchCar(f.carId, { lastServiceDate: new Date(f.fecha + 'T12:00:00'), ...(mileage ? { kilometraje: mileage } : {}) });
-            update((s) => ({ registrar: s.registrar && { ...s.registrar, guardando: false, success: { tab: 'gasto', title: 'Service registrado', detail: plate + ' · ' + f.nota.trim(), amount: amountNum ? fmt(amountNum) : 'Sin costo' } } }));
+            update((s) => ({ registrar: s.registrar && { ...s.registrar, guardando: false, success: { tab: 'gasto', title: 'Mantenimiento registrado', detail: plate + ' · ' + f.nota.trim(), amount: amountNum ? fmt(amountNum) : 'Sin costo' } } }));
           })
           .catch((e: Error) => {
             setF({ guardando: false });
@@ -2377,12 +2377,12 @@ export function useMobileView(
       ['Revisá el egreso', 'Confirmá los datos antes de guardarlo.'],
     ];
     const serviceTitles = [
-      ['¿De qué auto es el service?', 'Elegí el vehículo al que corresponde.'],
+      ['¿De qué auto es el mantenimiento?', 'Elegí el vehículo al que corresponde.'],
       ['¿Qué se hizo?', 'Escribí una descripción breve del mantenimiento.'],
       ['¿Cuánto costó? (opcional)', 'Si lo completás, también aparecerá en Gastos.'],
       ['¿Cuándo se hizo?', 'La fecha no puede ser posterior a hoy.'],
       ['¿Cuál era el kilometraje?', 'Podés dejarlo vacío si no lo sabés.'],
-      ['Revisá el service', 'Confirmá los datos antes de guardarlo.'],
+      ['Revisá el mantenimiento', 'Confirmá los datos antes de guardarlo.'],
     ];
     const firstStep = f.lockCar ? 1 : 0;
     const viewStep = f.serviceMode ? Math.min(f.step, 5) : f.tab === 'gasto' ? Math.min(f.step, 3) : f.step;
@@ -2400,14 +2400,14 @@ export function useMobileView(
       stepHint: stepMeta[1],
       backStep: () => back(),
       next,
-      nextLabel: f.serviceMode ? (f.step >= 5 ? 'Registrar service' : 'Continuar') : (f.tab === 'cobro' && f.step === 2) || (f.tab === 'gasto' && f.step >= 3) ? (f.tab === 'cobro' ? 'Registrar ingreso' : 'Registrar egreso') : 'Continuar',
+      nextLabel: f.serviceMode ? (f.step >= 5 ? 'Registrar mantenimiento' : 'Continuar') : (f.tab === 'cobro' && f.step === 2) || (f.tab === 'gasto' && f.step >= 3) ? (f.tab === 'cobro' ? 'Registrar ingreso' : 'Registrar egreso') : 'Continuar',
       nextDisabled: false,
       success: f.success,
       finish,
       again,
       amountDisplay: amountNum ? fmt(amountNum) : '₲ 0',
       amountColor: amountNum ? (f.tab === 'cobro' ? COLORS.pos : COLORS.neg) : '#b3aa99',
-      amountHint: amountNum ? (f.tab === 'cobro' ? 'Cobro al chofer' : f.serviceMode ? 'Costo del service' : 'Total del gasto') : f.tab === 'gasto' ? 'Agregá el detalle del gasto' : 'Usá el teclado para escribir el monto',
+      amountHint: amountNum ? (f.tab === 'cobro' ? 'Cobro al chofer' : f.serviceMode ? 'Costo del mantenimiento' : 'Total del gasto') : f.tab === 'gasto' ? 'Agregá el detalle del gasto' : 'Usá el teclado para escribir el monto',
       keys,
       fecha: f.fecha,
       setFecha: (iso) => setF({ fecha: iso }),
@@ -2612,7 +2612,7 @@ export function useMobileView(
     reportes: ['Reportes', ''],
     detalle: ['Detalle del vehículo', ''],
     nuevoVehiculo: [state.carId ? 'Editar vehículo' : 'Nuevo vehículo', ''],
-    registrar: [f?.serviceMode ? 'Registrar service' : f?.tab === 'gasto' ? 'Registrar egreso' : 'Registrar ingreso', ''],
+    registrar: [f?.serviceMode ? 'Registrar mantenimiento' : f?.tab === 'gasto' ? 'Registrar egreso' : 'Registrar ingreso', ''],
     assistant: ['MiFlota IA', ''],
     perfil: ['Perfil', ''],
     secciones: ['Secciones', 'Organizá tu flota'],

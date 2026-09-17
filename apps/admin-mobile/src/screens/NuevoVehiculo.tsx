@@ -54,11 +54,11 @@ export function NuevoVehiculo({ v }: { v: MobileView }) {
           <TextInput value={nc.gpsTag} onChangeText={nc.setGpsTag} placeholder="Opcional" maxLength={40} style={valueInput} />
         </View>
         <Pressable onPress={lastService.open} style={[row, divider]}>
-          <Text style={label}>Último service · opcional</Text>
+          <Text style={label}>Último mantenimiento · opcional</Text>
           <Text style={valueInput}>{nc.lastService ? dLblFull(new Date(nc.lastService + 'T12:00:00')) : 'Elegir fecha'}</Text>
         </Pressable>
         <View style={[row, { paddingBottom: 12 }]}>
-          <Text style={label}>Service cada · opcional</Text>
+          <Text style={label}>Mantenimiento cada · opcional</Text>
           <TextInput keyboardType="numeric" value={nc.serviceCada} onChangeText={nc.setServiceCada} placeholder="6" style={valueInput} />
         </View>
         <View style={{ paddingBottom: 12 }}>

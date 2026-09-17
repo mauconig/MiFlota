@@ -16,7 +16,7 @@ export interface Car {
   estado: Estado;
   /** Identificador del equipo de rastreo instalado. Vacío = sin GPS. */
   gpsTag: string;
-  /** Cada cuánto toca el service, en la unidad de `serviceUnidad`. */
+  /** Cada cuánto toca el mantenimiento, en la unidad de `serviceUnidad`. */
   serviceCada: number;
   serviceUnidad: ServiceUnidad;
   lastServiceDate: Date;
@@ -160,7 +160,7 @@ export interface DriverCredentialDraft {
 
 export interface RegistrarForm {
   tab: RegistrarTab;
-  /** Atajo para registrar mantenimiento: se guarda como gasto Service y
+  /** Atajo para registrar mantenimiento: se guarda como gasto Mantenimiento y
    * actualiza la ficha del vehículo. */
   serviceMode: boolean;
   /** Auto de contexto: fijo si se abrió desde la ficha de un vehículo, editable
@@ -175,7 +175,7 @@ export interface RegistrarForm {
   /** Solo Gasto. */
   cat: string;
   comprobante: PickedFile | null;
-  /** Solo Service: lectura del odómetro al momento del service. */
+  /** Solo mantenimiento: lectura del odómetro al momento del service. */
   kilometraje: string;
   /** Paso actual del asistente guiado. */
   step: RegistrarStep;

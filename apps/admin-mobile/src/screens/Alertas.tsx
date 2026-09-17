@@ -5,10 +5,10 @@ import { ChipRow } from '../components/ChipRow';
 import { Pagination } from '../components/Pagination';
 
 const PAGE_SIZE = 6;
-type AlertFilter = 'todos' | 'Service' | 'Seguro' | 'Taller' | 'Kilometraje' | 'Reporte';
+type AlertFilter = 'todos' | 'Mantenimiento' | 'Seguro' | 'Taller' | 'Kilometraje' | 'Reporte';
 const FILTERS: { key: AlertFilter; label: string }[] = [
   { key: 'todos', label: 'Todas' },
-  { key: 'Service', label: 'Service' },
+  { key: 'Mantenimiento', label: 'Mantenimiento' },
   { key: 'Seguro', label: 'Seguro' },
   { key: 'Taller', label: 'Taller' },
   { key: 'Kilometraje', label: 'Kilometraje' },
@@ -59,7 +59,7 @@ export function Alertas({ v }: { v: MobileView }) {
         <View style={{ backgroundColor: emptyAll ? '#e7f2ec' : '#fffdf8', borderWidth: emptyAll ? 0 : 1, borderColor: '#ece4d6', borderRadius: 20, padding: 24, alignItems: 'center' }}>
           <Text style={{ fontSize: 17, fontWeight: '800' }}>{emptyAll ? 'Todo al día' : 'Sin alertas de este tipo'}</Text>
           <Text style={{ color: '#6b665c', marginTop: 5, textAlign: 'center' }}>
-            {emptyAll ? 'No hay avisos de service, seguro o kilometraje.' : `No hay alertas de ${selectedLabel}.`}
+            {emptyAll ? 'No hay avisos de mantenimiento, seguro o kilometraje.' : `No hay alertas de ${selectedLabel}.`}
           </Text>
         </View>
       ) : (

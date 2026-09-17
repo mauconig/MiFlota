@@ -35,7 +35,7 @@ export function GastoWizard({ r }: { r: RegistrarView }) {
   const compact = width < 380;
   const gasto = r.gasto;
   const current = gasto?.selCars.find((c) => c.id === gasto.carId);
-  const select = useSelectSheet('ElegÃ­ un auto', gasto?.selCars ?? [], gasto?.setCarId ?? (() => {}));
+  const select = useSelectSheet('Elegí un auto', gasto?.selCars ?? [], gasto?.setCarId ?? (() => {}));
   const fecha = useDateField(r.fecha, r.setFecha, r.hoy);
   void current;
   void select;
