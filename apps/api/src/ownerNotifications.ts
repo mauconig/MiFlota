@@ -9,7 +9,7 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 export interface OwnerAlertDigestItem {
   carId: string;
   plate: string;
-  kind: 'Service' | 'Seguro' | 'Taller' | 'Kilometraje' | 'Reporte';
+  kind: 'Mantenimiento' | 'Seguro' | 'Taller' | 'Kilometraje' | 'Reporte';
   text: string;
   severity: number;
 }
@@ -56,8 +56,8 @@ export function buildOwnerAlertDigest(cars: CarRow[], today: string, reports: Re
       if (next) {
         const daysLeft = daysBetween(today, next);
         if (daysLeft <= SERVICE_NOTICE_DAYS) {
-          const text = daysLeft < 0 ? `Service vencido hace ${Math.abs(daysLeft)} días` : daysLeft === 0 ? 'Service vence hoy' : `Service vence en ${daysLeft} días`;
-          items.push({ carId: car.id, plate: car.plate, kind: 'Service', text, severity: daysLeft < 0 ? 2 : 1 });
+          const text = daysLeft < 0 ? `Mantenimiento vencido hace ${Math.abs(daysLeft)} días` : daysLeft === 0 ? 'Mantenimiento vence hoy' : `Mantenimiento vence en ${daysLeft} días`;
+          items.push({ carId: car.id, plate: car.plate, kind: 'Mantenimiento', text, severity: daysLeft < 0 ? 2 : 1 });
         }
       }
     }

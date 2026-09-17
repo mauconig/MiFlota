@@ -98,7 +98,7 @@ export function generateFleetData(): { cars: SeedCar[]; movs: SeedMov[] } {
     // Se consume igual que antes para no correr la secuencia del PRNG y que
     // la flota sembrada siga siendo idéntica a la original.
     R();
-    // Días desde el último service. Los valores replican las mismas fracciones
+    // Días desde el último mantenimiento. Los valores replican las mismas fracciones
     // del intervalo que usaba el esquema por km (94% / 32% / 61% de 6 meses),
     // para que sigan siendo los mismos autos los que aparecen por vencer.
     const gapDias = [172, 59, 112][i % 3] + Math.round(R() * 15);

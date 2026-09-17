@@ -355,22 +355,21 @@ const reportCategoryMatches = (value: string, filter: string) => {
 
 /** Categorías que el dueño cuenta como "gastos de talleres"; el resto del
  *  egreso va a "Otros gastos". Es el corte con el que arma su reporte quincenal.
- *  OJO: "Repuestos" queda afuera a propósito. Un trabajo de taller se carga como
- *  "Taller" (con los repuestos adentro como ítems y la mano de obra aparte),
- *  mientras que "Repuestos" se usa para compras y stock —por ejemplo el
- *  prorrateo de importación de los GPS—, que en su reporte va a
- *  "Otros gastos / Repuestos para stock", no a talleres. */
-const REPORT_WORKSHOP_CATEGORIES = new Set(['taller', 'service']);
+ *  Los repuestos entran acá: cuando se compra una pieza para un arreglo, el dueño
+ *  la cuenta como gasto de taller, así que "Repuestos" ya no es una categoría
+ *  suelta (queda solo para las filas viejas). "Service" se renombró a
+ *  "Mantenimiento", pero se deja la clave vieja para no romper el histórico. */
+const REPORT_WORKSHOP_CATEGORIES = new Set(['taller', 'service', 'mantenimiento', 'repuestos']);
 const reportCategoryKey = (value: string) => reportFilterNorm(value).replace(/[^a-z0-9]/g, '');
 
 interface FleetReportVehicleRef { vehiculo: string; seccion: string; modelo: string; gpsTag: string }
 interface FleetReportGroup<T> { name: string; total: number; vehicles: { label: string; total: number; rows: T[] }[] }
 
-/** Rótulo del vehículo en el PDF: SECCIÓN - TAG GPS - CHAPA, todo en mayúsculas.
+/** Rótulo del vehículo en el PDF: MODELO - TAG GPS - CHAPA, todo en mayúsculas.
  *  El `gps_tag` de esta flota guarda el color y la letra que distingue dos autos
  *  iguales ("Gris B") y es opcional: si no está cargado, no deja separador suelto. */
 function reportVehicleLabel(row: FleetReportVehicleRef): string {
-  const parts = [row.seccion?.trim() || 'Sin sección', row.gpsTag, row.vehiculo].map((part) => String(part ?? '').trim()).filter(Boolean);
+  const parts = [row.modelo, row.gpsTag, row.vehiculo].map((part) => String(part ?? '').trim()).filter(Boolean);
   return parts.join(' - ').toUpperCase() || 'Vehículo eliminado';
 }
 
@@ -580,7 +579,8 @@ async function pdfFromFleetReport(data: {
     };
 
     /** Lo que avanza el rótulo de un vehículo (ver `vehicleHeader`). */
-    const vehicleHeaderHeight = (label: string) => doc.font('Helvetica-Bold').fontSize(9).heightOfString(label, { width: width - 34 }) + 11;
+    const VEHICLE_LABEL_SIZE = 10;
+    const vehicleHeaderHeight = (label: string) => doc.font('Helvetica-Bold').fontSize(VEHICLE_LABEL_SIZE).heightOfString(label, { width: width - 34 }) + 4;
 
     /** Lo que avanza una fila de subtotal (ver `totalRow`). */
     const totalRowHeight = (label: string, padAfter = 8) => amountRowHeight(label, 18, 'bold') + padAfter;
@@ -623,12 +623,15 @@ async function pdfFromFleetReport(data: {
       doc.y = y + 42;
     };
 
-    /** Vehículo dentro de una sección: SECCIÓN - TAG GPS - CHAPA (ver reportVehicleLabel). */
+    /** Vehículo dentro de una sección: MODELO - TAG GPS - CHAPA (ver reportVehicleLabel),
+     *  subrayado. `doc.y` se fija a mano: pdfkit ya avanza el cursor al dibujar el
+     *  texto, así que sumarle el alto otra vez dejaba el rótulo con el doble de aire. */
     const vehicleHeader = (label: string) => {
       const height = vehicleHeaderHeight(label);
       ensureSpace(height + 3);
-      doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(9).text(label, margin + 18, doc.y + 5, { width: width - 34 });
-      doc.y += height;
+      const y = doc.y;
+      doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(VEHICLE_LABEL_SIZE).text(label, margin + 18, y, { width: width - 34, underline: true });
+      doc.y = y + height;
     };
 
     /** Subtotal de un auto o de un bloque. */
@@ -708,7 +711,7 @@ async function pdfFromFleetReport(data: {
       // de autos para que no arranque sola la página siguiente.
       const sectionTotalHeight = totalRowHeight(`TOTAL GASTOS · ${section.toUpperCase()}`, 10);
       if (taller.length) {
-        blockHeader('GASTOS DE TALLERES', REPORT_COLORS.ink, keepWithBlock(firstVehicleBlock(taller), 48));
+        blockHeader('GASTOS DE TALLERES', REPORT_COLORS.blue, keepWithBlock(firstVehicleBlock(taller), 48));
         renderExpenseVehicles(taller, totalRowHeight('TOTAL TALLERES', 18) + (otros.length ? 0 : sectionTotalHeight));
         totalRow('TOTAL TALLERES', sumExpenses(taller), 18);
       }
@@ -857,8 +860,8 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
   const carById = new Map(cars.map((car) => [car.id, car]));
   const sections = selSections.all(ownerId) as SectionRow[];
   const sectionById = new Map(sections.map((section) => [section.id, section.name]));
-  // El PDF quincenal se agrupa por sección y rotula cada vehículo con la
-  // sección, la etiqueta GPS (en esta flota guarda el color, "Gris B") y la chapa.
+  // El PDF quincenal se agrupa por sección y rotula cada vehículo con el modelo,
+  // la etiqueta GPS (en esta flota guarda el color, "Gris B") y la chapa.
   const carSection = (carId: string | null) => sectionById.get(carById.get(carId ?? '')?.section_id ?? -1) ?? 'Sin sección';
   const carModel = (carId: string | null) => carById.get(carId ?? '')?.model ?? '';
   const carGpsTag = (carId: string | null) => carById.get(carId ?? '')?.gps_tag ?? '';
@@ -968,10 +971,10 @@ async function cargarTile(z: number, x: number, y: number, cachePath: string): P
       });
       if (!upstream.ok) throw new Error(`OpenStreetMap respondió ${upstream.status}`);
       const contentType = upstream.headers.get('content-type') ?? '';
-      if (!contentType.toLowerCase().startsWith('image/png')) throw new Error('Respuesta de mapa no vÃ¡lida');
+      if (!contentType.toLowerCase().startsWith('image/png')) throw new Error('Respuesta de mapa no válida');
       const declared = Number(upstream.headers.get('content-length') ?? 0);
       if (declared > TILE_MAX_BYTES) throw new Error('Tile demasiado grande');
-      if (!upstream.body) throw new Error('Respuesta de mapa vacÃ­a');
+      if (!upstream.body) throw new Error('Respuesta de mapa vacía');
       const reader = upstream.body.getReader();
       const chunks: Buffer[] = [];
       let total = 0;
@@ -1731,8 +1734,18 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
   });
 });
 
-/** Categorías válidas para un gasto suelto. Mismo set que `CATS` en el cliente. */
-const CATS_EGRESO = new Set(['Repuestos', 'Service', 'Taller', 'Combustible', 'Seguro', 'Multas', 'Documentación', 'Otros']);
+/** Categorías válidas para un gasto suelto. Mismo set que `CATS` en el cliente:
+ *  "Repuestos" ya no es una categoría suelta (cuenta como taller) y "Service" se
+ *  renombró a "Mantenimiento". */
+const CATS_EGRESO = new Set(['Mantenimiento', 'Taller', 'Combustible', 'Seguro', 'Multas', 'Documentación', 'Otros']);
+
+/** Categorías que ya no se ofrecen pero siguen llegando de clientes viejos. */
+const CATS_EGRESO_VIEJAS: Record<string, string> = {
+  service: 'Mantenimiento',
+  repuestos: 'Taller',
+};
+
+const normalizarCategoria = (value: string) => CATS_EGRESO_VIEJAS[value.trim().toLowerCase()] ?? value.trim();
 
 /** Gasto genérico con comprobante opcional, sin efecto sobre el estado del auto:
  *  a diferencia de `/taller`, esta ruta no saca al vehículo de circulación —
@@ -1752,7 +1765,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
       if (parte.type === 'field') {
         if (parte.fieldname === 'razon') razon = String(parte.value).trim().slice(0, 120);
         if (parte.fieldname === 'monto') monto = Number(String(parte.value).replace(/\D/g, '')) || 0;
-        if (parte.fieldname === 'cat') cat = String(parte.value);
+        if (parte.fieldname === 'cat') cat = normalizarCategoria(String(parte.value));
         // `items` y `manoObra` quedaron fuera del modelo: si un cliente viejo
         // todavía los manda, se ignoran.
         continue;
@@ -1804,7 +1817,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
   return reply.code(201).send({ mov: movToJson(mov) });
 });
 
-/** Registra un service y, si tuvo costo, su gasto asociado en una sola
+/** Registra un mantenimiento y, si tuvo costo, su gasto asociado en una sola
  * operación. El archivo se escribe antes de la transacción porque SQLite no
  * puede esperar una escritura async; si algo falla, se elimina el archivo
  * recién creado para no dejar comprobantes huérfanos. */
@@ -1853,12 +1866,12 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/service', async (req, reply)
   }
 
   const hoy = hoyISO();
-  if (!FECHA.test(fecha) || fecha > hoy) return reply.code(400).send({ error: 'La fecha del service no es válida' });
-  if (!descripcion) return reply.code(400).send({ error: 'Contá qué service se hizo' });
+  if (!FECHA.test(fecha) || fecha > hoy) return reply.code(400).send({ error: 'La fecha del mantenimiento no es válida' });
+  if (!descripcion) return reply.code(400).send({ error: 'Contá qué mantenimiento se hizo' });
   if (kilometraje !== undefined && (!Number.isInteger(kilometraje) || kilometraje < car.kilometraje || kilometraje > 10_000_000)) {
     return reply.code(400).send({ error: 'El kilometraje no puede ser menor al actual' });
   }
-  if (costo !== undefined && (!Number.isInteger(costo) || costo < 0 || costo > 1_000_000_000)) return reply.code(400).send({ error: 'El costo del service no es válido' });
+  if (costo !== undefined && (!Number.isInteger(costo) || costo < 0 || costo > 1_000_000_000)) return reply.code(400).send({ error: 'El costo del mantenimiento no es válido' });
 
   const guardado = await guardarComprobanteParaRuta(archivoPendiente, reply);
   if (!guardado.ok) return;
@@ -1877,14 +1890,14 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/service', async (req, reply)
       return db
         .prepare(
           `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
-           VALUES (?, ?, 'egreso', ?, ?, ?, 'Service', NULL, ?, ?, ?)`,
+           VALUES (?, ?, 'egreso', ?, ?, ?, 'Mantenimiento', NULL, ?, ?, ?)`,
         )
         .run(u.id, car.id, costo, fecha, descripcion, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
     })();
 
     const actualizado = db.prepare('SELECT * FROM cars WHERE id = ? AND owner_id = ?').get(car.id, u.id) as CarRow;
     const mov = info ? (db.prepare('SELECT * FROM movs WHERE id = ?').get(info.lastInsertRowid) as MovRow) : undefined;
-    req.log.info({ car: car.plate, costo: costo ?? 0, comprobante: !!archivo }, 'service registrado');
+    req.log.info({ car: car.plate, costo: costo ?? 0, comprobante: !!archivo }, 'mantenimiento registrado');
     return reply.code(201).send({ car: carToJson(actualizado), ...(mov ? { mov: movToJson(mov) } : {}) });
   } catch (error) {
     if (archivo) await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
@@ -1905,7 +1918,7 @@ app.get<{ Params: { id: string } }>('/api/comprobantes/:id', async (req, reply) 
       (db.prepare('SELECT comprobante, comprobante_nombre, comprobante_tipo FROM pagos WHERE comprobante = ? AND owner_id = ?').get(comprobanteId, owner.id) as Fila | undefined);
   } else {
     const chofer = quienChofer(db, req);
-    if (!chofer) return reply.code(401).send({ error: 'SesiÃ³n requerida' });
+    if (!chofer) return reply.code(401).send({ error: 'Sesión requerida' });
     fila = db
       .prepare(`SELECT comprobante, comprobante_nombre, comprobante_tipo
                  FROM pagos
@@ -2139,7 +2152,7 @@ app.post<{ Body: DriverLocationBody }>('/api/chofer/location', async (req, reply
   })();
 
   if (info.changes === 0) req.log.warn({ carId: s.carId, reason: 'stale_recorded_at' }, 'driver location rejected');
-  if (info.changes === 0) return reply.code(409).send({ ok: false, accepted: false, error: 'La ubicaciÃ³n estÃ¡ desactualizada' });
+  if (info.changes === 0) return reply.code(409).send({ ok: false, accepted: false, error: 'La ubicación está desactualizada' });
   req.log.info({ carId: s.carId, accuracy, recordedAt }, 'driver location received');
   return { ok: true, accepted: true, recordedAt, receivedAt };
 });

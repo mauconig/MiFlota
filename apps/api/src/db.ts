@@ -94,7 +94,7 @@ export interface PagoRow {
 }
 
 /** Un reporte de falla que un chofer manda desde apps/driver. Pensado para
- *  poder mezclarse a futuro en el mismo `alertList` que ya arma Service/
+ *  poder mezclarse a futuro en el mismo `alertList` que ya arma Mantenimiento/
  *  Seguro/Taller (ver useFleetView.ts) — por eso `estado` deja lugar para que
  *  el dueño lo vaya moviendo, aunque hoy nada todavía lo cambia de 'enviada'. */
 export interface ReporteRow {
@@ -344,7 +344,7 @@ function migrarOwner(db: Database.Database) {
   if (cols('cars').includes('km') && !cols('cars').includes('kilometraje')) db.exec('ALTER TABLE cars RENAME COLUMN km TO kilometraje');
   if (!cols('cars').includes('kilometraje')) db.exec('ALTER TABLE cars ADD COLUMN kilometraje INTEGER NOT NULL DEFAULT 0');
   if (!cols('cars').includes('kilometraje_actualizado')) db.exec('ALTER TABLE cars ADD COLUMN kilometraje_actualizado TEXT');
-  // El intervalo de service deja de ser siempre en meses: pasa a valor + unidad.
+  // El intervalo de mantenimiento deja de ser siempre en meses: pasa a valor + unidad.
   // Las filas viejas eran meses por definición, así que se copian tal cual.
   if (!cols('cars').includes('gps_tag')) db.exec("ALTER TABLE cars ADD COLUMN gps_tag TEXT NOT NULL DEFAULT ''");
   // La cuota es lo que paga el chofer: un vehículo sin chofer no puede tener una.
@@ -395,6 +395,16 @@ function migrarOwner(db: Database.Database) {
   // era el total (ítems + mano de obra) en todas las filas.
   db.exec('DROP TABLE IF EXISTS gasto_items');
   if (cols('movs').includes('mano_obra')) db.exec('ALTER TABLE movs DROP COLUMN mano_obra');
+  // Las categorías de gasto cambiaron: "Service" pasó a llamarse "Mantenimiento"
+  // y "Repuestos" dejó de ir suelto, porque una pieza comprada para un arreglo el
+  // dueño la cuenta como gasto de taller. La excepción es la compra de repuestos
+  // para stock —la importación de los GPS—, que va a "Otros gastos".
+  db.exec("UPDATE movs SET cat = 'Mantenimiento' WHERE cat = 'Service'");
+  db.exec("UPDATE movs SET cat = 'Otros' WHERE cat = 'Repuestos' AND descripcion LIKE '%GPS%' AND descripcion LIKE '%importaci%'");
+  db.exec("UPDATE movs SET cat = 'Taller' WHERE cat = 'Repuestos'");
+  // "Neumáticos" se usó en algunos datos de prueba pero nunca estuvo en la lista
+  // de categorías de la app: un cambio de cubiertas es un trabajo de taller.
+  db.exec("UPDATE movs SET cat = 'Taller' WHERE cat = 'Neumáticos'");
   db.exec(`
     CREATE TABLE IF NOT EXISTS kilometraje_alertas (
       owner_id INTEGER NOT NULL,
