@@ -601,16 +601,6 @@ async function pdfFromFleetReport(data: {
       doc.y = y + 42;
     };
 
-    /** Sección dentro de un bloque, con su subtotal. */
-    const groupHeader = (name: string, total: number) => {
-      ensureSpace(32);
-      const y = doc.y;
-      doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(10).text(name, margin + 8, y, { width: width - 184, lineBreak: false });
-      doc.fillColor(REPORT_COLORS.muted).font('Helvetica').fontSize(9).text(reportMoney(total), margin + width - 176, y + 2, { width: 168, align: 'right', lineBreak: false });
-      doc.moveTo(margin + 8, y + 16).lineTo(margin + width, y + 16).lineWidth(0.7).strokeColor(REPORT_COLORS.line).stroke();
-      doc.y = y + 26;
-    };
-
     /** Vehículo dentro de una sección: modelo · etiqueta GPS · chapa. */
     const vehicleHeader = (label: string) => {
       const textWidth = width - 34;
@@ -626,7 +616,97 @@ async function pdfFromFleetReport(data: {
       doc.y += padAfter;
     };
 
+    const sectionOf = (row: FleetReportVehicleRef) => row.seccion?.trim() || 'Sin sección';
+    const isWorkshop = (row: FleetReportExpenseRow) => REPORT_WORKSHOP_CATEGORIES.has(reportCategoryKey(row.categoria));
+    const sumExpenses = (rows: FleetReportExpenseRow[]) => rows.reduce((sum, row) => sum + row.total, 0);
+    const sumIncome = (rows: FleetReportIncomeRow[]) => rows.reduce((sum, row) => sum + row.monto, 0);
+
+    // Orden de secciones: el del panel y, al final, "Sin sección".
+    const sectionRankOrder = new Map(data.sectionOrder.map((name, index) => [name.trim().toLowerCase(), index]));
+    const sectionRank = (name: string) => sectionRankOrder.get(name.trim().toLowerCase()) ?? (name === 'Sin sección' ? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER - 1);
+    const orderedSections = (rows: FleetReportVehicleRef[]) => [...new Set(rows.map(sectionOf))]
+      .sort((a, b) => sectionRank(a) - sectionRank(b) || a.localeCompare(b, 'es'));
+
+    /** Vehículos de una sección (una sola sección entra acá), con su total. */
+    const groupVehicles = <T extends FleetReportVehicleRef>(rows: T[], amountOf: (row: T) => number) => groupReportRows(rows, amountOf, data.sectionOrder)[0]?.vehicles ?? [];
+
+    /** Título grande que abre la página de cada sección. */
+    const sectionBanner = (name: string) => {
+      ensureSpace(44);
+      const y = doc.y;
+      doc.roundedRect(margin, y, width, 30, 8).fill(REPORT_COLORS.orangeLight);
+      doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(13).text(name.toUpperCase(), margin + 12, y + 8, { width: width - 24, lineBreak: false });
+      doc.y = y + 40;
+    };
+
+    const renderExpenseVehicles = (rows: FleetReportExpenseRow[]) => {
+      for (const vehicle of groupVehicles(rows, (row) => row.total)) {
+        vehicleHeader(vehicle.label);
+        for (const row of vehicle.rows) {
+          amountRow(row.detalle, row.total, 30);
+          for (const item of row.items) amountRow(`${item.cantidad} × ${item.nombre}`, item.subtotal, 42, 'muted');
+          if (row.manoObra > 0) amountRow('Mano de obra', row.manoObra, 42, 'muted');
+        }
+        totalRow('Total del auto', vehicle.total, 10);
+      }
+    };
+
     pageHeader();
+    // ---- gastos: una página por sección ----
+    const expenseSections = orderedSections(data.expenseRows);
+    if (!expenseSections.length && !data.incomeRows.length) {
+      pageHeader();
+      doc.roundedRect(margin, doc.y, width, 60, 10).fill(REPORT_COLORS.orangeLight);
+      doc.fillColor(REPORT_COLORS.muted).font('Helvetica-Bold').fontSize(11).text('No hay datos para los filtros elegidos.', margin + 16, doc.y + 23);
+      doc.end();
+      return;
+    }
+
+    expenseSections.forEach((section, index) => {
+      const rows = data.expenseRows.filter((row) => sectionOf(row) === section);
+      const taller = rows.filter(isWorkshop);
+      const otros = rows.filter((row) => !isWorkshop(row));
+      if (index > 0) doc.addPage();
+      pageHeader();
+      sectionBanner(section);
+      if (taller.length) {
+        blockHeader('GASTOS DE TALLERES', REPORT_COLORS.ink);
+        renderExpenseVehicles(taller);
+        totalRow('TOTAL TALLERES', sumExpenses(taller), 18);
+      }
+      if (otros.length) {
+        blockHeader('OTROS GASTOS', REPORT_COLORS.orange);
+        renderExpenseVehicles(otros);
+        totalRow('TOTAL OTROS GASTOS', sumExpenses(otros), 18);
+      }
+      totalRow(`TOTAL GASTOS · ${section.toUpperCase()}`, sumExpenses(rows), 10);
+    });
+
+    // ---- cobros: apartado único, resumido por sección y por vehículo ----
+    if (data.incomeRows.length) {
+      doc.addPage();
+      pageHeader();
+      sectionBanner('Cobros');
+      for (const section of orderedSections(data.incomeRows)) {
+        const rows = data.incomeRows.filter((row) => sectionOf(row) === section);
+        ensureSpace(34);
+        const sectionY = doc.y;
+        doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(10).text(section, margin + 8, sectionY, { width: width - 16, lineBreak: false });
+        doc.moveTo(margin + 8, sectionY + 16).lineTo(margin + width, sectionY + 16).lineWidth(0.7).strokeColor(REPORT_COLORS.line).stroke();
+        doc.y = sectionY + 24;
+        for (const vehicle of groupVehicles(rows, (row) => row.monto)) {
+          amountRow(`${vehicle.label} · ${vehicle.rows.length} cobro${vehicle.rows.length === 1 ? '' : 's'}`, vehicle.total, 20);
+        }
+        totalRow('Subtotal de la sección', sumIncome(rows), 16);
+      }
+      totalRow('TOTAL COBROS', data.incomeTotal, 10);
+    }
+
+    // ---- resumen final: los totales van abajo de todo ----
+    doc.addPage();
+    pageHeader();
+    sectionBanner('Resumen');
+
     const cardGap = 9;
     const cardWidth = (width - cardGap * 2) / 3;
     const summaryCards = [
@@ -641,59 +721,54 @@ async function pdfFromFleetReport(data: {
       doc.fillColor(REPORT_COLORS.muted).font('Helvetica-Bold').fontSize(8).text(label.toUpperCase(), x + 12, summaryY + 12);
       doc.fillColor(color).font('Helvetica-Bold').fontSize(15).text(reportMoney(amount), x + 12, summaryY + 32, { width: cardWidth - 24, lineBreak: false });
     });
-    doc.y = summaryY + 84;
-    doc.fillColor(REPORT_COLORS.muted).font('Helvetica').fontSize(9).text(`${data.incomeRows.length + data.expenseRows.length} movimientos incluidos · datos filtrados según la selección`, margin, doc.y);
-    doc.y += 22;
+    doc.y = summaryY + 88;
 
-    // El reporte se agrupa por sección, como lo manda el dueño: primero los
-    // gastos de taller, después el resto de los gastos y al final los cobros.
-    const workshopRows = data.expenseRows.filter((row) => REPORT_WORKSHOP_CATEGORIES.has(reportCategoryKey(row.categoria)));
-    const otherRows = data.expenseRows.filter((row) => !REPORT_WORKSHOP_CATEGORIES.has(reportCategoryKey(row.categoria)));
-
-    const renderExpenseGroups = (groups: FleetReportGroup<FleetReportExpenseRow>[]) => {
-      for (const group of groups) {
-        groupHeader(group.name, group.total);
-        for (const vehicle of group.vehicles) {
-          vehicleHeader(vehicle.label);
-          for (const row of vehicle.rows) {
-            amountRow(row.detalle, row.total, 30);
-            for (const item of row.items) amountRow(`${item.cantidad} × ${item.nombre}`, item.subtotal, 42, 'muted');
-            if (row.manoObra > 0) amountRow('Mano de obra', row.manoObra, 42, 'muted');
-          }
-          totalRow('Total del auto', vehicle.total, 10);
-        }
-      }
+    const showIncome = data.incomeRows.length > 0;
+    const summarySections = orderedSections([...data.expenseRows, ...data.incomeRows]);
+    const labelWidth = Math.round(width * (showIncome ? 0.34 : 0.44));
+    const columnWidth = Math.round((width - labelWidth) / (showIncome ? 4 : 3));
+    const columns = showIncome ? ['Talleres', 'Otros', 'Cobros', 'Neto'] : ['Talleres', 'Otros', 'Neto'];
+    const totalsFor = (section: string) => {
+      const expenses = data.expenseRows.filter((row) => sectionOf(row) === section);
+      const incomes = data.incomeRows.filter((row) => sectionOf(row) === section);
+      const taller = sumExpenses(expenses.filter(isWorkshop));
+      const otros = sumExpenses(expenses.filter((row) => !isWorkshop(row)));
+      const cobros = sumIncome(incomes);
+      return showIncome
+        ? [reportMoney(taller), reportMoney(otros), reportMoney(cobros), reportMoney(cobros - taller - otros)]
+        : [reportMoney(taller), reportMoney(otros), reportMoney(-(taller + otros))];
     };
 
-    const renderIncomeGroups = (groups: FleetReportGroup<FleetReportIncomeRow>[]) => {
-      for (const group of groups) {
-        groupHeader(group.name, group.total);
-        for (const vehicle of group.vehicles) {
-          vehicleHeader(vehicle.label);
-          for (const row of vehicle.rows) amountRow(`${row.fecha}${row.nota ? ` · ${row.nota}` : ''}`, row.monto, 30);
-          totalRow('Total del auto', vehicle.total, 10);
-        }
-      }
+    const summaryRow = (label: string, cells: string[], bold: boolean) => {
+      const height = 20;
+      ensureSpace(height + 4);
+      const y = doc.y;
+      const font = bold ? 'Helvetica-Bold' : 'Helvetica';
+      doc.font(font).fontSize(9).fillColor(REPORT_COLORS.ink).text(label, margin + 8, y + 5, { width: labelWidth - 16, lineBreak: false });
+      cells.forEach((cell, index) => {
+        doc.font(font).fontSize(9).fillColor(REPORT_COLORS.ink).text(cell, margin + labelWidth + index * columnWidth, y + 5, { width: columnWidth - 8, align: 'right', lineBreak: false });
+      });
+      doc.moveTo(margin + 4, y + height).lineTo(margin + width, y + height).lineWidth(0.5).strokeColor(REPORT_COLORS.line).stroke();
+      doc.y = y + height + 2;
     };
 
-    const block = (title: string, total: number, color: string, groups: FleetReportGroup<FleetReportExpenseRow>[]) => {
-      blockHeader(title, color);
-      renderExpenseGroups(groups);
-      totalRow(`TOTAL ${title}`, total, 18);
-    };
+    ensureSpace(26);
+    const tableHeadY = doc.y;
+    doc.font('Helvetica-Bold').fontSize(8).fillColor(REPORT_COLORS.muted).text('SECCIÓN', margin + 8, tableHeadY + 4, { width: labelWidth - 16, lineBreak: false });
+    columns.forEach((column, index) => {
+      doc.font('Helvetica-Bold').fontSize(8).fillColor(REPORT_COLORS.muted).text(column.toUpperCase(), margin + labelWidth + index * columnWidth, tableHeadY + 4, { width: columnWidth - 8, align: 'right', lineBreak: false });
+    });
+    doc.y = tableHeadY + 20;
 
-    if (workshopRows.length) block('GASTOS DE TALLERES', workshopRows.reduce((sum, row) => sum + row.total, 0), REPORT_COLORS.ink, groupReportRows(workshopRows, (row) => row.total, data.sectionOrder));
-    if (otherRows.length) block('OTROS GASTOS', otherRows.reduce((sum, row) => sum + row.total, 0), REPORT_COLORS.orange, groupReportRows(otherRows, (row) => row.total, data.sectionOrder));
-    if (data.incomeRows.length) {
-      const incomeTotal = data.incomeRows.reduce((sum, row) => sum + row.monto, 0);
-      blockHeader('COBROS', REPORT_COLORS.green);
-      renderIncomeGroups(groupReportRows(data.incomeRows, (row) => row.monto, data.sectionOrder));
-      totalRow('TOTAL COBROS', incomeTotal, 18);
-    }
-    if (!data.incomeRows.length && !data.expenseRows.length) {
-      doc.roundedRect(margin, doc.y, width, 60, 10).fill(REPORT_COLORS.orangeLight);
-      doc.fillColor(REPORT_COLORS.muted).font('Helvetica-Bold').fontSize(11).text('No hay datos para los filtros elegidos.', margin + 16, doc.y + 23);
-    }
+    for (const section of summarySections) summaryRow(section, totalsFor(section), false);
+    const tallerTotal = sumExpenses(data.expenseRows.filter(isWorkshop));
+    const otrosTotal = sumExpenses(data.expenseRows.filter((row) => !isWorkshop(row)));
+    summaryRow('TOTAL', showIncome
+      ? [reportMoney(tallerTotal), reportMoney(otrosTotal), reportMoney(data.incomeTotal), reportMoney(data.resultTotal)]
+      : [reportMoney(tallerTotal), reportMoney(otrosTotal), reportMoney(-data.expenseTotal)], true);
+
+    doc.y += 14;
+    doc.font('Helvetica').fontSize(9).fillColor(REPORT_COLORS.muted).text(`${data.incomeRows.length + data.expenseRows.length} movimientos incluidos · datos filtrados según la selección`, margin, doc.y);
     doc.end();
   });
 }
