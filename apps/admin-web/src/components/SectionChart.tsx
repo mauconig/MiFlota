@@ -120,6 +120,12 @@ function Donut({
 }) {
   const [activa, setActiva] = useState<string | null>(null);
 
+  // Con el mouse sobre una porción, el centro deja de mostrar el total y pasa a
+  // mostrar esa porción: nombre, monto y % (el mismo redondeo que la leyenda).
+  const hovered = filas.find((bar) => bar.key === activa) ?? null;
+  const hoveredValor = hovered ? valor(hovered) : 0;
+  const hoveredPct = hovered && total ? Math.round((hoveredValor / total) * 100) : 0;
+
   // Cada porción es un trazo de círculo: con r = 15.9155 la circunferencia mide
   // ~100, así el porcentaje se usa directo como dash. El grupo rotado -90°
   // arranca en las 12 en punto y el offset corre cada porción.
@@ -155,9 +161,23 @@ function Donut({
           ))}
         </g>
       </svg>
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, pointerEvents: 'none' }}>
-        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: '#6b665c' }}>Total</span>
-        <span style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em' }}>{fmtShort(total, hide)}</span>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, padding: '0 19%', pointerEvents: 'none' }}>
+        {hovered ? (
+          <>
+            <span style={{ width: '100%', fontSize: 11, fontWeight: 700, lineHeight: 1.25, color: '#6b665c', textAlign: 'center', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{hovered.label}</span>
+            {hide ? (
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#6b665c' }}>monto oculto</span>
+            ) : (
+              <span style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em' }}>{fmtShort(hoveredValor, hide)}</span>
+            )}
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#6b665c' }}>{hoveredPct}%</span>
+          </>
+        ) : (
+          <>
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: '#6b665c' }}>Total</span>
+            <span style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em' }}>{fmtShort(total, hide)}</span>
+          </>
+        )}
       </div>
     </div>
   );

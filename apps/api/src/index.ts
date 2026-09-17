@@ -366,11 +366,12 @@ const reportCategoryKey = (value: string) => reportFilterNorm(value).replace(/[^
 interface FleetReportVehicleRef { vehiculo: string; seccion: string; modelo: string; gpsTag: string }
 interface FleetReportGroup<T> { name: string; total: number; vehicles: { label: string; total: number; rows: T[] }[] }
 
-/** Rótulo del vehículo tal como lo escribe el dueño: el `gps_tag` de esta flota
- *  guarda el color y la letra que distingue dos autos iguales ("Gris B"). */
+/** Rótulo del vehículo en el PDF: SECCIÓN - TAG GPS - CHAPA, todo en mayúsculas.
+ *  El `gps_tag` de esta flota guarda el color y la letra que distingue dos autos
+ *  iguales ("Gris B") y es opcional: si no está cargado, no deja separador suelto. */
 function reportVehicleLabel(row: FleetReportVehicleRef): string {
-  const parts = [row.modelo, row.gpsTag, row.vehiculo].map((part) => String(part ?? '').trim()).filter(Boolean);
-  return parts.join(' · ') || 'Vehículo eliminado';
+  const parts = [row.seccion?.trim() || 'Sin sección', row.gpsTag, row.vehiculo].map((part) => String(part ?? '').trim()).filter(Boolean);
+  return parts.join(' - ').toUpperCase() || 'Vehículo eliminado';
 }
 
 /** Agrupa por sección y, dentro de cada sección, por vehículo. */
@@ -522,14 +523,15 @@ interface FleetReportIncomeRow {
 }
 
 const REPORT_COLORS = {
-  ink: '#1b1a17',
+  ink: '#16150f',
   muted: '#6b665c',
-  orange: '#eda332',
-  orangeLight: '#fff0d8',
-  paper: '#fffdf9',
-  line: '#e7dfd2',
-  green: '#2d8666',
-  red: '#c85c45',
+  blue: '#4a7fb5',
+  navy: '#1f3d63',
+  blueLight: '#dbe7f5',
+  paper: '#fffdf8',
+  line: '#f0ebe0',
+  green: '#2e7d5b',
+  red: '#c0553f',
 };
 
 async function pdfFromFleetReport(data: {
@@ -567,6 +569,37 @@ async function pdfFromFleetReport(data: {
       pageHeader();
     };
 
+    /** Alto útil de una página después del encabezado negro: lo que se puede
+     *  dibujar sin que `ensureSpace` dispare un salto. */
+    const pageInner = doc.page.height - margin * 2 - 102;
+
+    /** Lo que avanza una fila "concepto → monto" (ver `amountRow`). */
+    const amountRowHeight = (label: string, indent: number, emphasis: 'normal' | 'bold' | 'muted' = 'normal') => {
+      const font = emphasis === 'bold' ? 'Helvetica-Bold' : 'Helvetica';
+      return doc.font(font).fontSize(9).heightOfString(label, { width: width - indent - 148 }) + 4;
+    };
+
+    /** Lo que avanza el rótulo de un vehículo (ver `vehicleHeader`). */
+    const vehicleHeaderHeight = (label: string) => doc.font('Helvetica-Bold').fontSize(9).heightOfString(label, { width: width - 34 }) + 11;
+
+    /** Lo que avanza una fila de subtotal (ver `totalRow`). */
+    const totalRowHeight = (label: string, padAfter = 8) => amountRowHeight(label, 18, 'bold') + padAfter;
+
+    /** Alto del bloque de un auto — rótulo, filas y "Total del auto" — para que
+     *  no quede partido entre dos páginas. `padTotal` es el `padAfter` del total. */
+    const vehicleBlockHeight = (label: string, rows: { detalle: string }[], padTotal = 10) =>
+      vehicleHeaderHeight(label) + rows.reduce((sum, row) => sum + amountRowHeight(row.detalle, 30), 0) + amountRowHeight('Total del auto', 18, 'bold') + padTotal;
+
+    /** Cuánto tiene que acompañar una barra o un título al bloque que viene
+     *  abajo: el bloque completo si entra en una página, o al menos el rótulo y
+     *  la primera fila cuando el auto tiene más gastos de los que entran. */
+    const keepWithBlock = (vehicle: { label: string; rows: { detalle: string }[] } | undefined, prefix = 0) => {
+      if (!vehicle) return 0;
+      const minBlock = vehicleHeaderHeight(vehicle.label) + (vehicle.rows[0] ? amountRowHeight(vehicle.rows[0].detalle, 30) : 0);
+      const block = vehicleBlockHeight(vehicle.label, vehicle.rows);
+      return Math.max(0, Math.min(block <= pageInner ? block : minBlock, pageInner - prefix));
+    };
+
     /** Fila "concepto → monto": el monto siempre alineado a la derecha. */
     const amountRow = (label: string, amount: number, indent: number, emphasis: 'normal' | 'bold' | 'muted' = 'normal') => {
       const font = emphasis === 'bold' ? 'Helvetica-Bold' : 'Helvetica';
@@ -579,22 +612,23 @@ async function pdfFromFleetReport(data: {
       doc.y = y + height + 4;
     };
 
-    /** Barra del bloque principal: GASTOS DE TALLERES, OTROS GASTOS, COBROS. */
-    const blockHeader = (title: string, color: string) => {
-      ensureSpace(48);
+    /** Barra del bloque principal: GASTOS DE TALLERES, OTROS GASTOS, COBROS.
+     *  `keepWith` es el alto del bloque que viene abajo: la barra no puede quedar
+     *  sola al pie de una página mientras su contenido sigue en la otra. */
+    const blockHeader = (title: string, color: string, keepWith = 0) => {
+      ensureSpace(48 + keepWith);
       const y = doc.y;
       doc.roundedRect(margin, y, width, 30, 8).fill(color);
       doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(11).text(title, margin + 12, y + 9, { width: width - 24, lineBreak: false });
       doc.y = y + 42;
     };
 
-    /** Vehículo dentro de una sección: modelo · etiqueta GPS · chapa. */
+    /** Vehículo dentro de una sección: SECCIÓN - TAG GPS - CHAPA (ver reportVehicleLabel). */
     const vehicleHeader = (label: string) => {
-      const textWidth = width - 34;
-      const height = doc.font('Helvetica-Bold').fontSize(9).heightOfString(label, { width: textWidth });
-      ensureSpace(height + 14);
-      doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(9).text(label, margin + 18, doc.y + 5, { width: textWidth });
-      doc.y += height + 11;
+      const height = vehicleHeaderHeight(label);
+      ensureSpace(height + 3);
+      doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(9).text(label, margin + 18, doc.y + 5, { width: width - 34 });
+      doc.y += height;
     };
 
     /** Subtotal de un auto o de un bloque. */
@@ -621,19 +655,35 @@ async function pdfFromFleetReport(data: {
     const sectionBanner = (name: string) => {
       ensureSpace(44);
       const y = doc.y;
-      doc.roundedRect(margin, y, width, 30, 8).fill(REPORT_COLORS.orangeLight);
-      doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(13).text(name.toUpperCase(), margin + 12, y + 8, { width: width - 24, lineBreak: false });
+      doc.roundedRect(margin, y, width, 30, 8).fill(REPORT_COLORS.navy);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(13).text(name.toUpperCase(), margin + 12, y + 8, { width: width - 24, lineBreak: false });
       doc.y = y + 40;
     };
 
-    const renderExpenseVehicles = (rows: FleetReportExpenseRow[]) => {
-      for (const vehicle of groupVehicles(rows, (row) => row.total)) {
+    /** El primer auto de una lista, para saber cuánto tiene que acompañar la barra. */
+    const firstVehicleBlock = (rows: FleetReportExpenseRow[]) => groupVehicles(rows, (row) => row.total)[0];
+
+    /** Bloques de autos de una sección. `closingHeight` es el alto de los totales
+     *  que vienen después: el último auto se lleva el cierre con él. */
+    const renderExpenseVehicles = (rows: FleetReportExpenseRow[], closingHeight = 0) => {
+      const vehicles = groupVehicles(rows, (row) => row.total);
+      vehicles.forEach((vehicle, index) => {
+        const isLast = index === vehicles.length - 1;
+        const blockHeight = vehicleBlockHeight(vehicle.label, vehicle.rows) + (isLast ? closingHeight : 0);
+        if (blockHeight <= pageInner) {
+          ensureSpace(blockHeight);
+        } else {
+          // El auto tiene más gastos de los que entran en una página: al menos
+          // el rótulo viaja con su primera fila.
+          const firstRow = vehicle.rows[0];
+          ensureSpace(vehicleHeaderHeight(vehicle.label) + (firstRow ? amountRowHeight(firstRow.detalle, 30) : 0));
+        }
         vehicleHeader(vehicle.label);
         for (const row of vehicle.rows) {
           amountRow(row.detalle, row.total, 30);
         }
         totalRow('Total del auto', vehicle.total, 10);
-      }
+      });
     };
 
     pageHeader();
@@ -641,7 +691,7 @@ async function pdfFromFleetReport(data: {
     const expenseSections = orderedSections(data.expenseRows);
     if (!expenseSections.length && !data.incomeRows.length) {
       pageHeader();
-      doc.roundedRect(margin, doc.y, width, 60, 10).fill(REPORT_COLORS.orangeLight);
+      doc.roundedRect(margin, doc.y, width, 60, 10).fill(REPORT_COLORS.blueLight);
       doc.fillColor(REPORT_COLORS.muted).font('Helvetica-Bold').fontSize(11).text('No hay datos para los filtros elegidos.', margin + 16, doc.y + 23);
       doc.end();
       return;
@@ -654,16 +704,20 @@ async function pdfFromFleetReport(data: {
       if (index > 0) doc.addPage();
       pageHeader();
       sectionBanner(section);
+      // `TOTAL GASTOS · SECCIÓN` cierra la sección: viaja con el último bloque
+      // de autos para que no arranque sola la página siguiente.
+      const sectionTotalHeight = totalRowHeight(`TOTAL GASTOS · ${section.toUpperCase()}`, 10);
       if (taller.length) {
-        blockHeader('GASTOS DE TALLERES', REPORT_COLORS.ink);
-        renderExpenseVehicles(taller);
+        blockHeader('GASTOS DE TALLERES', REPORT_COLORS.ink, keepWithBlock(firstVehicleBlock(taller), 48));
+        renderExpenseVehicles(taller, totalRowHeight('TOTAL TALLERES', 18) + (otros.length ? 0 : sectionTotalHeight));
         totalRow('TOTAL TALLERES', sumExpenses(taller), 18);
       }
       if (otros.length) {
-        blockHeader('OTROS GASTOS', REPORT_COLORS.orange);
-        renderExpenseVehicles(otros);
+        blockHeader('OTROS GASTOS', REPORT_COLORS.blue, keepWithBlock(firstVehicleBlock(otros), 48));
+        renderExpenseVehicles(otros, totalRowHeight('TOTAL OTROS GASTOS', 18) + sectionTotalHeight);
         totalRow('TOTAL OTROS GASTOS', sumExpenses(otros), 18);
       }
+      ensureSpace(sectionTotalHeight);
       totalRow(`TOTAL GASTOS · ${section.toUpperCase()}`, sumExpenses(rows), 10);
     });
 
@@ -674,16 +728,23 @@ async function pdfFromFleetReport(data: {
       sectionBanner('Cobros');
       for (const section of orderedSections(data.incomeRows)) {
         const rows = data.incomeRows.filter((row) => sectionOf(row) === section);
-        ensureSpace(34);
+        const vehicles = groupVehicles(rows, (row) => row.monto);
+        const incomeLabel = (vehicle: { label: string; rows: unknown[] }) => `${vehicle.label} · ${vehicle.rows.length} cobro${vehicle.rows.length === 1 ? '' : 's'}`;
+        const first = vehicles[0];
+        // El título de la sección no puede quedar solo al pie: se lleva su
+        // primera fila (y el subtotal, si la sección es de un solo auto).
+        ensureSpace(34 + (first ? amountRowHeight(incomeLabel(first), 20) : 0));
         const sectionY = doc.y;
         doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(10).text(section, margin + 8, sectionY, { width: width - 16, lineBreak: false });
         doc.moveTo(margin + 8, sectionY + 16).lineTo(margin + width, sectionY + 16).lineWidth(0.7).strokeColor(REPORT_COLORS.line).stroke();
         doc.y = sectionY + 24;
-        for (const vehicle of groupVehicles(rows, (row) => row.monto)) {
-          amountRow(`${vehicle.label} · ${vehicle.rows.length} cobro${vehicle.rows.length === 1 ? '' : 's'}`, vehicle.total, 20);
+        for (const vehicle of vehicles) {
+          amountRow(incomeLabel(vehicle), vehicle.total, 20);
         }
+        ensureSpace(totalRowHeight('Subtotal de la sección', 16));
         totalRow('Subtotal de la sección', sumIncome(rows), 16);
       }
+      ensureSpace(totalRowHeight('TOTAL COBROS', 10));
       totalRow('TOTAL COBROS', data.incomeTotal, 10);
     }
 
@@ -696,7 +757,7 @@ async function pdfFromFleetReport(data: {
     const cardWidth = (width - cardGap * 2) / 3;
     const summaryCards = [
       ['Cobrado', data.incomeTotal, REPORT_COLORS.green],
-      ['Gastos', data.expenseTotal, REPORT_COLORS.orange],
+      ['Gastos', data.expenseTotal, REPORT_COLORS.red],
       ['Resultado', data.resultTotal, data.resultTotal < 0 ? REPORT_COLORS.red : REPORT_COLORS.green],
     ] as const;
     const summaryY = doc.y;
@@ -737,7 +798,8 @@ async function pdfFromFleetReport(data: {
       doc.y = y + height + 2;
     };
 
-    ensureSpace(26);
+    // El encabezado de la tabla se lleva su primera fila para no quedar solo.
+    ensureSpace(26 + 22);
     const tableHeadY = doc.y;
     doc.font('Helvetica-Bold').fontSize(8).fillColor(REPORT_COLORS.muted).text('SECCIÓN', margin + 8, tableHeadY + 4, { width: labelWidth - 16, lineBreak: false });
     columns.forEach((column, index) => {
@@ -795,8 +857,8 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
   const carById = new Map(cars.map((car) => [car.id, car]));
   const sections = selSections.all(ownerId) as SectionRow[];
   const sectionById = new Map(sections.map((section) => [section.id, section.name]));
-  // El PDF quincenal se agrupa por sección y rotula cada vehículo con modelo,
-  // etiqueta GPS (en esta flota guarda el color, "Gris B") y chapa.
+  // El PDF quincenal se agrupa por sección y rotula cada vehículo con la
+  // sección, la etiqueta GPS (en esta flota guarda el color, "Gris B") y la chapa.
   const carSection = (carId: string | null) => sectionById.get(carById.get(carId ?? '')?.section_id ?? -1) ?? 'Sin sección';
   const carModel = (carId: string | null) => carById.get(carId ?? '')?.model ?? '';
   const carGpsTag = (carId: string | null) => carById.get(carId ?? '')?.gps_tag ?? '';

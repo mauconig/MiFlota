@@ -748,6 +748,13 @@ function gpsTagLabel(car: Car): string {
   return car.gpsTag.trim() || 'Sin GPS';
 }
 
+/** Rótulo del vehículo en el gráfico del resumen: Modelo - Tag GPS - Chapa.
+ *  El tag GPS es opcional: si no está cargado no deja un separador suelto. */
+function vehicleChartLabel(car: Car): string {
+  return [car.model, car.gpsTag, car.plate].map((part) => part.trim()).filter(Boolean).join(' - ');
+}
+
+
 const PTAG: Record<string, [string, string]> = {
   Cobrado: ['#eef4f0', '#2e7d5b'],
   Parcial: ['#eef1f6', '#4a6d99'],
@@ -2153,7 +2160,7 @@ export function useFleetView(
       if (st.sectionFilter !== 'todos') {
         return filteredFlota.map((x) => ({
           key: x.c.id,
-          label: x.c.plate,
+          label: vehicleChartLabel(x.c),
           sub: x.c.driver,
           ing: x.ing,
           egr: x.egr,
