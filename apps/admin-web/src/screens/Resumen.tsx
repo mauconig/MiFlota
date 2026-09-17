@@ -3,7 +3,7 @@ import { Btn } from '../components/Btn';
 import { ChipRow } from '../components/ChipRow';
 import { SearchBar } from '../components/SearchBar';
 import { SectionSelect } from '../components/SectionSelect';
-import { VehicleTable } from '../components/VehicleTable';
+import { SectionBars } from '../components/SectionBars';
 import { GastosChart } from '../components/GastosChart';
 import { AlertBanner } from '../components/AlertBanner';
 import { Screen } from '../components/Screen';
@@ -11,6 +11,11 @@ import { WarningIcon, ClockIcon } from '../icons';
 import { card, linkBtn, linkBtnHover, sectionTitle } from '../styles';
 
 export function Resumen({ v }: { v: View }) {
+  const chartTitle = v.sectionFilter === 'todos'
+    ? 'Por sección'
+    : v.sectionFilter === 'sin'
+      ? 'Sin sección'
+      : v.sectionOptions.find((section) => section.id === v.sectionFilter)?.name ?? 'Sección';
   return (
     <Screen label="Resumen" style={{ gap: 9 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 9 }}>
@@ -35,7 +40,7 @@ export function Resumen({ v }: { v: View }) {
                 Ver todo →
               </Btn>
             </div>
-            <VehicleTable cols={v.cols} rows={v.rows} variant="resumen" />
+            <SectionBars bars={v.bars} title={chartTitle} hide={v.hide} />
           </div>
         </div>
 
