@@ -1,0 +1,48 @@
+name: Deploy admin-web
+
+# Solo el panel web: se compila y se publica el build estático en la VPS, donde
+# Caddy lo sirve desde /var/www/miflota. La API se despliega aparte (docker
+# compose), así que un cambio de backend no redeploya el panel ni al revés.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/admin-web/**'
+      - 'package.json'
+      - '.github/workflows/deploy-web.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-admin-web
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build
+        # Sin lockfile a propósito: el versionado se genera en Windows y un
+        # install que lo respete no trae el binario de rolldown para linux-x64
+        # que usa Vite (npm/cli#4828). Mismo criterio que el Dockerfile.
+        run: |
+          rm -f package-lock.json
+          npm install
+          npm run build -w admin-web
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.MIFLOTA_SSH_KEY }}
+
+      - name: Publish build to the VPS
+        run: |
+          ssh-keyscan -H "${{ secrets.MIFLOTA_SSH_HOST }}" >> ~/.ssh/known_hosts
+          rsync -az --delete \
+            apps/admin-web/dist/ \
+            "${{ secrets.MIFLOTA_SSH_USER }}@${{ secrets.MIFLOTA_SSH_HOST }}:/var/www/miflota/"
