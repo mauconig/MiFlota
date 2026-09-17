@@ -193,8 +193,6 @@ export interface MovementDetailView {
   note: string;
   comprobante: { url: string; name: string; type: string } | null;
   appliedQuotas: { id: number; dateLbl: string; description: string; vehicle: string; amount: string }[];
-  items: { nombre: string; cantidad: number; costoUnitario: string; subtotal: string }[];
-  manoObra: string;
   saldoAFavor: string;
   canDelete: boolean;
   close: () => void;
@@ -319,8 +317,6 @@ export interface MovRow {
   sub: string;
   amt: string;
   amtFg: string;
-  items?: { nombre: string; cantidad: number; costoUnitario: number; subtotal: number }[];
-  manoObra?: number;
   sort?: Record<string, string | number>;
 }
 
@@ -338,8 +334,6 @@ export interface LedgerRow {
   amount: string;
   amountFg: string;
   comprobante: string;
-  items: { nombre: string; cantidad: number; costoUnitario: number; subtotal: number }[];
-  manoObra: number;
   sort?: Record<string, string | number>;
   open?: () => void;
 }
@@ -1287,8 +1281,6 @@ export function useFleetView(
     comprobante: string;
     comprobanteName: string;
     comprobanteType: string;
-    items: { nombre: string; cantidad: number; costoUnitario: number; subtotal: number }[];
-    manoObra: number;
   };
 
   const editCarFrom = (c: Car): EditCarForm => ({
@@ -1425,8 +1417,6 @@ export function useFleetView(
           comprobante: p.comprobante ? '/api/comprobantes/' + p.comprobante.id : '',
           comprobanteName: p.comprobante?.nombre || '',
           comprobanteType: p.comprobante?.tipo || '',
-          items: [],
-          manoObra: 0,
         };
       }),
     ...movs
@@ -1448,8 +1438,6 @@ export function useFleetView(
           comprobante: m.comprobante ? '/api/comprobantes/' + m.comprobante.id : '',
           comprobanteName: m.comprobante?.nombre || '',
           comprobanteType: m.comprobante?.tipo || '',
-          items: m.items || [],
-          manoObra: m.manoObra || 0,
         };
       }),
   ].sort((a, b) => +b.date - +a.date || b.id.localeCompare(a.id));
@@ -1555,8 +1543,6 @@ export function useFleetView(
       note: selected.note || '',
       comprobante: selected.comprobante ? { url: selected.comprobante, name: selected.comprobanteName || 'Comprobante', type: selected.comprobanteType } : null,
       appliedQuotas,
-      items: selected.items.map((item) => ({ nombre: item.nombre, cantidad: item.cantidad, costoUnitario: fmt(item.costoUnitario, st.hide), subtotal: fmt(item.subtotal, st.hide) })),
-      manoObra: selected.manoObra ? fmt(selected.manoObra, st.hide) : '',
       saldoAFavor: favor ? fmt(favor, st.hide) : '',
       canDelete: !!p,
       close: () => update({ movementDetailId: null }),
@@ -2476,8 +2462,6 @@ export function useFleetView(
         sub: inc ? m.vehicle + ' · ' + m.driver : m.vehicle + ' · ' + m.category,
         amt: (inc ? '+' : '−') + fmtShort(m.amount, st.hide),
         amtFg: inc ? '#2e7d5b' : '#c0553f',
-        items: m.items.length ? m.items : undefined,
-        manoObra: m.manoObra || undefined,
         sort: {
           date: m.date.getTime(),
           type: inc ? 'Ingreso' : 'Gasto',
@@ -2543,8 +2527,6 @@ export function useFleetView(
       amount: '−' + fmtShort(m.amount, st.hide),
       amountFg: COLORS.neg,
       comprobante: m.comprobante,
-      items: m.items,
-      manoObra: m.manoObra,
       sort: { date: m.date.getTime(), vehicle: m.vehicle, driver: m.driver, description: m.desc, category: m.category, amount: m.amount },
       open: () => update({ movementDetailId: m.id, quotaDetailId: null }),
     })),
@@ -2596,8 +2578,6 @@ export function useFleetView(
       amount: (m.type === 'ingreso' ? '+' : '−') + fmtShort(m.amount, st.hide),
       amountFg: m.type === 'ingreso' ? COLORS.pos : COLORS.neg,
       comprobante: m.comprobante,
-      items: m.items,
-      manoObra: m.manoObra,
     })),
     movementTotalRows: filteredRealMovements.length,
     movementPage,

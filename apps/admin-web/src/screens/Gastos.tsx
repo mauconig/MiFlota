@@ -85,7 +85,6 @@ export function Gastos({ v }: { v: View }) {
               <span style={{ width: 174, flex: 'none', fontSize: 13, fontWeight: 700, paddingTop: 7, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.driver}</span>
               <span style={{ flex: 1, minWidth: 210 }}>
                 <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#3d3a34' }}>{m.desc}</span>
-                {!!m.items.length && <span style={{ display: 'block', marginTop: 6, padding: '6px 8px', background: '#faf7f0', borderRadius: 8, fontSize: 11, color: '#6b665c' }}>{m.items.map((item, i) => <span key={i} style={{ display: 'block' }}>{item.cantidad} × {item.nombre}</span>)}{!!m.manoObra && <span style={{ display: 'block', marginTop: 2 }}>Mano de obra · registrada</span>}</span>}
                 {m.comprobante && <span style={{ display: 'inline-block', marginTop: 6, fontSize: 11, color: '#8a641c' }}>Tiene comprobante</span>}
               </span>
               <span style={{ width: 116, flex: 'none', paddingTop: 5, textAlign: 'center' }}><span style={{ display: 'inline-block', padding: '5px 9px', borderRadius: 11, background: `${CATCOLORS[m.category] || '#f4f0e8'}22`, color: CATCOLORS[m.category] || '#6b665c', fontSize: 10, fontWeight: 700 }}>{m.category}</span></span>

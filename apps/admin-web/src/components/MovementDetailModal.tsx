@@ -57,12 +57,6 @@ export function MovementDetailModal({ v }: { v: View }) {
 
           {d.comprobante && <ComprobantePreview comprobante={d.comprobante} />}
 
-          {d.category !== 'Pago' && d.category !== 'Ajuste' && <section style={{ ...cardTight, padding: 15 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Detalle del gasto</div>
-            {d.items.length ? d.items.map((item, index) => <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: '1px solid #f4efe4', fontSize: 12 }}><span style={{ flex: 1, minWidth: 0 }}><strong>{item.nombre}</strong><span style={{ display: 'block', color: '#6b665c', marginTop: 2 }}>{item.cantidad} × {item.costoUnitario}</span></span><strong>{item.subtotal}</strong></div>) : <div style={{ fontSize: 12, color: '#6b665c' }}>Gasto sin repuestos detallados.</div>}
-            {d.manoObra && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, paddingTop: 10, marginTop: 3, borderTop: '1px solid #f4efe4', fontSize: 12 }}><strong>Mano de obra</strong><strong>{d.manoObra}</strong></div>}
-          </section>}
-
           <section style={{ ...cardTight, padding: 15 }}>
             <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Aplicado a cuotas</div>
             {d.appliedQuotas.length ? d.appliedQuotas.map((q) => (

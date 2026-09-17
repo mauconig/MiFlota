@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { CarRow, MovRow, PagoRow, ReporteRow, LocationRow, GastoItemRow } from './db.js';
+import type { CarRow, MovRow, PagoRow, ReporteRow, LocationRow } from './db.js';
 import type { AssistantQueryRequest, AssistantQueryResult, AssistantQueryRow } from './assistant.js';
 import { imputar } from './cobranza.js';
 import { localDateISO } from './time.js';
@@ -194,11 +194,10 @@ export function queryFleetData(db: Database.Database, ownerId: number, r: Assist
     const reports = db.prepare('SELECT r.id,r.car_id,r.driver_id,r.driver,r.cat,r.urgencia,r.texto,r.estado,r.fecha FROM reportes_falla r JOIN cars c ON c.id=r.car_id WHERE r.owner_id=? AND c.owner_id=?').all(ownerId, ownerId) as ReporteRow[];
     for (const f of reports) if (dateAllowed(f.fecha)) add({ label: f.texto, carId: f.car_id, driver: driverName(f.driver_id, f.driver), category: f.cat, status: f.estado, date: dayOf(f.fecha), value: 1, details: { Vehículo: byId.get(f.car_id)!.plate, Chofer: driverName(f.driver_id, f.driver), Categoría: f.cat, Urgencia: f.urgencia, Estado: f.estado, Fecha: f.fecha } });
   } else {
-    const movements = db.prepare('SELECT m.id,m.car_id,m.type,m.amount,m.date,m.descripcion,m.cat,m.estado,m.driver,m.driver_id,m.mano_obra,m.comprobante_nombre FROM movs m JOIN cars c ON c.id=m.car_id WHERE m.owner_id=? AND c.owner_id=? AND m.date<=?').all(ownerId, ownerId, range.to) as MovRow[];
+    const movements = db.prepare('SELECT m.id,m.car_id,m.type,m.amount,m.date,m.descripcion,m.cat,m.estado,m.driver,m.driver_id,m.comprobante_nombre FROM movs m JOIN cars c ON c.id=m.car_id WHERE m.owner_id=? AND c.owner_id=? AND m.date<=?').all(ownerId, ownerId, range.to) as MovRow[];
     const payments = db.prepare('SELECT p.id,p.owner_id,p.car_id,p.driver,p.driver_id,p.fecha,p.monto,p.tipo,p.medio,p.nota,p.comprobante_nombre FROM pagos p LEFT JOIN cars c ON c.id=p.car_id WHERE p.owner_id=? AND (p.car_id IS NULL OR c.owner_id=?) AND p.fecha<=?').all(ownerId, ownerId, range.to) as PagoRow[];
     // Allocate against the entire account first; vehicle/date filters must not move payments to other quotas.
     const allocation = imputar(movements.filter(m => m.type === 'ingreso'), payments, m => m.driver_id ?? driverName(null, m.driver || byId.get(m.car_id)?.driver || null));
-    const items = db.prepare('SELECT i.id,i.mov_id,i.nombre,i.cantidad,i.costo_unitario,i.subtotal FROM gasto_items i JOIN movs m ON m.id=i.mov_id JOIN cars c ON c.id=m.car_id WHERE m.owner_id=? AND c.owner_id=?').all(ownerId, ownerId) as GastoItemRow[];
     for (const m of movements) {
       if (!dateAllowed(m.date)) continue;
       const income = m.type === 'ingreso';
@@ -209,7 +208,7 @@ export function queryFleetData(db: Database.Database, ownerId: number, r: Assist
       const status = income ? debt === 0 ? 'pagado' : debt < m.amount ? 'parcial' : 'pendiente' : 'registrado';
       const value = metric === 'cantidad' ? 1 : entity === 'deudas' ? debt : metric === 'ganancia' ? -m.amount : m.amount;
       add({ label: m.descripcion, carId: m.car_id, driver: driverName(m.driver_id, m.driver || byId.get(m.car_id)?.driver || null), category: m.cat || (income ? 'Cuota' : 'Sin categoría'), status, date: m.date, value,
-        details: { Fecha: m.date, Vehículo: byId.get(m.car_id)!.plate, Chofer: driverName(m.driver_id, m.driver || byId.get(m.car_id)?.driver || null), Tipo: income ? 'Cuota' : 'Gasto', Estado: status, Monto: money(m.amount), ...(income ? { 'Saldo pendiente': money(debt) } : { Repuestos: items.filter(i => i.mov_id === m.id).map(i => `${i.cantidad} × ${i.nombre}: ${money(i.subtotal)}`).join('; ') || 'Sin detalle', 'Mano de obra': money(m.mano_obra ?? 0) }), Comprobante: m.comprobante_nombre || 'Sin comprobante' } });
+        details: { Fecha: m.date, Vehículo: byId.get(m.car_id)!.plate, Chofer: driverName(m.driver_id, m.driver || byId.get(m.car_id)?.driver || null), Tipo: income ? 'Cuota' : 'Gasto', Estado: status, Monto: money(m.amount), ...(income ? { 'Saldo pendiente': money(debt) } : {}), Comprobante: m.comprobante_nombre || 'Sin comprobante' } });
     }
     for (const p of payments) {
       if (!dateAllowed(p.fecha)) continue;

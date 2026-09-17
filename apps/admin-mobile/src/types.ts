@@ -54,16 +54,6 @@ export interface Mov {
   driverId?: number | null;
   /** Adjunto del gasto. El archivo se pide por `/api/comprobantes/:id`. */
   comprobante?: { id: string; nombre: string; tipo: string };
-  manoObra?: number;
-  items?: GastoItem[];
-}
-
-export interface GastoItem {
-  id?: number;
-  nombre: string;
-  cantidad: number;
-  costoUnitario: number;
-  subtotal: number;
 }
 
 /** `pago` es plata que entró; `ajuste` cancela deuda sin caja (condonación).
@@ -185,24 +175,14 @@ export interface RegistrarForm {
   /** Solo Gasto. */
   cat: string;
   comprobante: PickedFile | null;
-  items: GastoDraft[];
-  manoObra: string;
+  /** Solo Service: lectura del odómetro al momento del service. */
+  kilometraje: string;
   /** Paso actual del asistente guiado. */
   step: RegistrarStep;
-  /** true cuando el gasto lleva repuestos; null mientras no se respondiÃ³. */
-  repuestos: boolean | null;
-  /** true cuando se quiere agregar otro repuesto. */
-  otroItem: boolean | null;
-  /** El vehÃ­culo viene fijado cuando el flujo se abre desde su ficha. */
+  /** El vehículo viene fijado cuando el flujo se abre desde su ficha. */
   lockCar: boolean;
   guardando: boolean;
   success: RegistrarSuccess | null;
-}
-
-export interface GastoDraft {
-  nombre: string;
-  cantidad: string;
-  costoUnitario: string;
 }
 
 export type FleetFilter = 'todos' | 'activo' | 'taller' | 'alerta';

@@ -28,22 +28,6 @@ export function MovementDetailSheet({ movement }: { movement: MovementDetailView
       {!!movement.note && <Info label="Detalle" value={movement.note} multiline />}
 
       {movement.comprobante && <ComprobantePreview source={movement.comprobante} />}
-
-      {!!movement.items.length && (
-        <View style={{ backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#ece4d6', borderRadius: 15, paddingHorizontal: 13 }}>
-          <Text style={{ fontSize: 14, fontWeight: '700', paddingVertical: 12 }}>Detalle del gasto</Text>
-          {movement.items.map((item, index) => (
-            <View key={`${item.nombre}-${index}`} style={{ flexDirection: 'row', gap: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#f4efe4' }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 13, fontWeight: '700' }}>{item.nombre}</Text>
-                <Text style={{ fontSize: 11, color: '#6b665c', marginTop: 2 }}>{item.cantidad} × {item.costoUnitario}</Text>
-              </View>
-              <Text style={{ fontSize: 13, fontWeight: '700' }}>{item.subtotal}</Text>
-            </View>
-          ))}
-          {!!movement.manoObra && <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 11, borderTopWidth: 1, borderTopColor: '#f4efe4' }}><Text style={{ fontSize: 13, fontWeight: '700' }}>Mano de obra</Text><Text style={{ fontSize: 13, fontWeight: '700' }}>{movement.manoObra}</Text></View>}
-        </View>
-      )}
     </BottomSheet>
   );
 }

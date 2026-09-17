@@ -192,11 +192,8 @@ export function blankRegistrarForm(tab: RegistrarTab, carId: string, driver: str
     tipo: 'pago',
     cat: '',
     comprobante: null,
-    items: [{ nombre: '', cantidad: '1', costoUnitario: '' }],
-    manoObra: '',
+    kilometraje: '',
     step: lockCar ? 1 : 0,
-    repuestos: null,
-    otroItem: null,
     lockCar,
     guardando: false,
     success: null,
@@ -352,8 +349,6 @@ export interface MovementDetailView {
   note: string;
   comprobanteName: string;
   comprobante: { uri: string; name: string; type: string; headers?: Record<string, string> } | null;
-  items: { nombre: string; cantidad: number; costoUnitario: string; subtotal: string }[];
-  manoObra: string;
   close: () => void;
 }
 
@@ -444,9 +439,6 @@ interface GastoRowView {
   amount: string;
   amountValue: number;
   open: () => void;
-  repuestos: string;
-  manoObra: string;
-  items: { nombre: string; cantidad: string; costoUnitario: string; subtotal: string }[];
   expanded: boolean;
   toggle: () => void;
 }
@@ -470,13 +462,6 @@ interface GastoChoiceView {
   pick: () => void;
 }
 
-interface ReportPreviewItem {
-  nombre: string;
-  cantidad: number;
-  costoUnitario: number;
-  subtotal: number;
-}
-
 interface ReportPreviewRow {
   id: string;
   tipo: 'Ingreso' | 'Gasto';
@@ -488,8 +473,6 @@ interface ReportPreviewRow {
   monto: number;
   medio: string;
   nota: string;
-  items: ReportPreviewItem[];
-  manoObra: number;
   open: () => void;
 }
 
@@ -804,12 +787,6 @@ export interface MobileView {
       lockCar: boolean;
       comprobante: PickedFile | null;
       setComprobante: (f: PickedFile | null) => void;
-      items: { nombre: string; cantidad: string; costoUnitario: string }[];
-      setItem: (index: number, patch: Partial<{ nombre: string; cantidad: string; costoUnitario: string }>) => void;
-      addItem: () => void;
-      removeItem: (index: number) => void;
-      manoObra: string;
-      setManoObra: (v: string) => void;
     } | null;
     service: {
       carId: string;
@@ -1597,8 +1574,6 @@ export function useMobileView(
         expanded: state.gastosExpanded[groupKey] !== false,
         toggle: () => update((s) => ({ gastosExpanded: { ...s.gastosExpanded, [groupKey]: !(s.gastosExpanded[groupKey] !== false) } })),
         rows: movements.map((m) => {
-          const items = m.items || [];
-          const repuestos = items.reduce((sum, item) => sum + item.subtotal, 0);
           const rowKey = 'mov:' + m.id;
           return {
             id: rowKey,
@@ -1609,9 +1584,6 @@ export function useMobileView(
             amount: fmtShort(m.amount),
             amountValue: m.amount,
             open: () => update({ movementDetailId: 'gasto-' + m.id }),
-            repuestos: fmt(repuestos),
-            manoObra: m.manoObra ? fmt(m.manoObra) : '',
-            items: items.map((item) => ({ nombre: item.nombre, cantidad: String(item.cantidad), costoUnitario: fmt(item.costoUnitario), subtotal: fmt(item.subtotal) })),
             expanded: !!state.gastosExpanded[rowKey],
             toggle: () => update((s) => ({ gastosExpanded: { ...s.gastosExpanded, [rowKey]: !s.gastosExpanded[rowKey] } })),
           };
@@ -1982,8 +1954,6 @@ export function useMobileView(
           note: selectedPago.nota || '',
           comprobanteName: selectedPago.comprobante?.nombre || '',
           comprobante: selectedPago.comprobante ? { uri: API_BASE + '/api/comprobantes/' + encodeURIComponent(selectedPago.comprobante.id), name: selectedPago.comprobante.nombre, type: selectedPago.comprobante.tipo, headers: getAuthHeaders() } : null,
-          items: [],
-          manoObra: '',
           close: () => update({ movementDetailId: null }),
         };
       }
@@ -2006,8 +1976,6 @@ export function useMobileView(
         note: selectedGasto.desc,
         comprobanteName: selectedGasto.comprobante?.nombre || '',
         comprobante: selectedGasto.comprobante ? { uri: API_BASE + '/api/comprobantes/' + encodeURIComponent(selectedGasto.comprobante.id), name: selectedGasto.comprobante.nombre, type: selectedGasto.comprobante.tipo, headers: getAuthHeaders() } : null,
-        items: (selectedGasto.items || []).map((item) => ({ nombre: item.nombre, cantidad: item.cantidad, costoUnitario: fmt(item.costoUnitario), subtotal: fmt(item.subtotal) })),
-        manoObra: selectedGasto.manoObra ? fmt(selectedGasto.manoObra) : '',
         close: () => update({ movementDetailId: null }),
       };
     })();
@@ -2141,8 +2109,6 @@ export function useMobileView(
         note: selectedPago.nota || '',
         comprobanteName: selectedPago.comprobante?.nombre || '',
         comprobante: selectedPago.comprobante ? { uri: API_BASE + '/api/comprobantes/' + encodeURIComponent(selectedPago.comprobante.id), name: selectedPago.comprobante.nombre, type: selectedPago.comprobante.tipo, headers: getAuthHeaders() } : null,
-        items: [],
-        manoObra: '',
         close: () => update({ movementDetailId: null }),
       };
     } else if (selectedGasto) {
@@ -2165,8 +2131,6 @@ export function useMobileView(
         note: selectedGasto.desc,
         comprobanteName: selectedGasto.comprobante?.nombre || '',
         comprobante: selectedGasto.comprobante ? { uri: API_BASE + '/api/comprobantes/' + encodeURIComponent(selectedGasto.comprobante.id), name: selectedGasto.comprobante.nombre, type: selectedGasto.comprobante.tipo, headers: getAuthHeaders() } : null,
-        items: (selectedGasto.items || []).map((item) => ({ nombre: item.nombre, cantidad: item.cantidad, costoUnitario: fmt(item.costoUnitario), subtotal: fmt(item.subtotal) })),
-        manoObra: selectedGasto.manoObra ? fmt(selectedGasto.manoObra) : '',
         close: () => update({ movementDetailId: null }),
       };
     }
@@ -2188,13 +2152,7 @@ export function useMobileView(
   let registrarView: MobileView['registrar'] = null;
   if (f) {
     const setF = (patch: Partial<typeof f>) => update((s) => ({ registrar: s.registrar && { ...s.registrar, ...patch } }));
-    const gastoItems = f.items
-      .map((item) => ({ nombre: item.nombre.trim(), cantidad: numFromInput(item.cantidad), costoUnitario: numFromInput(item.costoUnitario) }))
-      .filter((item) => item.nombre && item.cantidad > 0 && item.costoUnitario > 0)
-      .map((item) => ({ ...item, subtotal: item.cantidad * item.costoUnitario }));
-    const manoObraNum = numFromInput(f.manoObra);
-    const gastoStructuredTotal = gastoItems.reduce((sum, item) => sum + item.subtotal, 0) + manoObraNum;
-    const amountNum = f.serviceMode ? parseInt(f.digits || '0', 10) : f.tab === 'gasto' ? gastoStructuredTotal || parseInt(f.digits || '0', 10) : parseInt(f.digits || '0', 10);
+    const amountNum = parseInt(f.digits || '0', 10);
     const press = (k: string) =>
       setF({
         digits: k === 'del' ? f.digits.slice(0, -1) : k === '000' ? (f.digits ? (f.digits + '000').slice(0, 10) : f.digits) : f.digits.length < 10 ? (f.digits === '' && k === '0' ? '' : f.digits + k) : f.digits,
@@ -2241,12 +2199,6 @@ export function useMobileView(
         lockCar: f.lockCar,
         comprobante: f.comprobante,
         setComprobante: (file) => setF({ comprobante: file }),
-        items: f.items,
-        setItem: (index, patch) => setF({ items: f.items.map((item, i) => (i === index ? { ...item, ...patch } : item)) }),
-        addItem: () => setF({ items: [...f.items, { nombre: '', cantidad: '1', costoUnitario: '' }] }),
-        removeItem: (index) => setF({ items: f.items.length > 1 ? f.items.filter((_, i) => i !== index) : f.items }),
-        manoObra: f.manoObra,
-        setManoObra: (v) => setF({ manoObra: miles(v) }),
       };
     }
 
@@ -2257,8 +2209,8 @@ export function useMobileView(
         setCarId: (v) => setF({ carId: v }),
         selCars: active.map((c) => ({ id: c.id, label: c.plate + ' · ' + c.driver })),
         lockCar: f.lockCar,
-        kilometraje: f.manoObra,
-        setKilometraje: (v) => setF({ manoObra: v.replace(/\D/g, '').slice(0, 10) }),
+        kilometraje: f.kilometraje,
+        setKilometraje: (v) => setF({ kilometraje: v.replace(/\D/g, '').slice(0, 10) }),
         tieneCosto: amountNum > 0,
         comprobante: f.comprobante,
         setComprobante: (file) => setF({ comprobante: file }),
@@ -2281,7 +2233,7 @@ export function useMobileView(
 
     const legacySubmit = () => {
       if (f.guardando) return;
-      if (!amountNum) return toast(f.tab === 'cobro' ? 'Ingresá cuánto pagó' : 'Agregá repuestos o mano de obra');
+      if (!amountNum) return toast(f.tab === 'cobro' ? 'Ingresá cuánto pagó' : 'Ingresá cuánto gastaste');
       if (f.fecha > isoLocal(TODAY)) return toast('La fecha no puede ser futura');
       if (f.tab === 'cobro') {
         if (!f.driver) return toast('Elegí de qué chofer es el pago');
@@ -2310,7 +2262,7 @@ export function useMobileView(
         setF({ guardando: true });
         const plate = carDe.get(f.carId)?.plate ?? '';
         persist
-          .addEgreso(f.carId, { razon: f.nota.trim(), monto: amountNum, cat: f.cat, comprobante: f.comprobante, items: gastoItems, manoObra: manoObraNum })
+          .addEgreso(f.carId, { razon: f.nota.trim(), monto: amountNum, cat: f.cat, comprobante: f.comprobante })
           .then(() => {
             toast('Gasto registrado · ' + plate + ' · ' + fmt(amountNum));
             back();
@@ -2355,11 +2307,11 @@ export function useMobileView(
         if (!f.carId) return toast('Elegí a qué auto corresponde');
         if (!f.nota.trim()) return toast('Contá qué service se hizo');
         if (f.fecha > isoLocal(TODAY)) return toast('La fecha no puede ser futura');
-        const mileage = numFromInput(f.manoObra);
+        const mileage = numFromInput(f.kilometraje);
         const plate = carDe.get(f.carId)?.plate ?? '';
         setF({ guardando: true });
         const saveExpense = amountNum > 0
-          ? persist.addEgreso(f.carId, { razon: f.nota.trim(), monto: amountNum, cat: 'Service', comprobante: f.comprobante, items: [], manoObra: amountNum })
+          ? persist.addEgreso(f.carId, { razon: f.nota.trim(), monto: amountNum, cat: 'Service', comprobante: f.comprobante })
           : Promise.resolve();
         saveExpense
           .then(() => {
@@ -2393,12 +2345,9 @@ export function useMobileView(
         return;
       }
       const plate = carDe.get(f.carId)?.plate ?? '';
-      const simpleItems = f.cat === 'Repuestos' && f.nota.trim()
-        ? [{ nombre: f.nota.trim(), cantidad: 1, costoUnitario: amountNum, subtotal: amountNum }]
-        : [];
       const descripcion = f.nota.trim() || f.cat;
       persist
-        .addEgreso(f.carId, { razon: descripcion, monto: amountNum, cat: f.cat, comprobante: f.comprobante, items: simpleItems, manoObra: simpleItems.length ? 0 : undefined })
+        .addEgreso(f.carId, { razon: descripcion, monto: amountNum, cat: f.cat, comprobante: f.comprobante })
         .then(() => update((s) => ({ registrar: s.registrar && { ...s.registrar, guardando: false, success: { tab: 'gasto', title: 'Egreso registrado', detail: plate + ' · ' + descripcion, amount: fmt(amountNum) } } })))
         .catch((e: Error) => {
           setF({ guardando: false });
@@ -2458,7 +2407,7 @@ export function useMobileView(
       again,
       amountDisplay: amountNum ? fmt(amountNum) : '₲ 0',
       amountColor: amountNum ? (f.tab === 'cobro' ? COLORS.pos : COLORS.neg) : '#b3aa99',
-      amountHint: amountNum ? (f.tab === 'cobro' ? 'Cobro al chofer' : f.serviceMode ? 'Costo del service' : 'Repuestos + mano de obra') : f.tab === 'gasto' ? 'Agregá el detalle del gasto' : 'Usá el teclado para escribir el monto',
+      amountHint: amountNum ? (f.tab === 'cobro' ? 'Cobro al chofer' : f.serviceMode ? 'Costo del service' : 'Total del gasto') : f.tab === 'gasto' ? 'Agregá el detalle del gasto' : 'Usá el teclado para escribir el monto',
       keys,
       fecha: f.fecha,
       setFecha: (iso) => setF({ fecha: iso }),
@@ -2534,8 +2483,6 @@ export function useMobileView(
       monto: pago.monto,
       medio: pago.medio || 'Sin especificar',
       nota: pago.nota || '',
-      items: [],
-      manoObra: 0,
       open: () => update({ movementDetailId: 'pago-' + pago.id }),
     })),
     ...reportExpenses.map((mov) => ({
@@ -2546,11 +2493,9 @@ export function useMobileView(
       chofer: cars.find((car) => car.id === mov.carId)?.driver ?? 'Sin chofer',
       categoria: mov.cat || 'Otros',
       detalle: mov.desc,
-      monto: mov.items?.length ? mov.items.reduce((sum, item) => sum + item.subtotal, 0) + (mov.manoObra ?? 0) : mov.amount,
+      monto: mov.amount,
       medio: '',
       nota: '',
-      items: (mov.items ?? []).map((item) => ({ nombre: item.nombre, cantidad: item.cantidad, costoUnitario: item.costoUnitario, subtotal: item.subtotal })),
-      manoObra: mov.manoObra ?? 0,
       open: () => update({ movementDetailId: 'gasto-' + mov.id }),
     })),
   ];

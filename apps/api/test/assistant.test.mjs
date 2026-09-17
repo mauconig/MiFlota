@@ -26,8 +26,7 @@ db.exec(`
  (2,1,'b','ingreso',100,'2026-09-01','Cuota actual','Oscar Ledezma',1),
  (3,1,'b','egreso',40,'2026-09-02','Cambio de aceite',NULL,NULL),
  (4,2,'private','ingreso',999999,'2026-09-01','SECRET', 'Otro Propietario',4);
- UPDATE movs SET cat='Taller',mano_obra=20 WHERE id=3;
- INSERT INTO gasto_items(mov_id,nombre,cantidad,costo_unitario,subtotal) VALUES (3,'Aceite',1,20,20);
+ UPDATE movs SET cat='Taller' WHERE id=3;
  INSERT INTO pagos(owner_id,car_id,driver,driver_id,fecha,monto,tipo) VALUES
  (1,'b','Oscar Ledezma',1,'2026-09-01',100,'pago'),
  (1,'b','Oscar Ledezma',1,'2026-09-02',20,'pago'),
@@ -83,8 +82,7 @@ test('cash, adjustments, billed amount, expenses and net are distinct', () => {
  const expense=query({entity:'gastos',category:'Taller',driver:'Oscar Ledezma'});
  const expenseFromNaturalPhrase=query({entity:'gastos',category:'gastos de taller',driver:'Oscar Ledezma'});
  assert.equal(expenseFromNaturalPhrase.total,expense.total);
- assert.match(expense.rows[0].details.Repuestos,/Aceite/);
- assert.equal(expense.rows[0].details['Mano de obra'],'Gs. 20');
+ assert.equal(expense.rows[0].details.Monto,'Gs. 40');
 });
 test('complete totals before pagination and grouping by model', () => {
  const q=queryFleetData(db,3,{entity:'vehiculos',limit:10,offset:10},'2026-09-08');

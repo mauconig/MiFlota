@@ -71,16 +71,6 @@ export interface Mov {
   driverId?: number | null;
   /** Adjunto del gasto. El archivo se pide por `/api/comprobantes/:id`. */
   comprobante?: { id: string; nombre: string; tipo: string };
-  manoObra?: number;
-  items?: GastoItem[];
-}
-
-export interface GastoItem {
-  id?: number;
-  nombre: string;
-  cantidad: number;
-  costoUnitario: number;
-  subtotal: number;
 }
 
 /** `pago` es plata que entró; `ajuste` cancela deuda sin caja (condonación).

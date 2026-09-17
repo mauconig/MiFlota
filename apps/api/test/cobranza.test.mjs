@@ -5,7 +5,7 @@ import { imputar } from '../dist/cobranza.js';
 const cargo = (id, driverId, date, amount) => ({
   id, car_id: `c${driverId}`, type: 'ingreso', amount, date, descripcion: '', cat: null,
   estado: 'pendiente', driver: `Chofer ${driverId}`, driver_id: driverId,
-  comprobante: null, comprobante_nombre: null, comprobante_tipo: null, mano_obra: 0,
+  comprobante: null, comprobante_nombre: null, comprobante_tipo: null,
 });
 
 const pago = (id, driverId, fecha, monto) => ({

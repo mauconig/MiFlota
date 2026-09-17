@@ -7,7 +7,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { CarRow, GastoItemRow, LocationHistoryRow, LocationRow, MovRow, PagoRow, ReporteRow } from './db.js';
+import type { CarRow, LocationHistoryRow, LocationRow, MovRow, PagoRow, ReporteRow } from './db.js';
 import { DB_PATH, carToJson, ensureDriver, locationHistoryToJson, locationToJson, movToJson, openDb, pagoToJson, reporteToJson } from './db.js';
 import { borrarComprobante, canonicalizarComprobanteId, ComprobanteInvalidoError, COMPROBANTES_STORAGE, guardarComprobante, leerComprobante, type ComprobanteInput } from './comprobantes.js';
 import {
@@ -283,7 +283,6 @@ const selCar = db.prepare(`
     LEFT JOIN drivers d ON d.id = c.driver_id AND d.owner_id = c.owner_id
    WHERE c.id = ? AND c.owner_id = ?
 `);
-const selItems = db.prepare('SELECT * FROM gasto_items WHERE mov_id = ? ORDER BY id');
 const selLocations = db.prepare(`
   SELECT l.*
     FROM driver_locations l
@@ -431,8 +430,6 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
   });
   const rows = movements.map((mov) => {
     const car = carById.get(mov.car_id);
-    const items = selItems.all(mov.id) as GastoItemRow[];
-    const repuestos = items.reduce((sum, item) => sum + item.subtotal, 0);
     return {
       fecha: mov.date,
       vehiculo: car?.plate ?? 'Vehículo eliminado',
@@ -441,11 +438,7 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
       gpsTag: car?.gps_tag ?? '',
       categoria: mov.cat ?? 'Otro',
       detalle: mov.descripcion,
-      repuestos,
-      manoObra: mov.mano_obra ?? 0,
-      total: items.length ? repuestos + (mov.mano_obra ?? 0) : mov.amount,
-      items: items.map((item) => `${item.cantidad} x ${item.nombre} (${reportMoney(item.costo_unitario)})`).join('; '),
-      itemRows: items,
+      total: mov.amount,
     };
   });
   const periodLabel = from ? `${from} a ${to}` : `Hasta ${to}`;
@@ -473,9 +466,6 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
         gpsTag: row.gpsTag,
         categoria: row.categoria,
         detalle: row.detalle,
-        items: row.itemRows,
-        repuestos: row.repuestos,
-        manoObra: row.manoObra,
         total: row.total,
       })),
       incomeTotal: 0,
@@ -517,9 +507,6 @@ interface FleetReportExpenseRow {
   gpsTag: string;
   categoria: string;
   detalle: string;
-  items: GastoItemRow[];
-  repuestos: number;
-  manoObra: number;
   total: number;
 }
 
@@ -644,8 +631,6 @@ async function pdfFromFleetReport(data: {
         vehicleHeader(vehicle.label);
         for (const row of vehicle.rows) {
           amountRow(row.detalle, row.total, 30);
-          for (const item of row.items) amountRow(`${item.cantidad} × ${item.nombre}`, item.subtotal, 42, 'muted');
-          if (row.manoObra > 0) amountRow('Mano de obra', row.manoObra, 42, 'muted');
         }
         totalRow('Total del auto', vehicle.total, 10);
       }
@@ -835,10 +820,7 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
       return matchesSearch(mov.descripcion, mov.cat || 'Otros', car?.plate, car?.model, car?.driver);
     })
     .map((mov) => {
-      const items = selItems.all(mov.id) as GastoItemRow[];
-      const repuestos = items.reduce((sum, item) => sum + item.subtotal, 0);
-      const manoObra = mov.mano_obra ?? 0;
-      return { fecha: mov.date, vehiculo: carById.get(mov.car_id)?.plate ?? 'Vehículo eliminado', seccion: carSection(mov.car_id), modelo: carModel(mov.car_id), gpsTag: carGpsTag(mov.car_id), categoria: mov.cat || 'Otros', detalle: mov.descripcion, items, repuestos, manoObra, total: items.length ? repuestos + manoObra : mov.amount };
+      return { fecha: mov.date, vehiculo: carById.get(mov.car_id)?.plate ?? 'Vehículo eliminado', seccion: carSection(mov.car_id), modelo: carModel(mov.car_id), gpsTag: carGpsTag(mov.car_id), categoria: mov.cat || 'Otros', detalle: mov.descripcion, total: mov.amount };
     });
 
   const counts = { ingresos: incomeRows.length, gastos: expenseRows.length, total: incomeRows.length + expenseRows.length };
@@ -977,7 +959,7 @@ app.get('/api/state', async (req) => {
   return {
     sections: selSections.all(u.id) as SectionRow[],
     cars: (selCars.all(u.id) as CarRow[]).map(carToJson),
-    movs: (selMovs.all(u.id) as MovRow[]).map((m) => movToJson(m, selItems.all(m.id) as GastoItemRow[])),
+    movs: (selMovs.all(u.id) as MovRow[]).map((m) => movToJson(m)),
     pagos: (selPagos.all(u.id) as PagoRow[]).map(pagoToJson),
     reportes: (selReportes.all(u.id) as ReporteRow[]).map(reporteToJson),
   };
@@ -1690,33 +1672,6 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
 /** Categorías válidas para un gasto suelto. Mismo set que `CATS` en el cliente. */
 const CATS_EGRESO = new Set(['Repuestos', 'Service', 'Taller', 'Combustible', 'Seguro', 'Multas', 'Documentación', 'Otros']);
 
-interface GastoItemInput {
-  nombre?: unknown;
-  cantidad?: unknown;
-  costoUnitario?: unknown;
-}
-
-function normalizarGastoItems(raw: string): { nombre: string; cantidad: number; costoUnitario: number; subtotal: number }[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw || '[]');
-  } catch {
-    throw new Error('El detalle de repuestos no es válido');
-  }
-  if (!Array.isArray(parsed) || parsed.length > 50) throw new Error('El gasto puede tener hasta 50 ítems');
-  return parsed.map((item: GastoItemInput) => {
-    const nombre = String(item?.nombre ?? '').trim().slice(0, 120);
-    const cantidad = Number(item?.cantidad);
-    const costoUnitario = Number(item?.costoUnitario);
-    if (!nombre || !Number.isFinite(cantidad) || cantidad <= 0 || cantidad > 1_000_000 || !Number.isInteger(costoUnitario) || costoUnitario <= 0 || costoUnitario > 1_000_000_000) {
-      throw new Error('Cada ítem necesita nombre, cantidad y costo unitario válidos');
-    }
-    const subtotal = Math.round(cantidad * costoUnitario);
-    if (!Number.isInteger(subtotal) || subtotal <= 0 || subtotal > 1_000_000_000) throw new Error('El subtotal de un ítem no es válido');
-    return { nombre, cantidad, costoUnitario, subtotal };
-  });
-}
-
 /** Gasto genérico con comprobante opcional, sin efecto sobre el estado del auto:
  *  a diferencia de `/taller`, esta ruta no saca al vehículo de circulación —
  *  eso sigue siendo una decisión aparte, tomada en la ficha del auto. */
@@ -1728,8 +1683,6 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
   let razon = '';
   let monto = 0;
   let cat = '';
-  let itemsRaw = '[]';
-  let manoObra = 0;
   let archivoPendiente: ComprobantePendiente | null = null;
 
   try {
@@ -1738,8 +1691,8 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
         if (parte.fieldname === 'razon') razon = String(parte.value).trim().slice(0, 120);
         if (parte.fieldname === 'monto') monto = Number(String(parte.value).replace(/\D/g, '')) || 0;
         if (parte.fieldname === 'cat') cat = String(parte.value);
-        if (parte.fieldname === 'items') itemsRaw = String(parte.value);
-        if (parte.fieldname === 'manoObra') manoObra = Number(String(parte.value).replace(/\D/g, '')) || 0;
+        // `items` y `manoObra` quedaron fuera del modelo: si un cliente viejo
+        // todavía los manda, se ignoran.
         continue;
       }
       if (parte.fieldname !== 'comprobante') {
@@ -1763,17 +1716,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
 
   if (!razon) return reply.code(400).send({ error: 'Indicá de qué es el gasto' });
   if (!CATS_EGRESO.has(cat)) return reply.code(400).send({ error: 'Elegí una categoría válida' });
-  if (!Number.isInteger(manoObra) || manoObra < 0 || manoObra > 1_000_000_000) return reply.code(400).send({ error: 'La mano de obra no es válida' });
-  let items: { nombre: string; cantidad: number; costoUnitario: number; subtotal: number }[];
-  try {
-    items = normalizarGastoItems(itemsRaw);
-  } catch (e) {
-    return reply.code(400).send({ error: e instanceof Error ? e.message : 'Detalle de gasto inválido' });
-  }
-  const detalleTotal = items.reduce((sum, item) => sum + item.subtotal, 0) + manoObra;
-  const total = items.length || manoObra > 0 ? detalleTotal : monto;
-  if (monto > 0 && (items.length || manoObra > 0) && monto !== detalleTotal) return reply.code(400).send({ error: 'El total no coincide con los ítems y la mano de obra' });
-  if (total <= 0 || total > 1_000_000_000) return reply.code(400).send({ error: 'Indicá cuánto se gastó' });
+  if (monto <= 0 || monto > 1_000_000_000) return reply.code(400).send({ error: 'Indicá cuánto se gastó' });
   const guardado = await guardarComprobanteParaRuta(archivoPendiente, reply);
   if (!guardado.ok) return;
   const archivo = guardado.archivo;
@@ -1781,25 +1724,22 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
   let info;
   try {
     info = db.transaction(() => {
-    const created = db
+    return db
       .prepare(
-        `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, mano_obra, comprobante, comprobante_nombre, comprobante_tipo)
-         VALUES (?, ?, 'egreso', ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+        `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
+         VALUES (?, ?, 'egreso', ?, ?, ?, ?, NULL, ?, ?, ?)`,
       )
-      .run(u.id, car.id, total, hoy, razon, cat, manoObra, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
-    const insertItem = db.prepare('INSERT INTO gasto_items (mov_id, nombre, cantidad, costo_unitario, subtotal) VALUES (?, ?, ?, ?, ?)');
-    for (const item of items) insertItem.run(created.lastInsertRowid, item.nombre, item.cantidad, item.costoUnitario, item.subtotal);
-    return created;
+      .run(u.id, car.id, monto, hoy, razon, cat, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
     })();
   } catch (error) {
     if (archivo) await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
     throw error;
   }
 
-  req.log.info({ car: car.plate, cat, monto: total, items: items.length, comprobante: !!archivo }, 'gasto registrado');
+  req.log.info({ car: car.plate, cat, monto, comprobante: !!archivo }, 'gasto registrado');
 
   const mov = db.prepare('SELECT * FROM movs WHERE id = ?').get(info.lastInsertRowid) as MovRow;
-  return reply.code(201).send({ mov: movToJson(mov, selItems.all(mov.id) as GastoItemRow[]) });
+  return reply.code(201).send({ mov: movToJson(mov) });
 });
 
 /** Registra un service y, si tuvo costo, su gasto asociado en una sola
@@ -1874,8 +1814,8 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/service', async (req, reply)
       if (costo === undefined || costo === 0) return null;
       return db
         .prepare(
-          `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, mano_obra, comprobante, comprobante_nombre, comprobante_tipo)
-           VALUES (?, ?, 'egreso', ?, ?, ?, 'Service', NULL, 0, ?, ?, ?)`,
+          `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
+           VALUES (?, ?, 'egreso', ?, ?, ?, 'Service', NULL, ?, ?, ?)`,
         )
         .run(u.id, car.id, costo, fecha, descripcion, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
     })();
@@ -1883,7 +1823,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/service', async (req, reply)
     const actualizado = db.prepare('SELECT * FROM cars WHERE id = ? AND owner_id = ?').get(car.id, u.id) as CarRow;
     const mov = info ? (db.prepare('SELECT * FROM movs WHERE id = ?').get(info.lastInsertRowid) as MovRow) : undefined;
     req.log.info({ car: car.plate, costo: costo ?? 0, comprobante: !!archivo }, 'service registrado');
-    return reply.code(201).send({ car: carToJson(actualizado), ...(mov ? { mov: movToJson(mov, []) } : {}) });
+    return reply.code(201).send({ car: carToJson(actualizado), ...(mov ? { mov: movToJson(mov) } : {}) });
   } catch (error) {
     if (archivo) await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
     throw error;

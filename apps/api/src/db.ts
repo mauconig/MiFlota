@@ -62,17 +62,8 @@ export interface MovRow {
   /** Nombre original, solo para mostrar y para la descarga. */
   comprobante_nombre: string | null;
   comprobante_tipo: string | null;
-  mano_obra: number;
 }
 
-export interface GastoItemRow {
-  id: number;
-  mov_id: number;
-  nombre: string;
-  cantidad: number;
-  costo_unitario: number;
-  subtotal: number;
-}
 
 /**
  * Un asiento a favor del chofer. No se ata a una cuota concreta: se imputa a lo
@@ -216,19 +207,9 @@ export function openDb() {
       estado      TEXT CHECK (estado IN ('pagado','pendiente','parcial')),
       driver      TEXT,
       driver_id   INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
-      mano_obra   INTEGER NOT NULL DEFAULT 0,
       comprobante        TEXT,
       comprobante_nombre TEXT,
       comprobante_tipo   TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS gasto_items (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      mov_id          INTEGER NOT NULL REFERENCES movs(id) ON DELETE CASCADE,
-      nombre          TEXT NOT NULL CHECK (length(nombre) > 0 AND length(nombre) <= 120),
-      cantidad        REAL NOT NULL CHECK (cantidad > 0),
-      costo_unitario  INTEGER NOT NULL CHECK (costo_unitario > 0),
-      subtotal        INTEGER NOT NULL CHECK (subtotal > 0)
     );
 
     CREATE TABLE IF NOT EXISTS pagos (
@@ -315,7 +296,6 @@ export function openDb() {
 
     CREATE INDEX IF NOT EXISTS idx_movs_car       ON movs(car_id);
     CREATE INDEX IF NOT EXISTS idx_movs_date      ON movs(date);
-    CREATE INDEX IF NOT EXISTS idx_gasto_items_mov ON gasto_items(mov_id);
     CREATE INDEX IF NOT EXISTS idx_pagos_owner    ON pagos(owner_id);
     CREATE INDEX IF NOT EXISTS idx_pagos_drv      ON pagos(driver);
     CREATE INDEX IF NOT EXISTS idx_reportes_owner ON reportes_falla(owner_id);
@@ -410,17 +390,12 @@ function migrarOwner(db: Database.Database) {
     `);
   }
   if (!cols('cars').includes('seguro_nombre')) db.exec("ALTER TABLE cars ADD COLUMN seguro_nombre TEXT NOT NULL DEFAULT ''");
-  if (!cols('movs').includes('mano_obra')) db.exec('ALTER TABLE movs ADD COLUMN mano_obra INTEGER NOT NULL DEFAULT 0');
+  // El gasto es un monto único: se fueron los repuestos por ítem y la mano de
+  // obra. Antes de dropear se comprobó contra la base real que `movs.amount` ya
+  // era el total (ítems + mano de obra) en todas las filas.
+  db.exec('DROP TABLE IF EXISTS gasto_items');
+  if (cols('movs').includes('mano_obra')) db.exec('ALTER TABLE movs DROP COLUMN mano_obra');
   db.exec(`
-    CREATE TABLE IF NOT EXISTS gasto_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      mov_id INTEGER NOT NULL REFERENCES movs(id) ON DELETE CASCADE,
-      nombre TEXT NOT NULL CHECK (length(nombre) > 0 AND length(nombre) <= 120),
-      cantidad REAL NOT NULL CHECK (cantidad > 0),
-      costo_unitario INTEGER NOT NULL CHECK (costo_unitario > 0),
-      subtotal INTEGER NOT NULL CHECK (subtotal > 0)
-    );
-    CREATE INDEX IF NOT EXISTS idx_gasto_items_mov ON gasto_items(mov_id);
     CREATE TABLE IF NOT EXISTS kilometraje_alertas (
       owner_id INTEGER NOT NULL,
       car_id TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
@@ -716,7 +691,7 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
     for (const m of movs) {
       const nombre = m.driver ?? 'Sin chofer';
       const did = m.driver ? driverId(nombre) : null;
-      const movInfo = insMov.run({
+      insMov.run({
         owner_id: ownerId,
         car_id: idDe(m.carId),
         type: m.type,
@@ -728,9 +703,6 @@ export function sembrarFlota(db: Database.Database, ownerId: number): { cars: nu
         driver: m.driver ?? null,
         driver_id: did,
       });
-      if (m.type === 'egreso') {
-        db.prepare('INSERT INTO gasto_items (mov_id, nombre, cantidad, costo_unitario, subtotal) VALUES (?, ?, 1, ?, ?)').run(movInfo.lastInsertRowid, m.desc, m.amount, m.amount);
-      }
       if (m.cobrado) {
         insPago.run({
           owner_id: ownerId,
@@ -772,7 +744,7 @@ export function carToJson(r: CarRow) {
   };
 }
 
-export function movToJson(r: MovRow, items: GastoItemRow[] = []) {
+export function movToJson(r: MovRow) {
   return {
     id: r.id,
     carId: r.car_id,
@@ -784,7 +756,6 @@ export function movToJson(r: MovRow, items: GastoItemRow[] = []) {
     ...(r.estado ? { estado: r.estado } : {}),
     ...(r.driver ? { driver: r.driver } : {}),
     ...(r.driver_id != null ? { driverId: r.driver_id } : {}),
-    ...(r.type === 'egreso' ? { manoObra: r.mano_obra ?? 0, items: items.map((item) => ({ id: item.id, nombre: item.nombre, cantidad: item.cantidad, costoUnitario: item.costo_unitario, subtotal: item.subtotal })) } : {}),
     // El cliente nunca ve la ruta del archivo, solo si hay uno y cómo se llama.
     ...(r.comprobante ? { comprobante: { id: r.comprobante, nombre: r.comprobante_nombre ?? 'comprobante', tipo: r.comprobante_tipo ?? '' } } : {}),
   };

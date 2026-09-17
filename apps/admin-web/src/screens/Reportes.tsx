@@ -6,7 +6,6 @@ import { ChipRow } from '../components/ChipRow';
 import { SearchBar } from '../components/SearchBar';
 import { Screen, ScrollArea, Vacio } from '../components/Screen';
 import { card, sectionTitle } from '../styles';
-import { fmtShort } from '../format';
 import { SortableHeader, compareSortableRows, type SortState } from '../components/SortableHeader';
 
 const movementHeader: CSSProperties = {
@@ -55,7 +54,6 @@ export function Reportes({ v }: { v: View }) {
               <span style={{ width: 34, height: 34, borderRadius: 11, background: m.iconBg, color: m.iconFg, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 15, fontWeight: 700 }}>{m.sign}</span>
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>{m.desc}</span>
-                {!!m.items?.length && <span style={{ display: 'block', marginTop: 7, padding: '7px 9px', background: '#faf7f0', borderRadius: 9, fontSize: 11, color: '#6b665c' }}>{m.items.map((item, j) => <span key={j} style={{ display: 'block' }}>{item.cantidad} × {item.nombre} · {fmtShort(item.subtotal)}</span>)}{!!m.manoObra && <span style={{ display: 'block', marginTop: 3, fontWeight: 600 }}>Mano de obra · {fmtShort(m.manoObra)}</span>}</span>}
               </span>
               <span style={{ width: 220, flex: 'none', minWidth: 0, fontSize: 11, color: '#6b665c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.sub}</span>
               <span style={{ width: 96, flex: 'none', textAlign: 'right', fontSize: 13, fontWeight: 700, color: m.amtFg }}>{m.amt}</span>

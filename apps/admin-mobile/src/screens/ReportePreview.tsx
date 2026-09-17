@@ -5,7 +5,6 @@ const PAPER = '#fffdf8';
 const BORDER = '#ece4d6';
 const INK = '#16150f';
 const MUTED = '#6b665c';
-const SOFT = '#f4f0e8';
 
 function previewMoney(value: number) {
   return `Gs. ${new Intl.NumberFormat('es-PY').format(Math.round(value))}`;
@@ -40,11 +39,6 @@ export function ReportePreview({ v }: { v: MobileView }) {
               <Text style={{ color: INK, fontSize: 14, fontWeight: '700' }}>{row.detalle}</Text>
               <Text style={{ color: MUTED, fontSize: 12 }}>{row.tipo === 'Ingreso' ? `Chofer: ${row.chofer} · Medio: ${row.medio}` : `Categoría: ${row.categoria}`}</Text>
               {!!row.nota && <Text style={{ color: MUTED, fontSize: 12 }}>Nota: {row.nota}</Text>}
-              {!!row.items.length && <View style={{ backgroundColor: SOFT, borderRadius: 10, padding: 9, gap: 3 }}>
-                <Text style={{ color: MUTED, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' }}>Repuestos</Text>
-                {row.items.map((item, index) => <Text key={`${row.id}-item-${index}`} style={{ color: INK, fontSize: 11 }}>{item.cantidad} x {item.nombre} · {previewMoney(item.costoUnitario)} c/u · {previewMoney(item.subtotal)}</Text>)}
-              </View>}
-              {!!row.manoObra && <Text style={{ color: MUTED, fontSize: 12 }}>Mano de obra: {previewMoney(row.manoObra)}</Text>}
             </Pressable>
           ))}
         </ScrollView>

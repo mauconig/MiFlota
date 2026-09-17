@@ -263,8 +263,6 @@ export interface NuevoEgresoPayload {
   monto: number;
   cat: string;
   comprobante: PickedFile | null;
-  items?: { nombre: string; cantidad: number; costoUnitario: number; subtotal: number }[];
-  manoObra?: number;
 }
 
 export interface AssistantHistoryItem {
@@ -541,8 +539,6 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     fd.append('razon', datos.razon);
     fd.append('monto', String(datos.monto));
     fd.append('cat', datos.cat);
-    fd.append('manoObra', String(datos.manoObra ?? 0));
-    fd.append('items', JSON.stringify(datos.items ?? []));
     // React Native no tiene `File`: un archivo elegido con expo-document-picker
     // se adjunta como este objeto {uri,name,type}, que el fetch de RN entiende
     // igual que un File real al armar el multipart.
