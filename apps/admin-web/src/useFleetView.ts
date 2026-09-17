@@ -507,6 +507,8 @@ export interface View {
 
   alertCount: number;
   alertsSummary: string;
+  /** Los avisos de prioridad alta, para el vistazo rápido del banner. */
+  alertTop: { key: string; plate: string; text: string; open: () => void }[];
   alertsFull: AlertFull[];
   alertKindChips: Chip[];
   alertQ: string;
@@ -2224,6 +2226,15 @@ export function useFleetView(
       const avisos = alertList.length + (alertList.length === 1 ? ' aviso' : ' avisos');
       return prioritarios ? avisos + ' · ' + prioritarios + ' de prioridad alta' : avisos;
     })(),
+    alertTop: alertList
+      .filter((a) => a.sev === 2)
+      .slice(0, 3)
+      .map((a) => ({
+        key: a.report ? `report:${a.report.id}` : `${a.car.id}:${a.kind}`,
+        plate: a.car.plate,
+        text: a.text,
+        open: () => (a.report ? update({ reportDetailId: a.report.id }) : update({ detailId: a.car.id })),
+      })),
     alertsFull: (st.alertKind === 'todas' ? alertList : alertList.filter((a) => a.kind === st.alertKind))
       .filter((a) => matches(st.alertQ, a.car.plate, a.car.model, a.car.driver, a.car.gpsTag, a.text, a.report?.driver, a.report?.cat, a.report?.texto))
       .map((a) => ({
