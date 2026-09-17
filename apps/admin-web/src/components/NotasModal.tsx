@@ -1,8 +1,11 @@
 import type { View } from '../useFleetView';
 import { Btn } from './Btn';
+import { dLbl } from '../format';
 import { modalOverlay, modalPanel, modalTitle, modalCloseBtn, modalCloseBtnHover, modalFooter, btnPrimary, btnPrimaryHover, btnSecondary, btnSecondaryHover, fieldInput } from '../styles';
 
 const money = (n: number) => '₲ ' + n.toLocaleString('es-PY');
+/** Fecha corta del gasto ("10 sep"), a partir del ISO del servidor. */
+const fechaCorta = (iso: string) => (iso ? dLbl(new Date(iso + 'T12:00:00')) : '');
 
 /** Notas del reporte: primero la pregunta y, si dice que sí, un recorrido auto
  *  por auto mostrando los gastos de ese auto para explicarlos. Se puede saltar
@@ -83,6 +86,7 @@ export function NotasModal({ v }: { v: View }) {
             <div style={{ padding: '6px 12px 2px' }}>
               {bloque.filas.map((fila, i) => (
                 <div key={i} style={{ display: 'flex', flexDirection: 'row', gap: 12, alignItems: 'baseline', padding: '3px 0' }}>
+                  <span style={{ width: 54, flex: 'none', fontSize: 12, color: '#a9a293' }}>{fechaCorta(fila.fecha)}</span>
                   <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: '#3d3a34' }}>{fila.detalle}</span>
                   <span style={{ flex: 'none', fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{money(fila.total)}</span>
                 </div>

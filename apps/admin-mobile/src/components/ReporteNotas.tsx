@@ -1,5 +1,6 @@
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import type { MobileView } from '../useMobileView';
+import { dLbl } from '../format';
 
 const PAPER = '#fffdf8';
 const BORDER = '#ece4d6';
@@ -9,6 +10,11 @@ const SOFT = '#f4f0e8';
 
 function money(value: number) {
   return `Gs. ${new Intl.NumberFormat('es-PY').format(Math.round(value))}`;
+}
+
+/** Fecha corta del gasto ("10 sep"), a partir del ISO del servidor. */
+function fechaCorta(iso: string) {
+  return iso ? dLbl(new Date(iso + 'T12:00:00')) : '';
 }
 
 function Boton({ label, onPress, primary = false, disabled = false, flex = 0 }: { label: string; onPress: () => void; primary?: boolean; disabled?: boolean; flex?: number }) {
@@ -104,7 +110,8 @@ export function ReporteNotas({ v }: { v: MobileView }) {
             </View>
             <View style={{ paddingHorizontal: 12, paddingTop: 8 }}>
               {bloque.filas.map((fila, i) => (
-                <View key={i} style={{ flexDirection: 'row', gap: 12, alignItems: 'baseline', paddingVertical: 3 }}>
+                <View key={i} style={{ flexDirection: 'row', gap: 10, alignItems: 'baseline', paddingVertical: 3 }}>
+                  <Text style={{ width: 50, color: '#a9a293', fontSize: 11 }}>{fechaCorta(fila.fecha)}</Text>
                   <Text style={{ flex: 1, minWidth: 0, color: '#3d3a34', fontSize: 13 }}>{fila.detalle}</Text>
                   <Text style={{ color: INK, fontSize: 13, fontWeight: '600' }}>{money(fila.total)}</Text>
                 </View>

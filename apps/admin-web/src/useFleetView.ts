@@ -13,7 +13,7 @@ export interface NotasBloque {
   tipo: 'talleres' | 'otros';
   titulo: string;
   total: number;
-  filas: { detalle: string; total: number }[];
+  filas: { detalle: string; total: number; fecha: string }[];
   nota: string;
   notaGuardada: string;
 }

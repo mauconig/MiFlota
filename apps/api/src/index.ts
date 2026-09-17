@@ -419,7 +419,7 @@ function notasDelPeriodo(ownerId: number, from: string, to: string): Map<string,
 }
 
 type NotaTipo = 'talleres' | 'otros';
-interface NotaBloque { tipo: NotaTipo; titulo: string; total: number; filas: { detalle: string; total: number }[]; nota: string }
+interface NotaBloque { tipo: NotaTipo; titulo: string; total: number; filas: { detalle: string; total: number; fecha: string }[]; nota: string }
 interface NotaAuto { carId: string; label: string; seccion: string; total: number; bloques: NotaBloque[] }
 
 /** Recorrido de notas: los autos con gastos del período, en el mismo orden en
@@ -443,7 +443,7 @@ function autosParaNotas(rows: FleetReportExpenseRow[], notas: Map<string, string
           tipo: bloque.tipo,
           titulo: bloque.titulo,
           total,
-          filas: vehicle.rows.map((row) => ({ detalle: row.detalle, total: row.total })),
+          filas: vehicle.rows.map((row) => ({ detalle: row.detalle, total: row.total, fecha: row.fecha })),
           nota: notas.get(`${carId}:${bloque.tipo}`) ?? '',
         });
         autos.set(carId, auto);

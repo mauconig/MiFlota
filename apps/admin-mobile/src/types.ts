@@ -201,7 +201,8 @@ export interface NotasBloque {
   tipo: ReportNoteTipo;
   titulo: string;
   total: number;
-  filas: { detalle: string; total: number }[];
+  /** Cada gasto con su fecha (ISO `YYYY-MM-DD`). */
+  filas: { detalle: string; total: number; fecha: string }[];
   /** Lo que se está escribiendo ahora. */
   nota: string;
   /** La que ya estaba guardada en el servidor: "Saltar" vuelve a esta. */

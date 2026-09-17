@@ -157,6 +157,8 @@ export type ReportNoteTipo = 'talleres' | 'otros';
 export interface ReportNoteFila {
   detalle: string;
   total: number;
+  /** Fecha del gasto, en ISO `YYYY-MM-DD`. */
+  fecha: string;
 }
 
 export interface ReportNoteBloque {
