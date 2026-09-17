@@ -36,8 +36,8 @@ export function CarModal({ v }: { v: View }) {
             <input inputMode="numeric" value={v.ncar.year} onChange={v.ch.year} placeholder="2018" style={fieldInput} />
           </label>
           <label style={fieldLabel}>
-            <span style={fieldLabelText}>Último service · opcional</span>
-            <DateField value={v.ncar.lastService} onChange={v.setLastService} max={v.hoyISO} ariaLabel="Último service" />
+            <span style={fieldLabelText}>Último mantenimiento · opcional</span>
+            <DateField value={v.ncar.lastService} onChange={v.setLastService} max={v.hoyISO} ariaLabel="Último mantenimiento" />
           </label>
           <label style={fieldLabel}>
             <span style={fieldLabelText}>GPS tag</span>
@@ -48,7 +48,7 @@ export function CarModal({ v }: { v: View }) {
             <input inputMode="numeric" value={v.ncar.kilometraje} onChange={v.ch.kilometraje} placeholder="120000" style={fieldInput} />
           </label>
           <div style={fieldLabel}>
-            <span style={fieldLabelText}>Service cada · opcional</span>
+            <span style={fieldLabelText}>Mantenimiento cada · opcional</span>
             <div style={{ display: 'flex', flexDirection: 'row', gap: 7, minWidth: 0 }}>
               <input
                 inputMode="numeric"

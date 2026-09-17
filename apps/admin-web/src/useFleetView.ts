@@ -8,10 +8,10 @@ import { COLORS, TODAY, addD, addM, dLbl, dLblFull, daysBetween, durLbl, fmt, fm
 
 const UMBRAL_VERDE = 2500000;
 
-/** Días de aviso antes de que venza el service. */
+/** Días de aviso antes de que venza el mantenimiento. */
 const SVC_AVISO_DIAS = 15;
 
-/** Tope del intervalo de service. Es el mismo que valida el servidor: si acá
+/** Tope del intervalo de mantenimiento. Es el mismo que valida el servidor: si acá
  *  pasara un valor mayor, se guardaría con el 6 por defecto sin avisar. */
 const SVC_MAX = 3650;
 
@@ -22,7 +22,7 @@ const svcConfigured = (c: Car) => c.serviceCada > 0 && c.lastServiceDate.getFull
 const svcNextDate = (c: Car) => (c.serviceUnidad === 'meses' ? addM(c.lastServiceDate, c.serviceCada) : addD(c.lastServiceDate, c.serviceCada));
 /** "cada 6 meses" / "cada 90 días" */
 const svcIntervalo = (n: number, u: Car['serviceUnidad']) => n + ' ' + (u === 'meses' ? (n === 1 ? 'mes' : 'meses') : n === 1 ? 'día' : 'días');
-/** Días que faltan para el próximo service (negativo = vencido). */
+/** Días que faltan para el próximo mantenimiento (negativo = vencido). */
 const svcDaysLeft = (c: Car) => daysBetween(TODAY, svcNextDate(c));
 /** "vencido hace 8 días" / "vence hoy" / "en 3 meses" */
 /** Días que faltan para el vencimiento de un documento (negativo = vencido). */
@@ -620,7 +620,7 @@ export interface View {
   setSeguroVence: (iso: string) => void;
   /** Selector días/meses del alta. */
   ncarUnidadOpts: Chip[];
-  /** Hoy en ISO, para topar el <input type="date"> del último service. */
+  /** Hoy en ISO, para topar el <input type="date"> del último mantenimiento. */
   hoyISO: string;
   ndrv: NewDriverForm;
   dh: {
@@ -721,7 +721,7 @@ const FTAG: Record<Car['estado'], [string, string, string]> = {
 };
 
 const KTAG: Record<string, [string, string]> = {
-  Service: ['#fdf3e2', '#a8730f'],
+  Mantenimiento: ['#fdf3e2', '#a8730f'],
   Seguro: ['#eef1f6', '#4a6d99'],
   Taller: ['#f3eefa', '#6b52a1'],
   Kilometraje: ['#fdf3e2', '#a8730f'],
@@ -948,7 +948,7 @@ export function useFleetView(
     const cada = numFromInput(n.serviceCada);
     const kilometraje = numFromInput(n.kilometraje);
     if (n.lastService && n.lastService > isoLocal(TODAY)) {
-      toast('El último service no puede ser una fecha futura');
+      toast('El último mantenimiento no puede ser una fecha futura');
       return;
     }
     const segCada = numFromInput(n.seguroCada);
@@ -1149,9 +1149,9 @@ export function useFleetView(
     if (svcConfigured(c) && dLeft <= SVC_AVISO_DIAS)
       alertList.push({
         car: c,
-        kind: 'Service',
+        kind: 'Mantenimiento',
         sev: dLeft < 0 ? 2 : 1,
-        text: 'Service ' + svcLeftLbl(dLeft, true),
+        text: 'Mantenimiento ' + svcLeftLbl(dLeft, true),
       });
     const segLeft = daysBetween(TODAY, c.seguroDate);
     if (c.seguroCada > 0 && c.seguroNombre.trim() && c.seguroDate.getFullYear() > 1970 && segLeft === 0)
@@ -1319,7 +1319,7 @@ export function useFleetView(
     if (!f.plate.trim() || !f.model.trim()) return toast('Completá chapa y marca/modelo');
     if (!Number.isInteger(year) || year < 1951 || year > 2099) return toast('El año no es válido');
     if (km !== undefined && (km < c.kilometraje || km > 10_000_000)) return toast('El kilometraje no puede disminuir');
-    if (serviceStarted && (!f.lastService || !serviceCada)) return toast('Completá fecha e intervalo del service');
+    if (serviceStarted && (!f.lastService || !serviceCada)) return toast('Completá fecha e intervalo del mantenimiento');
     if (insuranceStarted && (!f.seguroNombre.trim() || !f.seguroVence || !seguroCada)) return toast('Completá todos los datos del seguro');
     if (f.driver.trim() && !numFromInput(f.cuota)) return toast('Indicá la cuota diaria del chofer');
     const patch: Partial<Car> = {
@@ -1377,11 +1377,11 @@ export function useFleetView(
     if (!s || !c || s.guardando) return;
     const km = s.kilometraje.trim() ? numFromInput(s.kilometraje) : undefined;
     const costo = s.costo.trim() ? numFromInput(s.costo) : undefined;
-    if (!s.fecha || s.fecha > isoLocal(TODAY) || !s.descripcion.trim()) return toast('Revisá los datos del service');
+    if (!s.fecha || s.fecha > isoLocal(TODAY) || !s.descripcion.trim()) return toast('Revisá los datos del mantenimiento');
     if (km !== undefined && (km < c.kilometraje || km > 10_000_000)) return toast('El kilometraje no puede disminuir');
     update({ service: { ...s, guardando: true } });
     persist.registrarService(c.id, { fecha: s.fecha, descripcion: s.descripcion.trim(), kilometraje: km, costo, comprobante: s.comprobante })
-      .then(() => update({ service: null, toast: costo ? 'Service registrado y gasto agregado' : 'Service registrado' }))
+      .then(() => update({ service: null, toast: costo ? 'Mantenimiento registrado y gasto agregado' : 'Mantenimiento registrado' }))
       .catch((e: Error) => update({ service: { ...s, guardando: false }, toast: 'No se pudo registrar: ' + e.message }));
   };
   const realMovements: RealMovement[] = [
@@ -1684,7 +1684,7 @@ export function useFleetView(
     const cuotasCobradas = suyas.filter((m) => deudaDe(m) === 0).length;
     const cuotasPend = suyas.filter((m) => deudaDe(m) > 0);
 
-    // El intervalo de service se edita en borrador y se confirma con "Guardar":
+    // El intervalo de mantenimiento se edita en borrador y se confirma con "Guardar":
     // a diferencia del resto de la ficha, escribir un número de a un dígito
     // pasaría por valores absurdos si cada tecla se guardara sola.
     const bor = st.svcEdit && st.svcEdit.carId === c.id ? st.svcEdit : { carId: c.id, cada: String(c.serviceCada), unidad: c.serviceUnidad };
@@ -1714,8 +1714,8 @@ export function useFleetView(
       location: locationView(locationByCar.get(c.id)),
       cobradas: cuotasCobradas + ' cuotas cobradas',
       pendientes: cuotasPend.length ? cuotasPend.length + ' sin cobrar · debe ' + fmtShort(cuotasPend.reduce((a, m) => a + (m.amount - cobradoDe(m)), 0), st.hide) : 'Todo cobrado',
-      svcLbl: configuredService ? (dLeft < 0 ? 'Service vencido hace ' + durLbl(dLeft) : dLeft === 0 ? 'El service vence hoy' : 'Próximo service en ' + durLbl(dLeft)) + ' · ' + dLblFull(svcNextDate(c)) : 'Datos de service sin cargar',
-      svcSub: configuredService ? 'Último service: ' + dLblFull(c.lastServiceDate) : 'Agregá el último service y su intervalo',
+      svcLbl: configuredService ? (dLeft < 0 ? 'Mantenimiento vencido hace ' + durLbl(dLeft) : dLeft === 0 ? 'El mantenimiento vence hoy' : 'Próximo mantenimiento en ' + durLbl(dLeft)) + ' · ' + dLblFull(svcNextDate(c)) : 'Datos de service sin cargar',
+      svcSub: configuredService ? 'Último mantenimiento: ' + dLblFull(c.lastServiceDate) : 'Agregá el último mantenimiento y su intervalo',
       svcFg: configuredService ? (dLeft < 0 ? COLORS.neg : dLeft <= SVC_AVISO_DIAS ? COLORS.warn : COLORS.pos) : COLORS.warn,
        svcPct: configuredService ? Math.max(4, Math.min(100, Math.round(((svcTotalDias - dLeft) / svcTotalDias) * 100))) + '%' : '0%',
        svcBar: configuredService ? (dLeft < 0 ? COLORS.neg : dLeft <= SVC_AVISO_DIAS ? COLORS.warn : COLORS.pos) : '#e8a13a',
@@ -1735,12 +1735,12 @@ export function useFleetView(
         if (!borCambio) return;
         patchCar(c.id, { serviceCada: borN, serviceUnidad: bor.unidad });
         update({ svcEdit: null });
-        toast('Service cada ' + svcIntervalo(borN, bor.unidad) + ' · próximo el ' + dLblFull(svcNextDate({ ...c, serviceCada: borN, serviceUnidad: bor.unidad })));
+        toast('Mantenimiento cada ' + svcIntervalo(borN, bor.unidad) + ' · próximo el ' + dLblFull(svcNextDate({ ...c, serviceCada: borN, serviceUnidad: bor.unidad })));
       },
       svcHint: !borOk
         ? 'Poné un número entre 1 y ' + SVC_MAX
         : borCambio
-          ? 'El próximo service pasaría al ' + dLblFull(svcNextDate({ ...c, serviceCada: borN, serviceUnidad: bor.unidad }))
+          ? 'El próximo mantenimiento pasaría al ' + dLblFull(svcNextDate({ ...c, serviceCada: borN, serviceUnidad: bor.unidad }))
           : '',
       agregarDatos,
       docs: [
@@ -1829,7 +1829,7 @@ export function useFleetView(
 
   const openDriverCredentialsEdit = (car: Car) => {
     if (car.driver === 'Sin chofer' || car.driverId == null) {
-      toast('Este vehÃ­culo no tiene un chofer asignado');
+      toast('Este vehículo no tiene un chofer asignado');
       return;
     }
     update({
@@ -1889,7 +1889,7 @@ export function useFleetView(
       .updateDriverCredentials(f.carId, { username, ...(f.password ? { password: f.password } : {}) })
       .then(({ username: savedUsername }) => {
         update({ driverCredentialsEdit: null });
-        toast('Credenciales actualizadas Â· ' + savedUsername);
+        toast('Credenciales actualizadas · ' + savedUsername);
       })
       .catch((e: Error) => {
         update((s) => (s.driverCredentialsEdit ? { driverCredentialsEdit: { ...s.driverCredentialsEdit, saving: false } } : {}));
@@ -2135,7 +2135,7 @@ export function useFleetView(
       ['section', 'Sección', 'left'],
       ['driver', 'Chofer', 'left'],
       ['cuota', 'Cuota', 'right'],
-      ['svc', 'Service', 'left'],
+      ['svc', 'Mantenimiento', 'left'],
       ['ing', 'Ingresos', 'right'],
       ['egr', 'Egresos', 'right'],
       ['net', 'Neto', 'right'],

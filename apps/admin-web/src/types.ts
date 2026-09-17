@@ -18,7 +18,7 @@ export interface Car {
   estado: Estado;
   /** Identificador del equipo de rastreo instalado. Vacío = sin GPS. */
   gpsTag: string;
-  /** Cada cuánto toca el service, en la unidad de `serviceUnidad`. */
+  /** Cada cuánto toca el mantenimiento, en la unidad de `serviceUnidad`. */
   serviceCada: number;
   serviceUnidad: ServiceUnidad;
   lastServiceDate: Date;
@@ -205,7 +205,7 @@ export interface UIState {
   driverCredentialsEdit: DriverCredentialsEdit | null;
   detailId: string | null;
   reportDetailId: number | null;
-  /** Intervalo de service que se está editando en la ficha, sin guardar todavía.
+  /** Intervalo de mantenimiento que se está editando en la ficha, sin guardar todavía.
       Lleva el id del vehículo para que abrir otro no arrastre el borrador. */
   svcEdit: { carId: string; cada: string; unidad: ServiceUnidad } | null;
   /** Entrada a taller a medio cargar. Null = el modal está cerrado. */
