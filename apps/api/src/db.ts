@@ -413,6 +413,21 @@ function migrarOwner(db: Database.Database) {
       PRIMARY KEY (owner_id, car_id, notified_date)
     );
   `);
+  // Notas del reporte: una explicación por auto y por tipo de gasto, atada al
+  // período que se está informando (no al auto ni al movimiento). Se imprimen
+  // abajo del "Total del auto" en el PDF.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS report_notas (
+      owner_id INTEGER NOT NULL,
+      car_id TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+      tipo TEXT NOT NULL CHECK (tipo IN ('talleres','otros')),
+      desde TEXT NOT NULL,
+      hasta TEXT NOT NULL,
+      nota TEXT NOT NULL,
+      actualizado TEXT NOT NULL,
+      PRIMARY KEY (owner_id, car_id, tipo, desde, hasta)
+    );
+  `);
 
   // Chofer al que corresponde cada cobro. Null en las filas viejas: el
   // chofer actual del auto sigue siendo el valor por defecto para esas, así
