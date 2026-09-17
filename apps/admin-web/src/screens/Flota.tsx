@@ -2,6 +2,7 @@ import type { View } from '../useFleetView';
 import { Btn } from '../components/Btn';
 import { ChipRow } from '../components/ChipRow';
 import { SearchBar } from '../components/SearchBar';
+import { SectionSelect } from '../components/SectionSelect';
 import { VehicleTable } from '../components/VehicleTable';
 import { Screen } from '../components/Screen';
 import { PlusIcon } from '../icons';
@@ -14,17 +15,7 @@ export function Flota({ v }: { v: View }) {
         <SearchBar value={v.carQ} onChange={v.setCarQ} placeholder="Buscar vehículo…" />
         <ChipRow chips={v.fleetFilters} />
         <span aria-hidden style={{ width: 1, height: 24, background: '#e0d6c4', margin: '0 4px', flex: 'none' }} />
-        <select
-          className="field-select"
-          value={String(v.sectionFilter)}
-          onChange={(e) => v.setSectionFilter(e.target.value === 'todos' ? 'todos' : e.target.value === 'sin' ? 'sin' : Number(e.target.value))}
-          aria-label="Filtrar por sección"
-          style={{ width: 156, minHeight: 34, border: '1px solid #e0d6c4', borderRadius: 12, padding: '0 34px 0 12px', fontSize: 12, color: '#3d3a34', background: '#fffdf8', cursor: 'pointer', flex: 'none' }}
-        >
-          <option value="todos">Todas las secciones</option>
-          {v.sectionOptions.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}
-          <option value="sin">Sin sección</option>
-        </select>
+        <SectionSelect value={v.sectionFilter} onChange={v.setSectionFilter} options={v.sectionOptions} width={156} />
         <Btn
           onClick={v.openCarModal}
           style={{
