@@ -7,6 +7,7 @@ import { SearchBar } from '../components/SearchBar';
 import { Screen, ScrollArea, Vacio } from '../components/Screen';
 import { card, sectionTitle } from '../styles';
 import { SortableHeader, compareSortableRows, type SortState } from '../components/SortableHeader';
+import { NotasModal } from '../components/NotasModal';
 
 const movementHeader: CSSProperties = {
   display: 'flex',
@@ -74,6 +75,8 @@ export function Reportes({ v }: { v: View }) {
         </div>
         <div style={{ borderTop: '1px solid #f0ebe0', paddingTop: 13, display: 'flex', flexDirection: 'column', gap: 9, flex: 'none' }}><span style={sectionTitle}>Exportar este período</span><span style={{ fontSize: 12, color: '#6b665c', lineHeight: 1.5 }}>Generá un archivo con pagos recibidos, gastos detallados y el resumen del período.</span><div style={{ display: 'flex', gap: 8, marginTop: 4 }}><Btn onClick={v.exportarPdf} style={{ flex: 1, border: 'none', background: '#16150f', color: '#fffdf8', borderRadius: 12, minHeight: 40, fontSize: 12, fontWeight: 700, cursor: 'pointer' }} hoverStyle={{ background: '#2a2820' }}>PDF</Btn><Btn onClick={v.exportar} style={{ flex: 1, border: '1px solid #e0d6c4', background: '#fffdf8', color: '#3d3a34', borderRadius: 12, minHeight: 40, fontSize: 12, fontWeight: 700, cursor: 'pointer' }} hoverStyle={{ background: '#f7f1e5' }}>Excel</Btn></div></div>
       </div>
+
+      <NotasModal v={v} />
     </Screen>
   );
 }

@@ -1,10 +1,44 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { Car, CarLocation, Mov, Pago, Reporte, UIState, NewCarForm, NewDriverForm, EditCarForm, DriverCredentialsEdit } from './types';
 import type { DriverCredentials, NuevoCarPayload, NuevoPagoPayload, ReportExportPayload } from './api';
+import { previewReportNotes, saveReportNotes } from './api';
 import type { Aplicacion } from './cobranza';
 import { imputar } from './cobranza';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, dLbl, dLblFull, daysBetween, durLbl, fmt, fmtShort, initials, isoLocal, miles, statusColor, numFromInput } from './format';
+
+/** Un bloque de gastos de un auto dentro del recorrido de notas. `notaGuardada`
+ *  es la que ya estaba en el servidor: sirve para "Saltar" sin guardar cambios. */
+export interface NotasBloque {
+  tipo: 'talleres' | 'otros';
+  titulo: string;
+  total: number;
+  filas: { detalle: string; total: number }[];
+  nota: string;
+  notaGuardada: string;
+}
+
+export interface NotasAuto {
+  carId: string;
+  label: string;
+  seccion: string;
+  total: number;
+  bloques: NotasBloque[];
+}
+
+/** Estado del modal de notas: primero la pregunta y después el recorrido. */
+export type NotasEstado =
+  | { fase: 'pregunta'; payload: Omit<ReportExportPayload, 'format'> }
+  | {
+      fase: 'recorrido';
+      payload: Omit<ReportExportPayload, 'format'>;
+      from: string;
+      to: string;
+      autos: NotasAuto[];
+      paso: number;
+      guardando: boolean;
+      error: string;
+    };
 
 const UMBRAL_VERDE = 2500000;
 
@@ -531,6 +565,17 @@ export interface View {
   movNetTotal: string;
   exportar: () => void;
   exportarPdf: () => void;
+  /** Notas del reporte: la pregunta previa al PDF y el recorrido auto por auto. */
+  notas: NotasEstado | null;
+  notasSi: () => void;
+  notasNo: () => void;
+  notasCerrar: () => void;
+  notasIr: (paso: number) => void;
+  notasAnterior: () => void;
+  notasSiguiente: () => void;
+  notasSaltar: () => void;
+  notasSetNota: (carId: string, tipo: NotasBloque['tipo'], texto: string) => void;
+  notasGuardarYExportar: () => void;
   movementMonths: MovementMonth[];
   movementRows: LedgerRow[];
   movementTotalRows: number;
@@ -868,6 +913,11 @@ export function useFleetView(
   },
 ): View {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Notas del reporte: la pregunta "¿Deseás agregar notas?" y el recorrido auto
+  // por auto. Vive acá porque es un paso previo a exportar el PDF, no un estado
+  // de la pantalla.
+  const [notas, setNotas] = useState<NotasEstado | null>(null);
 
   const toast = (m: string) => {
     clearTimeout(toastTimer.current);
@@ -2043,6 +2093,98 @@ export function useFleetView(
     };
   })();
 
+  // ---- notas del reporte: pregunta previa y recorrido auto por auto ----
+  const reportBasePayload = (): Omit<ReportExportPayload, 'format'> => {
+    const period = { type: st.period, ...(st.period === 'custom' ? { from: st.cFrom, to: st.cTo } : { to: isoLocal(TODAY) }) } as ReportExportPayload['period'];
+    return { period, include: reportInclude, carIds: 'todos', categories: reportCategories, search: st.movQ.trim() || undefined };
+  };
+
+  const descargarReporte = async (formato: 'pdf' | 'xlsx') => {
+    const result = await persist.exportReport({ ...reportBasePayload(), format: formato });
+    const a = document.createElement('a');
+    a.href = result.file.url;
+    a.download = result.file.name;
+    a.click();
+    toast((formato === 'pdf' ? 'PDF' : 'Excel') + ' descargado · ' + result.counts.total + ' movimientos');
+  };
+
+  const exportarSinNotas = async () => {
+    try {
+      await descargarReporte('pdf');
+    } catch (e) {
+      toast('No se pudo exportar: ' + (e as Error).message);
+    }
+  };
+
+  /** El botón PDF primero pregunta si quiere agregar notas. */
+  const abrirNotas = () => {
+    if (!reportMovements.length) return toast('No hay movimientos para exportar con estos filtros');
+    setNotas({ fase: 'pregunta', payload: reportBasePayload() });
+  };
+
+  const notasSi = async () => {
+    if (!notas || notas.fase !== 'pregunta') return;
+    const payload = notas.payload;
+    try {
+      const previa = await previewReportNotes(payload);
+      if (!previa.autos.length) {
+        setNotas(null);
+        toast('Este período no tiene gastos para anotar');
+        await exportarSinNotas();
+        return;
+      }
+      setNotas({
+        fase: 'recorrido',
+        payload,
+        from: previa.from,
+        to: previa.to,
+        autos: previa.autos.map((auto) => ({ ...auto, bloques: auto.bloques.map((bloque) => ({ ...bloque, notaGuardada: bloque.nota })) })),
+        paso: 0,
+        guardando: false,
+        error: '',
+      });
+    } catch (e) {
+      setNotas(null);
+      toast('No se pudo preparar el reporte: ' + (e as Error).message);
+    }
+  };
+
+  const notasNo = async () => {
+    setNotas(null);
+    await exportarSinNotas();
+  };
+
+  const notasIr = (paso: number) => setNotas((n) => (n && n.fase === 'recorrido' ? { ...n, paso: Math.max(0, Math.min(paso, n.autos.length - 1)) } : n));
+  const notasAnterior = () => setNotas((n) => (n && n.fase === 'recorrido' ? { ...n, paso: Math.max(0, n.paso - 1) } : n));
+  const notasSiguiente = () => setNotas((n) => (n && n.fase === 'recorrido' ? { ...n, paso: Math.min(n.autos.length - 1, n.paso + 1) } : n));
+
+  /** Saltar = no guardar cambios de este auto: se vuelve a lo que ya tenía. */
+  const notasSaltar = () => setNotas((n) => {
+    if (!n || n.fase !== 'recorrido') return n;
+    const autos = n.autos.map((auto, i) => (i === n.paso ? { ...auto, bloques: auto.bloques.map((bloque) => ({ ...bloque, nota: bloque.notaGuardada })) } : auto));
+    return { ...n, autos, paso: Math.min(autos.length - 1, n.paso + 1), error: '' };
+  });
+
+  const notasSetNota = (carId: string, tipo: NotasBloque['tipo'], texto: string) => setNotas((n) => {
+    if (!n || n.fase !== 'recorrido') return n;
+    const autos = n.autos.map((auto) => (auto.carId === carId ? { ...auto, bloques: auto.bloques.map((bloque) => (bloque.tipo === tipo ? { ...bloque, nota: texto.slice(0, 300) } : bloque)) } : auto));
+    return { ...n, autos, error: '' };
+  });
+
+  const notasGuardarYExportar = async () => {
+    if (!notas || notas.fase !== 'recorrido' || notas.guardando) return;
+    const estado = notas;
+    const notes = estado.autos.flatMap((auto) => auto.bloques.map((bloque) => ({ carId: auto.carId, tipo: bloque.tipo, nota: bloque.nota.trim() })));
+    setNotas({ ...estado, guardando: true, error: '' });
+    try {
+      await saveReportNotes({ from: estado.from, to: estado.to, notes });
+      await descargarReporte('pdf');
+      setNotas(null);
+    } catch (e) {
+      setNotas({ ...estado, guardando: false, error: (e as Error).message || 'No se pudieron guardar las notas' });
+    }
+  };
+
   return {
     kicker: TITLES[nav][1],
     pageTitle: TITLES[nav][0],
@@ -2452,23 +2594,25 @@ export function useFleetView(
     movNetTotal: fmt(reportIng - reportEgr, st.hide),
     exportar: async () => {
       if (!reportMovements.length) return toast('No hay movimientos para exportar con estos filtros');
-      const periodPayload = { type: st.period, ...(st.period === 'custom' ? { from: st.cFrom, to: st.cTo } : { to: isoLocal(TODAY) }) } as ReportExportPayload['period'];
       try {
-        const result = await persist.exportReport({ period: periodPayload, include: reportInclude, carIds: 'todos', categories: reportCategories, search: st.movQ.trim() || undefined, format: 'xlsx' });
-        const a = document.createElement('a'); a.href = result.file.url; a.download = result.file.name; a.click();
-        toast('Excel descargado · ' + result.counts.total + ' movimientos');
+        await descargarReporte('xlsx');
       } catch (e) { toast('No se pudo exportar: ' + (e as Error).message); }
       return;
     },
-    exportarPdf: async () => {
-      if (!reportMovements.length) return toast('No hay movimientos para exportar con estos filtros');
-      const periodPayload = { type: st.period, ...(st.period === 'custom' ? { from: st.cFrom, to: st.cTo } : { to: isoLocal(TODAY) }) } as ReportExportPayload['period'];
-      try {
-        const result = await persist.exportReport({ period: periodPayload, include: reportInclude, carIds: 'todos', categories: reportCategories, search: st.movQ.trim() || undefined, format: 'pdf' });
-        const a = document.createElement('a'); a.href = result.file.url; a.download = result.file.name; a.click();
-        toast('PDF descargado · ' + result.counts.total + ' movimientos');
-      } catch (e) { toast('No se pudo exportar: ' + (e as Error).message); }
+    // El botón PDF pregunta primero si quiere agregar notas a cada auto.
+    exportarPdf: () => {
+      abrirNotas();
     },
+    notas,
+    notasSi,
+    notasNo,
+    notasCerrar: () => setNotas(null),
+    notasIr,
+    notasAnterior,
+    notasSiguiente,
+    notasSaltar,
+    notasSetNota,
+    notasGuardarYExportar,
 
     gastosSub: gastosMovements.length + (gastosMovements.length === 1 ? ' gasto' : ' gastos') + ' · ' + fmt(gastosTotalAmount, st.hide) + (st.gastosQ.trim() || st.gastosCat !== 'todas' ? ' con los filtros aplicados' : ''),
     gastosQ: st.gastosQ,
