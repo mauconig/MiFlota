@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { API_BASE } from './config';
-import type { Car, CarLocation, LocationHistory, Mov, Pago, PickedFile, Reporte, ReportStatus } from './types';
+import type { Car, CarLocation, LocationHistory, Mov, Pago, PickedFile, Reporte, ReportNotesPreview, ReportNoteTipo, ReportStatus } from './types';
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`. Se parsean a mediodía para que
  *  ningún huso horario corra el día al construir el Date. */
@@ -351,6 +351,23 @@ export function exportFleetReport(payload: ReportExportPayload): Promise<ReportE
     body: JSON.stringify(payload),
   });
 }
+
+/** Notas del reporte: se piden con los mismos filtros del export y se guardan
+ *  por período, así el recorrido muestra lo que va a salir en el PDF. */
+export function previewReportNotes(payload: Omit<ReportExportPayload, 'format'>): Promise<ReportNotesPreview> {
+  return req<ReportNotesPreview>('/api/report-notes/preview', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function saveReportNotes(payload: { from: string; to: string; notes: { carId: string; tipo: ReportNoteTipo; nota: string }[] }): Promise<{ ok: true; guardadas: number }> {
+  return req<{ ok: true; guardadas: number }>('/api/report-notes', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
 
 export interface DriverCredentials {
   username: string;

@@ -5,6 +5,7 @@ import { BrandIcon } from '../components/BrandIcon';
 import { DateRangeInputs } from '../components/DateRangeInputs';
 import { ChipRow } from '../components/ChipRow';
 import { BackButton } from '../components/BackButton';
+import { ReporteNotas } from '../components/ReporteNotas';
 
 const PAPER = '#fffdf8';
 const BORDER = '#e6ded0';
@@ -178,6 +179,7 @@ export function Reportes({ v }: { v: MobileView }) {
         </ScrollView>
       )}
 
+      <ReporteNotas v={v} />
     </View>
   );
 }

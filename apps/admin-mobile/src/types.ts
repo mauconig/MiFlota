@@ -193,6 +193,41 @@ export type ReportStep = 'period' | 'include' | 'cars' | 'categories' | 'review'
 export type ReportSelection = 'todos' | string[];
 export type ReportCategorySelection = 'todas' | string[];
 
+/** Notas del reporte: una por auto y tipo de gasto, atada al período. Se cargan
+ *  en un recorrido antes de generar el PDF y se imprimen bajo el total del auto. */
+export type ReportNoteTipo = 'talleres' | 'otros';
+
+export interface NotasBloque {
+  tipo: ReportNoteTipo;
+  titulo: string;
+  total: number;
+  filas: { detalle: string; total: number }[];
+  /** Lo que se está escribiendo ahora. */
+  nota: string;
+  /** La que ya estaba guardada en el servidor: "Saltar" vuelve a esta. */
+  notaGuardada: string;
+}
+
+export interface NotasAuto {
+  carId: string;
+  label: string;
+  seccion: string;
+  total: number;
+  bloques: NotasBloque[];
+}
+
+/** Lo que devuelve la vista previa del servidor (todavía sin `notaGuardada`). */
+export interface ReportNotesPreview {
+  from: string;
+  to: string;
+  periodLabel: string;
+  autos: { carId: string; label: string; seccion: string; total: number; bloques: Omit<NotasBloque, 'notaGuardada'>[] }[];
+}
+
+export type ReportNotasEstado =
+  | { fase: 'pregunta' }
+  | { fase: 'recorrido'; from: string; to: string; autos: NotasAuto[]; paso: number; guardando: boolean; error: string };
+
 /** Archivo elegido con expo-document-picker: no hay `File` del browser en
  *  React Native, así que el comprobante viaja como URI + metadata. */
 export interface PickedFile {
@@ -257,6 +292,8 @@ export interface MobileState {
   reportesCategories: ReportCategorySelection;
   reportesExportando: boolean;
   reportesError: string;
+  /** Pregunta y recorrido de notas antes de generar el PDF. */
+  reportesNotas: ReportNotasEstado | null;
   toast: string;
   fleetFilter: FleetFilter;
   fleetSectionId: number | null;

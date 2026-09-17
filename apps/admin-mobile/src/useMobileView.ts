@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { BackHandler, Keyboard, Linking } from 'react-native';
-import type { AdminNotificationRoute, Car, Mov, Pago, Reporte, MobileState, Screen, DashboardDetailKind, RegistrarTab, FleetFilter, PickedFile, CarLocation, ReportCategorySelection, ReportInclude, ReportSelection, ReportStep, IncomeTypeSelection } from './types';
+import type { AdminNotificationRoute, Car, Mov, Pago, Reporte, MobileState, Screen, DashboardDetailKind, RegistrarTab, FleetFilter, PickedFile, CarLocation, ReportCategorySelection, ReportInclude, ReportNotasEstado, ReportNoteTipo, ReportSelection, ReportStep, IncomeTypeSelection } from './types';
 import { imputar, type Aplicacion } from './cobranza';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, daysBetween, durLbl, dLbl, dLblFull, fmt, fmtShort, initials, statusColor, numFromInput, miles, isoLocal } from './format';
-import { getAuthHeaders, type FleetStore, type NuevoCarPayload, type ReportPeriodType } from './api';
+import { getAuthHeaders, previewReportNotes, saveReportNotes, type FleetStore, type NuevoCarPayload, type ReportExportPayload, type ReportPeriodType } from './api';
 import { API_BASE } from './config';
 import { dateTextFromIso, maskDateInput, validateDateRange } from './dateRange';
 
@@ -281,6 +281,7 @@ export function initialMobileState(): MobileState {
     reportesCategories: 'todas',
     reportesExportando: false,
     reportesError: '',
+    reportesNotas: null,
     toast: '',
     fleetFilter: 'todos',
     fleetSectionId: null,
@@ -823,6 +824,17 @@ export interface MobileView {
     exporting: boolean;
     error: string;
     exportFile: (format: 'pdf' | 'xlsx') => void;
+    /** Notas del reporte: la pregunta previa al PDF y el recorrido auto por auto. */
+    notas: ReportNotasEstado | null;
+    notasSi: () => void;
+    notasNo: () => void;
+    notasCerrar: () => void;
+    notasIr: (paso: number) => void;
+    notasAnterior: () => void;
+    notasSiguiente: () => void;
+    notasSaltar: () => void;
+    notasSetNota: (carId: string, tipo: ReportNoteTipo, texto: string) => void;
+    notasGuardarYExportar: () => void;
   };
 
   ranking: { rows: RankRow[]; byAuto: boolean; setAuto: () => void; setModelo: () => void; hint: string };
@@ -2525,28 +2537,100 @@ export function useMobileView(
     if (previousStep) update({ reportesStep: previousStep, reportesError: '' });
   };
   const reportReset = () => update({ reportesStep: 'period', reportesInclude: 'ambos', reportesCarIds: 'todos', reportesCategories: 'todas', reportesExportando: false, reportesError: '', periodError: '' });
+  const reportBasePayload = (): Omit<ReportExportPayload, 'format'> => {
+    // Las quincenas no son un tipo de período del servidor: viajan como rango
+    // explícito, que es lo que ya sabe resolver.
+    const exportPeriodType: ReportPeriodType = state.period === 'q1' || state.period === 'q2' || state.period === 'q1ant' || state.period === 'q2ant' ? 'custom' : state.period;
+    return {
+      period: { type: exportPeriodType, from: isoLocal(r.start), to: isoLocal(r.end) },
+      include: reportInclude,
+      carIds: state.reportesCarIds,
+      ...(reportIncludeExpenses ? { categories: state.reportesCategories } : {}),
+    };
+  };
+
   const reportExport = (format: 'pdf' | 'xlsx') => {
-    const include = state.reportesInclude ?? 'ambos';
+    const payload = reportBasePayload();
     if (!reportCounts.total) {
       update({ reportesError: 'No hay datos para los filtros elegidos.' });
       return;
     }
+    // El PDF primero pregunta si quiere agregar notas por auto; el Excel sale directo.
+    if (format === 'pdf') return update({ reportesNotas: { fase: 'pregunta' }, reportesError: '' });
+    reportExportar(payload, format);
+  };
+
+  const reportExportar = (payload: Omit<ReportExportPayload, 'format'>, format: 'pdf' | 'xlsx') => {
     update({ reportesExportando: true, reportesError: '' });
-    // Las quincenas no son un tipo de período del servidor: viajan como rango
-    // explícito, que es lo que ya sabe resolver.
-    const exportPeriodType: ReportPeriodType = state.period === 'q1' || state.period === 'q2' || state.period === 'q1ant' || state.period === 'q2ant' ? 'custom' : state.period;
-    persist.exportReport({
-      period: { type: exportPeriodType, from: isoLocal(r.start), to: isoLocal(r.end) },
-      include,
-      carIds: state.reportesCarIds,
-      ...(reportIncludeExpenses ? { categories: state.reportesCategories } : {}),
-      format,
-    })
+    persist.exportReport({ ...payload, format })
       .then((result) => {
         update({ reportesExportando: false });
         void Linking.openURL(API_BASE + result.file.url).catch(() => toast('No se pudo abrir el archivo'));
       })
       .catch((error: Error) => update({ reportesExportando: false, reportesError: error.message || 'No se pudo generar el reporte' }));
+  };
+
+  const reportNotasSi = () => {
+    previewReportNotes(reportBasePayload())
+      .then((previa) => {
+        if (!previa.autos.length) {
+          toast('Este período no tiene gastos para anotar');
+          update({ reportesNotas: null });
+          reportExportar(reportBasePayload(), 'pdf');
+          return;
+        }
+        update({
+          reportesNotas: {
+            fase: 'recorrido',
+            from: previa.from,
+            to: previa.to,
+            autos: previa.autos.map((auto) => ({ ...auto, bloques: auto.bloques.map((bloque) => ({ ...bloque, notaGuardada: bloque.nota })) })),
+            paso: 0,
+            guardando: false,
+            error: '',
+          },
+        });
+      })
+      .catch((error: Error) => {
+        update({ reportesNotas: null });
+        toast('No se pudo preparar el reporte: ' + (error.message || 'error desconocido'));
+      });
+  };
+
+  const reportNotasNo = () => {
+    update({ reportesNotas: null });
+    reportExportar(reportBasePayload(), 'pdf');
+  };
+
+  const reportNotasPatch = (patch: (estado: Extract<ReportNotasEstado, { fase: 'recorrido' }>) => Partial<Extract<ReportNotasEstado, { fase: 'recorrido' }>>) =>
+    update((s) => (s.reportesNotas?.fase === 'recorrido' ? { reportesNotas: { ...s.reportesNotas, ...patch(s.reportesNotas) } } : {}));
+
+  const reportNotasIr = (paso: number) => reportNotasPatch((n) => ({ paso: Math.max(0, Math.min(paso, n.autos.length - 1)), error: '' }));
+  const reportNotasAnterior = () => reportNotasPatch((n) => ({ paso: Math.max(0, n.paso - 1), error: '' }));
+  const reportNotasSiguiente = () => reportNotasPatch((n) => ({ paso: Math.min(n.autos.length - 1, n.paso + 1), error: '' }));
+
+  /** Saltar = no guardar cambios de este auto: se vuelve a lo que ya tenía. */
+  const reportNotasSaltar = () => reportNotasPatch((n) => {
+    const autos = n.autos.map((auto, i) => (i === n.paso ? { ...auto, bloques: auto.bloques.map((bloque) => ({ ...bloque, nota: bloque.notaGuardada })) } : auto));
+    return { autos, paso: Math.min(autos.length - 1, n.paso + 1), error: '' };
+  });
+
+  const reportNotasSetNota = (carId: string, tipo: ReportNoteTipo, texto: string) => reportNotasPatch((n) => ({
+    autos: n.autos.map((auto) => (auto.carId === carId ? { ...auto, bloques: auto.bloques.map((bloque) => (bloque.tipo === tipo ? { ...bloque, nota: texto.slice(0, 300) } : bloque)) } : auto)),
+    error: '',
+  }));
+
+  const reportNotasGuardarYExportar = () => {
+    const estado = state.reportesNotas;
+    if (!estado || estado.fase !== 'recorrido' || estado.guardando) return;
+    const notes = estado.autos.flatMap((auto) => auto.bloques.map((bloque) => ({ carId: auto.carId, tipo: bloque.tipo, nota: bloque.nota.trim() })));
+    update({ reportesNotas: { ...estado, guardando: true, error: '' } });
+    saveReportNotes({ from: estado.from, to: estado.to, notes })
+      .then(() => {
+        update({ reportesNotas: null });
+        reportExportar(reportBasePayload(), 'pdf');
+      })
+      .catch((error: Error) => update({ reportesNotas: { ...estado, guardando: false, error: error.message || 'No se pudieron guardar las notas' } }));
   };
   // La versión web genera el .xlsx con la librería `xlsx` y lo baja como Blob;
   // ninguna de las dos cosas existe en React Native. Se exporta desde
@@ -2924,6 +3008,16 @@ export function useMobileView(
       exporting: state.reportesExportando,
       error: state.reportesError,
       exportFile: reportExport,
+      notas: state.reportesNotas,
+      notasSi: reportNotasSi,
+      notasNo: reportNotasNo,
+      notasCerrar: () => update({ reportesNotas: null }),
+      notasIr: reportNotasIr,
+      notasAnterior: reportNotasAnterior,
+      notasSiguiente: reportNotasSiguiente,
+      notasSaltar: reportNotasSaltar,
+      notasSetNota: reportNotasSetNota,
+      notasGuardarYExportar: reportNotasGuardarYExportar,
     },
 
     ranking: {
