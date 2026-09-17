@@ -3,7 +3,7 @@ import { Btn } from '../components/Btn';
 import { ChipRow } from '../components/ChipRow';
 import { SearchBar } from '../components/SearchBar';
 import { SectionSelect } from '../components/SectionSelect';
-import { SectionBars } from '../components/SectionBars';
+import { SectionChart } from '../components/SectionChart';
 import { GastosChart } from '../components/GastosChart';
 import { AlertBanner } from '../components/AlertBanner';
 import { Screen } from '../components/Screen';
@@ -40,7 +40,7 @@ export function Resumen({ v }: { v: View }) {
                 Ver todo →
               </Btn>
             </div>
-            <SectionBars bars={v.bars} title={chartTitle} hide={v.hide} />
+            <SectionChart bars={v.bars} title={chartTitle} hide={v.hide} />
           </div>
         </div>
 
