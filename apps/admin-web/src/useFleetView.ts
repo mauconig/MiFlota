@@ -1198,7 +1198,8 @@ export function useFleetView(
       net: (x: any) => x.net,
       estado: (x: any) => x.c.estado,
     } as Record<string, (x: any) => string | number>)[st.sortK] || ((x: any) => x.net);
-  const sorted = [...filtered].sort((a, b) => {
+  // La tabla del resumen respeta el mismo filtro de sección que la de vehículos.
+  const sorted = [...filteredFlota].sort((a, b) => {
     const ka = keyF(a);
     const kb = keyF(b);
     return (typeof ka === 'string' ? ka.localeCompare(kb as string) : (ka as number) - (kb as number)) * st.sortDir;
