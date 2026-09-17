@@ -40,7 +40,7 @@ export function Flota({ v }: { v: View }) {
           Agregar vehículo
         </Btn>
       </div>
-      <VehicleTable cols={v.colsF} rows={v.flotaRows} />
+      <VehicleTable cols={v.colsF} rows={v.flotaRows} variant="flota" />
     </Screen>
   );
 }

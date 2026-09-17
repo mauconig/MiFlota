@@ -42,7 +42,7 @@ export function Resumen({ v }: { v: View }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9, minWidth: 0 }}>
           <GastosChart v={v} />
 
-          <AlertBanner icon={<WarningIcon size={18} />} iconBg="#fdeeea" iconFg="#a8412f" title="Necesitan atención" summary={v.alertsSummary} badge={v.alertCount} onClick={v.goAlertas} />
+          <AlertBanner icon={<WarningIcon size={18} />} iconBg="#fdeeea" iconFg="#a8412f" title="Necesitan atención" summary={v.alertsSummary} badge={v.alertCount} onClick={v.goAlertas} items={v.alertTop} />
 
           <AlertBanner icon={<ClockIcon size={18} />} iconBg="#fdf3e2" iconFg="#a8730f" title="Cobros pendientes" summary={v.pendSummary} onClick={v.goCobros} />
 

@@ -74,10 +74,6 @@ export interface VehicleRow {
   ing: string;
   egr: string;
   net: string;
-  /** Numéricos sin formatear: los usa el gráfico por sección. */
-  ingValue: number;
-  egrValue: number;
-  netValue: number;
   netColor: string;
   netPct: string;
   gpsTag: string;
@@ -86,18 +82,6 @@ export interface VehicleRow {
   tagBg: string;
   tagFg: string;
   rowBg: string;
-  open: () => void;
-}
-
-/** Una barra del gráfico del resumen: una sección, o un vehículo cuando ya se
- *  eligió una sección. `open` aplica el filtro o abre la ficha, según el nivel. */
-export interface BarItem {
-  key: string;
-  label: string;
-  sub: string;
-  ing: number;
-  egr: number;
-  net: number;
   open: () => void;
 }
 
@@ -464,7 +448,6 @@ export interface View {
   onFrom: (iso: string) => void;
   onTo: (iso: string) => void;
   montosLbl: string;
-  hide: boolean;
   toggleMontos: () => void;
 
   kpis: KpiItem[];
@@ -479,9 +462,10 @@ export interface View {
   fleetFilters: Chip[];
   sectionFilter: UIState['sectionFilter'];
   setSectionFilter: (value: UIState['sectionFilter']) => void;
+  cols: ColItem[];
   colsF: ColItem[];
+  rows: VehicleRow[];
   flotaRows: VehicleRow[];
-  bars: BarItem[];
   flotaGroups: { id: string; name: string; rows: VehicleRow[] }[];
   sectionOptions: { id: number; name: string }[];
   setNewCarSection: (e: React.ChangeEvent<HTMLSelectElement>) => void;
@@ -747,13 +731,6 @@ const KTAG: Record<string, [string, string]> = {
 function gpsTagLabel(car: Car): string {
   return car.gpsTag.trim() || 'Sin GPS';
 }
-
-/** Rótulo del vehículo en el gráfico del resumen: Modelo - Tag GPS - Chapa.
- *  El tag GPS es opcional: si no está cargado no deja un separador suelto. */
-function vehicleChartLabel(car: Car): string {
-  return [car.model, car.gpsTag, car.plate].map((part) => part.trim()).filter(Boolean).join(' - ');
-}
-
 
 const PTAG: Record<string, [string, string]> = {
   Cobrado: ['#eef4f0', '#2e7d5b'],
@@ -1217,6 +1194,12 @@ export function useFleetView(
       net: (x: any) => x.net,
       estado: (x: any) => x.c.estado,
     } as Record<string, (x: any) => string | number>)[st.sortK] || ((x: any) => x.net);
+  // La tabla del resumen respeta el mismo filtro de sección que la de vehículos.
+  const sorted = [...filteredFlota].sort((a, b) => {
+    const ka = keyF(a);
+    const kb = keyF(b);
+    return (typeof ka === 'string' ? ka.localeCompare(kb as string) : (ka as number) - (kb as number)) * st.sortDir;
+  });
   const sortedFlota = [...filteredFlota].sort((a, b) => {
     const ka = keyF(a);
     const kb = keyF(b);
@@ -1258,9 +1241,6 @@ export function useFleetView(
       ing: fmtShort(x.ing, st.hide),
       egr: fmtShort(x.egr, st.hide),
       net: fmtShort(x.net, st.hide),
-      ingValue: x.ing,
-      egrValue: x.egr,
-      netValue: x.net,
       netColor: statusColor(x.net, UMBRAL_VERDE),
       netPct: Math.round((Math.abs(x.net) / maxNet) * 100) + '%',
       gpsTag: gpsTagLabel(x.c),
@@ -2111,7 +2091,6 @@ export function useFleetView(
     onFrom: (iso) => update({ cFrom: iso }),
     onTo: (iso) => update({ cTo: iso }),
     montosLbl: st.hide ? 'Mostrar montos' : 'Ocultar montos',
-    hide: st.hide,
     toggleMontos: () => update((s2) => ({ hide: !s2.hide })),
 
     kpis: [
@@ -2142,6 +2121,15 @@ export function useFleetView(
     ).map(([k, label]) => ({ label, ...CH(st.filter === k), pick: () => update({ filter: k }) })),
     sectionFilter: st.sectionFilter,
     setSectionFilter: (value) => update({ sectionFilter: value }),
+    cols: mkCols([
+      ['plate', 'Vehículo', 'left'],
+      ['driver', 'Chofer', 'left'],
+      ['cuota', 'Cuota', 'right'],
+      ['ing', 'Ingresos', 'right'],
+      ['egr', 'Egresos', 'right'],
+      ['net', 'Neto', 'right'],
+      ['estado', 'Estado', 'right'],
+    ]),
     colsF: mkCols([
       ['model', 'Vehículo', 'left'],
       ['section', 'Sección', 'left'],
@@ -2153,32 +2141,7 @@ export function useFleetView(
       ['net', 'Neto', 'right'],
       ['estado', 'Estado', 'right'],
     ]),
-    // Con "Todas" el gráfico muestra una barra por sección; al elegir una
-    // sección (o "Sin sección") baja a una barra por vehículo de esa sección.
-    bars: (() => {
-      const nombreSeccion = (id: number | null) => persist.sections.find((section) => section.id === id)?.name ?? 'Sin sección';
-      if (st.sectionFilter !== 'todos') {
-        return filteredFlota.map((x) => ({
-          key: x.c.id,
-          label: vehicleChartLabel(x.c),
-          sub: x.c.driver,
-          ing: x.ing,
-          egr: x.egr,
-          net: x.net,
-          open: () => update({ detailId: x.c.id }),
-        }));
-      }
-      const porSeccion = new Map<string, BarItem>();
-      for (const x of filteredFlota) {
-        const key = x.c.sectionId == null ? 'sin' : String(x.c.sectionId);
-        const actual = porSeccion.get(key) ?? { key, label: nombreSeccion(x.c.sectionId), sub: '', ing: 0, egr: 0, net: 0, open: () => update({ sectionFilter: x.c.sectionId ?? 'sin' }) };
-        actual.ing += x.ing;
-        actual.egr += x.egr;
-        actual.net += x.net;
-        porSeccion.set(key, actual);
-      }
-      return [...porSeccion.values()];
-    })(),
+    rows: sorted.map(mkRow),
     flotaRows: sortedFlota.map(mkRow),
     flotaGroups: [
       ...persist.sections.map((section) => ({ id: String(section.id), name: section.name, rows: sortedFlota.filter((item) => item.c.sectionId === section.id).map(mkRow) })),
