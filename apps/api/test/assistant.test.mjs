@@ -105,7 +105,10 @@ test('temporal charts ordered by date; mobile keeps bars; negatives retained', (
 test('invalid fields, dates, metrics and SQL rejected; empty matches never fall back', () => {
  for(const r of [{entity:'users'},{entity:'vehiculos',sql:'SELECT * FROM users'},{entity:'vehiculos',owner_id:2},{entity:'pagos',metric:'deuda'},{entity:'pagos',limit:Infinity},{entity:'pagos',groupBy:'invalid'},{entity:'pagos',period:'personalizado',from:'2026-02-30'}]) assert.throws(()=>query(r));
  assert.throws(()=>queryRange({period:'personalizado',from:'2026-09-01',to:'2027-01-01'},'2026-09-08'));
- const empty=query({entity:'pagos',vehicle:'NO EXISTE'});
+ // Un filtro que no existe ahora se avisa para que el modelo lo corrija, pero
+ // un período válido sin datos sigue devolviendo un resultado vacío de verdad.
+ assert.throws(()=>query({entity:'pagos',vehicle:'NO EXISTE'}),/No encontré ningún vehículo/);
+ const empty=query({entity:'pagos',period:'personalizado',from:'2026-01-01',to:'2026-01-01'});
  assert.equal(empty.total,0); assert.deepEqual(empty.rows,[]); assert.equal(visualsFromQuery(empty).chart,undefined);
 });
 
@@ -181,7 +184,9 @@ test('invalid model JSON retried once, ambiguous identity returns clarification'
  const m=model([tool({entity:'pagos'}),{role:'assistant',content:'not json'},final()]);
  assert.equal((await answerAssistant('Cobros',[],'2026-09-08',{apiKey:'test',fetch:m.fetch,queryFleet:async r=>query(r)})).answer,'Respuesta');
  const invalid=model([tool({entity:'pagos'}),{role:'assistant',content:'not json'},{role:'assistant',content:'not json'}]);
- await assert.rejects(answerAssistant('Cobros',[],'2026-09-08',{apiKey:'test',fetch:invalid.fetch,queryFleet:async r=>query(r)}),/respuesta válida/);
+ // Sin JSON final válido, la red de seguridad responde con los datos reales ya consultados.
+ const salvaged=await answerAssistant('Cobros',[],'2026-09-08',{apiKey:'test',fetch:invalid.fetch,queryFleet:async r=>query(r)});
+ assert.match(salvaged.answer,/datos que encontré/);
  const ambiguous=model([tool({entity:'choferes',driver:'Hector'})]);
  const reply=await answerAssistant('Hector',[],'2026-09-08',{apiKey:'test',fetch:ambiguous.fetch,queryFleet:async r=>query(r)});
  assert.match(reply.answer,/Precisá el chofer/);assert.equal(reply.chart,undefined);

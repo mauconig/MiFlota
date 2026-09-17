@@ -218,23 +218,19 @@ Tu respuesta final debe ser JSON válido: {"answer":"respuesta breve","queryId":
       continue;
     }
     if (!results.length) {
-      // Sin consultas exitosas. Si el modelo ya devolvió un JSON válido, es una
-      // pregunta conversacional ("¿qué podés hacer?") y se responde sin datos.
-      try {
-        const parsed = parseJsonObject(message.content);
-        return { answer: parseAnswer(parsed), cards: [], followUps: parseFollowUps(parsed.followUps), asOf, mode: 'openrouter', ...(files.length ? { files } : {}) };
-      } catch {
-        // No sirvió como respuesta: se le pide una vez más que consulte, con el
-        // error a la vista para que corrija los argumentos.
-        if (askedForTool >= 2) throw Error('El modelo no consultó los datos');
-        askedForTool += 1;
-        // Un mensaje con tool_calls sin responder rompería el protocolo: se
-        // reenvía solo su texto.
-        messages.push(message.tool_calls?.length ? { role: 'assistant', content: message.content ?? '' } : message, { role: 'user', content: failedSignatures.size
-          ? 'Tu consulta anterior falló. Corregí los argumentos según el mensaje de error y volvé a llamar query_fleet_data antes de responder.'
-          : 'Para responder sobre la flota necesito datos reales: usá query_fleet_data antes de contestar. Si la pregunta no es sobre datos, devolvé el JSON final con tu respuesta.' });
-        continue;
-      }
+      // Nunca se responde con datos sin haberlos consultado. Si el modelo
+      // contesta con texto en vez de llamar a la herramienta se le da una
+      // oportunidad de corregir; si ya devolvió un JSON válido (o insiste), se
+      // corta con error en vez de mostrar una respuesta sin respaldo.
+      const answered = (() => { try { parseJsonObject(message.content); return true; } catch { return false; } })();
+      if (answered || askedForTool >= 2) throw Error('El modelo no consultó los datos');
+      askedForTool += 1;
+      // Un mensaje con tool_calls sin responder rompería el protocolo: se
+      // reenvía solo su texto.
+      messages.push(message.tool_calls?.length ? { role: 'assistant', content: message.content ?? '' } : message, { role: 'user', content: failedSignatures.size
+        ? 'Tu consulta anterior falló. Corregí los argumentos según el mensaje de error y volvé a llamar query_fleet_data antes de responder.'
+        : 'Para responder sobre la flota necesito datos reales: usá query_fleet_data antes de contestar.' });
+      continue;
     }
     try {
       const final = parseFinal(message.content);
