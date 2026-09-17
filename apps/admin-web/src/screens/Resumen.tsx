@@ -3,7 +3,7 @@ import { Btn } from '../components/Btn';
 import { ChipRow } from '../components/ChipRow';
 import { SearchBar } from '../components/SearchBar';
 import { SectionSelect } from '../components/SectionSelect';
-import { SectionChart } from '../components/SectionChart';
+import { VehicleTable } from '../components/VehicleTable';
 import { GastosChart } from '../components/GastosChart';
 import { AlertBanner } from '../components/AlertBanner';
 import { Screen } from '../components/Screen';
@@ -11,11 +11,6 @@ import { WarningIcon, ClockIcon } from '../icons';
 import { card, linkBtn, linkBtnHover, sectionTitle } from '../styles';
 
 export function Resumen({ v }: { v: View }) {
-  const chartTitle = v.sectionFilter === 'todos'
-    ? 'Por sección'
-    : v.sectionFilter === 'sin'
-      ? 'Sin sección'
-      : v.sectionOptions.find((section) => section.id === v.sectionFilter)?.name ?? 'Sección';
   return (
     <Screen label="Resumen" style={{ gap: 9 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 9 }}>
@@ -40,14 +35,14 @@ export function Resumen({ v }: { v: View }) {
                 Ver todo →
               </Btn>
             </div>
-            <SectionChart bars={v.bars} title={chartTitle} hide={v.hide} firstColumn={v.sectionFilter === 'todos' ? 'Sección' : 'Vehículo'} />
+            <VehicleTable cols={v.cols} rows={v.rows} variant="resumen" />
           </div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9, minWidth: 0 }}>
           <GastosChart v={v} />
 
-          <AlertBanner icon={<WarningIcon size={18} />} iconBg="#fdeeea" iconFg="#a8412f" title="Necesitan atención" summary={v.alertsSummary} badge={v.alertCount} onClick={v.goAlertas} items={v.alertTop} />
+          <AlertBanner icon={<WarningIcon size={18} />} iconBg="#fdeeea" iconFg="#a8412f" title="Necesitan atención" summary={v.alertsSummary} badge={v.alertCount} onClick={v.goAlertas} />
 
           <AlertBanner icon={<ClockIcon size={18} />} iconBg="#fdf3e2" iconFg="#a8730f" title="Cobros pendientes" summary={v.pendSummary} onClick={v.goCobros} />
 
