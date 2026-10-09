@@ -336,6 +336,8 @@ export interface MovRow {
   amt: string;
   amtFg: string;
   sort?: Record<string, string | number>;
+  /** Abre el detalle del movimiento. */
+  open?: () => void;
 }
 
 export interface LedgerRow {
@@ -537,6 +539,9 @@ export interface View {
 
   cobrosTab: 'cuotas' | 'pagos';
   cobrosTabChips: Chip[];
+  /** Filtro ingreso/egreso de la pestaña Movimientos. */
+  cobrosTipo: 'todos' | 'ingreso' | 'egreso';
+  cobrosTipoChips: Chip[];
   movimientosFull: MovimientoFull[];
   movimientosSub: string;
   abrirPago: () => void;
@@ -1490,7 +1495,7 @@ export function useFleetView(
   // emitidas, los pendientes y los ajustes no forman parte de esta lista.
   const reportMovements = realMovements.filter((m) => {
     const typeOk = st.movType === 'todos' || m.type === st.movType;
-    const categoryOk = st.movCat === 'todas' || (m.type === 'egreso' && m.category === st.movCat);
+    const categoryOk = st.movCats.length === 0 || (m.type === 'egreso' && st.movCats.includes(m.category));
     return m.date >= r.start && m.date <= r.end && typeOk && categoryOk && matches(
       st.movQ,
       m.desc,
@@ -1510,7 +1515,7 @@ export function useFleetView(
   const reportCatTotal = Object.values(reportByCat).reduce((sum, amount) => sum + amount, 0) || 1;
   const reportCatMax = Math.max(...CATS.map((category) => reportByCat[category] || 0), 1);
   const reportInclude: ReportExportPayload['include'] = st.movType === 'ingreso' ? 'ingresos' : st.movType === 'egreso' ? 'gastos' : 'ambos';
-  const reportCategories: ReportExportPayload['categories'] = st.movCat === 'todas' ? 'todas' : [st.movCat];
+  const reportCategories: ReportExportPayload['categories'] = st.movCats.length === 0 ? 'todas' : st.movCats;
 
   // La pantalla de Gastos es una vista dedicada de los egresos reales del
   // período. Mantiene su propia búsqueda y categoría para no alterar los
@@ -1543,7 +1548,7 @@ export function useFleetView(
   const selectedMovementMonth = monthKeys.has(st.movMonth) ? st.movMonth : monthKey(TODAY);
   const selectedMonth = movementMonths.find((m) => m.key === selectedMovementMonth) || movementMonths[0];
   const filteredRealMovements = (selectedMonth?.rows || []).filter((m) => {
-    const categoryOk = st.movCat === 'todas' || (m.type === 'egreso' && m.category === st.movCat);
+    const categoryOk = st.movCats.length === 0 || (m.type === 'egreso' && st.movCats.includes(m.category));
     return (st.movType === 'todos' || m.type === st.movType) && (st.movVehicle === 'todos' || m.carId === st.movVehicle) && categoryOk && matches(st.movQ, m.desc, m.category, m.vehicle, m.driver, m.note, m.medio);
   });
   const movementPageCount = Math.max(1, Math.ceil(filteredRealMovements.length / 20));
@@ -2390,8 +2395,8 @@ export function useFleetView(
           // 540k" no se puede leer mal, un "270k" suelto sí. Y en una pendiente
           // la columna va vacía: no entró nada, poner el monto facturado abajo
           // de "Cobrado" se lee como que sí.
-          amt: tag === 'Cobrado' ? fmtShort(m.amount, st.hide) : tag === 'Parcial' ? fmtShort(cob, st.hide) + ' de ' + fmtShort(m.amount, st.hide) : '—',
-          debe: debe ? fmtShort(debe, st.hide) : '',
+          amt: tag === 'Cobrado' ? fmt(m.amount, st.hide) : tag === 'Parcial' ? fmt(cob, st.hide) + ' de ' + fmt(m.amount, st.hide) : '—',
+          debe: debe ? fmt(debe, st.hide) : '',
           debeFg: debe ? COLORS.neg : '#6b665c',
           sort: { driver: drv, vehicle: c.plate + ' ' + c.model, description: m.desc, date: m.date.getTime(), status: tag, amount: cob, due: debe },
           // La ficha es del chofer actual del auto: si el auto cambió de manos
@@ -2415,7 +2420,13 @@ export function useFleetView(
       ...CH(st.cobrosTab === k),
       pick: () => update({ cobrosTab: k }),
     })),
-    movimientosFull: realMovements.filter(inR).filter((m) => matches(st.pendQ, m.driver, m.vehicle, m.desc, m.category, m.note, m.medio)).map((m) => {
+    cobrosTipo: st.cobrosTipo,
+    cobrosTipoChips: (['todos', 'ingreso', 'egreso'] as const).map((k) => ({
+      label: k === 'todos' ? 'Todos' : k === 'ingreso' ? 'Ingresos' : 'Egresos',
+      ...CH(st.cobrosTipo === k),
+      pick: () => update({ cobrosTipo: k }),
+    })),
+    movimientosFull: realMovements.filter(inR).filter((m) => st.cobrosTipo === 'todos' || m.type === st.cobrosTipo).filter((m) => matches(st.pendQ, m.driver, m.vehicle, m.desc, m.category, m.note, m.medio)).map((m) => {
       const inc = m.type === 'ingreso';
       return {
         id: m.id,
@@ -2424,7 +2435,7 @@ export function useFleetView(
         carLbl: m.vehicle,
         detalle: inc ? (m.note || 'Pago recibido') : m.category + ' · ' + m.desc,
         dateLbl: dLbl(m.date),
-        monto: (inc ? '+' : '−') + fmtShort(m.amount, st.hide),
+        monto: (inc ? '+' : '−') + fmt(m.amount, st.hide),
         tipo: m.type,
         tag: inc ? 'Ingreso' : 'Egreso',
         tagBg: inc ? '#eef4f0' : '#fdeeea',
@@ -2434,7 +2445,7 @@ export function useFleetView(
       };
     }),
     movimientosSub: (() => {
-      const visibles = realMovements.filter(inR).filter((m) => matches(st.pendQ, m.driver, m.vehicle, m.desc, m.category, m.note, m.medio));
+      const visibles = realMovements.filter(inR).filter((m) => st.cobrosTipo === 'todos' || m.type === st.cobrosTipo).filter((m) => matches(st.pendQ, m.driver, m.vehicle, m.desc, m.category, m.note, m.medio));
       const ingresos = visibles.filter((m) => m.type === 'ingreso').reduce((sum, m) => sum + m.amount, 0);
       const gastos = visibles.filter((m) => m.type === 'egreso').reduce((sum, m) => sum + m.amount, 0);
       if (!visibles.length) return 'Sin movimientos en el período';
@@ -2557,19 +2568,22 @@ export function useFleetView(
     setChQ: (e) => update({ chQ: e.target.value }),
     openDrvModal: () => update({ modal: 'drv', ndrv: blankDrv(), driverCredentials: null, driverCredentialsLoading: false }),
 
-    movsSub: reportMovements.length + ' movimientos en ' + r.short + (st.movType !== 'todos' || st.movCat !== 'todas' || st.movQ ? ' con los filtros aplicados' : ''),
+    movsSub: reportMovements.length + ' movimientos en ' + r.short + (st.movType !== 'todos' || st.movCats.length > 0 || st.movQ ? ' con los filtros aplicados' : ''),
     movTypeChips: (
       [
         ['todos', 'Todos'],
         ['ingreso', 'Ingresos'],
         ['egreso', 'Egresos'],
       ] as [UIState['movType'], string][]
-    ).map(([k, label]) => ({ label, ...CH(st.movType === k), pick: () => update({ movType: k, movCat: k === 'ingreso' ? 'todas' : st.movCat }) })),
-    movCatChips: [['todas', 'Todas las categorías'], ...CATS.map((c) => [c, c] as [string, string])].map(([k, label]) => ({
-      label,
-      ...CH(st.movCat === k),
-      pick: () => update({ movCat: k, movType: k === 'todas' ? st.movType : 'egreso' }),
-    })),
+    ).map(([k, label]) => ({ label, ...CH(st.movType === k), pick: () => update({ movType: k, movCats: k === 'ingreso' ? [] : st.movCats }) })),
+    movCatChips: [
+      { label: 'Todas las categorías', ...CH(st.movCats.length === 0), pick: () => update({ movCats: [] }) },
+      ...CATS.map((c) => ({
+        label: c,
+        ...CH(st.movCats.includes(c)),
+        pick: () => update({ movCats: st.movCats.includes(c) ? st.movCats.filter((x) => x !== c) : [...st.movCats, c], movType: 'egreso' }),
+      })),
+    ],
     movRows: reportMovements.map((m, i) => {
       const inc = m.type === 'ingreso';
       return {
@@ -2580,7 +2594,7 @@ export function useFleetView(
         iconFg: inc ? '#2e7d5b' : '#a8412f',
         desc: m.desc,
         sub: inc ? m.vehicle + ' · ' + m.driver : m.vehicle + ' · ' + m.category,
-        amt: (inc ? '+' : '−') + fmtShort(m.amount, st.hide),
+        amt: (inc ? '+' : '−') + fmt(m.amount, st.hide),
         amtFg: inc ? '#2e7d5b' : '#c0553f',
         sort: {
           date: m.date.getTime(),
@@ -2589,13 +2603,14 @@ export function useFleetView(
           sub: inc ? m.vehicle + ' ' + m.driver : m.vehicle + ' ' + m.category,
           amount: m.amount,
         },
+        open: () => update({ movementDetailId: m.id, quotaDetailId: null }),
       };
     }),
     movQ: st.movQ,
     setMovQ: (e) => update({ movQ: e.target.value }),
     movCats: CATS.map((label) => {
       const amount = reportByCat[label] || 0;
-      return { label, amt: fmtShort(amount, st.hide), color: CATCOLORS[label], pct: Math.round((amount / reportCatMax) * 100) + '%', share: Math.round((amount / reportCatTotal) * 100) + '%' };
+      return { label, amt: fmt(amount, st.hide), color: CATCOLORS[label], pct: Math.round((amount / reportCatMax) * 100) + '%', share: Math.round((amount / reportCatTotal) * 100) + '%' };
     }),
     movEgrTotal: fmt(reportEgr, st.hide),
     movIngTotal: fmt(reportIng, st.hide),
@@ -2639,7 +2654,7 @@ export function useFleetView(
     })),
     gastosCats: CATS.map((label) => {
       const amount = gastosByCat[label] || 0;
-      return { label, amt: fmtShort(amount, st.hide), color: CATCOLORS[label], pct: Math.round((amount / gastosCatMax) * 100) + '%', share: Math.round((amount / gastosCatTotal) * 100) + '%' };
+      return { label, amt: fmt(amount, st.hide), color: CATCOLORS[label], pct: Math.round((amount / gastosCatMax) * 100) + '%', share: Math.round((amount / gastosCatTotal) * 100) + '%' };
     }),
     gastosRows: gastosMovements.map((m) => ({
       id: m.id,
@@ -2652,7 +2667,7 @@ export function useFleetView(
       category: m.category,
       note: m.note,
       medio: m.medio,
-      amount: '−' + fmtShort(m.amount, st.hide),
+      amount: '−' + fmt(m.amount, st.hide),
       amountFg: COLORS.neg,
       comprobante: m.comprobante,
       sort: { date: m.date.getTime(), vehicle: m.vehicle, driver: m.driver, description: m.desc, category: m.category, amount: m.amount },
@@ -2718,7 +2733,10 @@ export function useFleetView(
       ...cars.map((c) => ({ label: c.plate, ...CH(st.movVehicle === c.id), pick: () => update({ movVehicle: c.id, movPage: 1, movExpanded: null }) })),
     ],
     movementTypeChips: (['todos', 'ingreso', 'egreso'] as const).map((k) => ({ label: k === 'todos' ? 'Todos' : k === 'ingreso' ? 'Ingresos' : 'Gastos', ...CH(st.movType === k), pick: () => update({ movType: k, movPage: 1, movExpanded: null }) })),
-    movementCategoryChips: [['todas', 'Todas'], ...CATS.map((c) => [c, c] as [string, string])].map(([k, label]) => ({ label, ...CH(st.movCat === k), pick: () => update({ movCat: k, movType: k === 'todas' ? st.movType : 'egreso', movPage: 1, movExpanded: null }) })),
+    movementCategoryChips: [
+      { label: 'Todas', ...CH(st.movCats.length === 0), pick: () => update({ movCats: [], movPage: 1, movExpanded: null }) },
+      ...CATS.map((c) => ({ label: c, ...CH(st.movCats.includes(c)), pick: () => update({ movCats: st.movCats.includes(c) ? st.movCats.filter((x) => x !== c) : [...st.movCats, c], movType: 'egreso', movPage: 1, movExpanded: null }) })),
+    ],
     setMovementVehicle: (id) => update({ movVehicle: id, movPage: 1, movExpanded: null }),
     movementPrevPage: () => update({ movPage: Math.max(1, movementPage - 1), movExpanded: null }),
     movementNextPage: () => update({ movPage: Math.min(movementPageCount, movementPage + 1), movExpanded: null }),

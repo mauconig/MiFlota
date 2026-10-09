@@ -49,7 +49,7 @@ export function Reportes({ v }: { v: View }) {
           </div>
           {!v.movRows.length && <Vacio titulo="Sin movimientos con estos filtros" detalle="Los pagos efectivos y los gastos registrados del período van a aparecer acá." />}
           {movimientos.map((m, i) => (
-            <div key={i} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '11px 0', borderBottom: '1px solid #f4efe4' }}>
+            <div key={i} role="button" tabIndex={0} onClick={() => m.open?.()} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); m.open?.(); } }} aria-label={'Ver detalle del movimiento ' + m.desc} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '11px 0', borderBottom: '1px solid #f4efe4', cursor: 'pointer' }}>
               <span style={{ width: 26, flex: 'none', fontSize: 12, color: '#a9a293', textAlign: 'right' }}>{i + 1}</span>
               <span style={{ width: 52, flex: 'none', fontSize: 12, color: '#6b665c' }}>{m.dateLbl}</span>
               <span style={{ width: 34, height: 34, borderRadius: 11, background: m.iconBg, color: m.iconFg, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 15, fontWeight: 700 }}>{m.sign}</span>

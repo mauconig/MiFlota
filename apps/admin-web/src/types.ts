@@ -181,7 +181,8 @@ export interface UIState {
   cFrom: string;
   cTo: string;
   movType: MovType;
-  movCat: string;
+  /** Categorías de egreso seleccionadas en el filtro (vacío = todas). */
+  movCats: string[];
   /** Cobros del bloque "quincena" cargados a mano (reemplazan lo calculado). */
   repCobrosManual: boolean;
   repCobrosActual: string;
@@ -217,6 +218,8 @@ export interface UIState {
   taller: { carId: string; reportId?: number | null; razon: string; monto: string; archivo: File | null; guardando: boolean } | null;
   /** Qué mira la pantalla de Cobros: las cuotas emitidas o el libro de pagos. */
   cobrosTab: 'cuotas' | 'pagos';
+  /** Filtro por tipo en la pestaña Movimientos de Cobros. */
+  cobrosTipo: 'todos' | 'ingreso' | 'egreso';
   movementDetailId: string | null;
   quotaDetailId: number | null;
   /** Pago a medio cargar. Null = el modal está cerrado. */

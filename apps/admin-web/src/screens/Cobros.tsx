@@ -88,6 +88,7 @@ export function Cobros({ v }: { v: View }) {
         <ChipRow chips={v.cobrosTabChips} />
         <span style={{ width: 1, height: 20, background: '#ece4d6', margin: '0 4px' }} />
         <SearchBar value={v.pendQ} onChange={v.setPendQ} placeholder="Buscar chofer o chapa…" />
+        {enPagos && <ChipRow chips={v.cobrosTipoChips} />}
         {!enPagos && <ChipRow chips={v.pendKindChips} />}
         <span style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 12, color: '#6b665c' }}>{enPagos ? v.movimientosSub : v.cobrosSub}</span>
