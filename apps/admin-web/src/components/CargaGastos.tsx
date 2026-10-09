@@ -41,7 +41,7 @@ export function CargaGastos({ cars, onSave }: { cars: Car[]; onSave: (items: Exp
 
   const car = cars.find((c) => c.id === carId);
   const query = norm(busqueda.trim());
-  const sugerencias = (query ? cars.filter((c) => norm(`${c.plate} ${c.model} ${c.year} ${c.driver}`).includes(query)) : cars).slice(0, 8);
+  const sugerencias = (query ? cars.filter((c) => norm(`${c.plate} ${c.model} ${c.year} ${c.driver} ${c.gpsTag}`).includes(query)) : cars).slice(0, 8);
 
   const abrir = () => {
     setPaso(1);
@@ -100,14 +100,14 @@ export function CargaGastos({ cars, onSave }: { cars: Car[]; onSave: (items: Exp
           {paso === 1 && <>
             <div style={fieldLabel}>
               <span style={fieldLabelText}>Buscá el vehículo</span>
-              <input autoFocus value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Escribí chapa, modelo o chofer… por ejemplo “blanco”" style={fieldInput} aria-label="Buscar vehículo" />
+              <input autoFocus value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Chapa, modelo, color (GPS) o chofer… por ejemplo “blanco”" style={fieldInput} aria-label="Buscar vehículo" />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflow: 'auto' }}>
               {sugerencias.map((c) => <button key={c.id} type="button" onClick={() => elegirAuto(c)} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, textAlign: 'left', border: '1px solid #e0d7c6', background: '#fffdf8', borderRadius: 12, padding: '11px 13px', cursor: 'pointer' }}>
                 <span style={{ fontWeight: 700, fontSize: 13, color: '#24271f' }}>{c.plate}</span>
-                <span style={{ fontSize: 12, color: '#756e5f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.model} · {c.year}</span>
+                <span style={{ fontSize: 12, color: '#756e5f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.model} · {c.year}{c.gpsTag ? ' · ' + c.gpsTag : ''}</span>
               </button>)}
-              {!sugerencias.length && <p style={{ margin: 0, fontSize: 12, color: '#8a7e68' }}>No encontré ningún vehículo con “{busqueda.trim()}”. Probá con la chapa o el modelo.</p>}
+              {!sugerencias.length && <p style={{ margin: 0, fontSize: 12, color: '#8a7e68' }}>No encontré ningún vehículo con “{busqueda.trim()}”. Probá con la chapa, el modelo o el color.</p>}
             </div>
           </>}
 
