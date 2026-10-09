@@ -112,7 +112,7 @@ export function Cobros({ v }: { v: View }) {
             <SortHeader label="Detalle" sortKey="note" state={sort} onSort={onSort} width={220} />
             <SortHeader label="Fecha" sortKey="date" state={sort} onSort={onSort} width={74} />
             <SortHeader label="Tipo" sortKey="type" state={sort} onSort={onSort} width={84} />
-            <SortHeader label="Monto" sortKey="amount" state={sort} onSort={onSort} width={96} align="right" />
+            <SortHeader label="Monto" sortKey="amount" state={sort} onSort={onSort} width={124} align="right" />
           </div>
           {!v.movimientosFull.length && (
             <Vacio titulo="Sin movimientos en el período" detalle="Acá queda el libro de lo que entró y salió, con la fecha real de cada movimiento." />
@@ -128,7 +128,7 @@ export function Cobros({ v }: { v: View }) {
                 <span style={{ width: 84, flex: 'none' }}>
                   <span style={{ ...tag, background: m.tagBg, color: m.tagFg }}>{m.tag}</span>
                 </span>
-                <span style={{ width: 96, flex: 'none', textAlign: 'right', fontSize: 14, fontWeight: 700, color: m.tagFg }}>{m.monto}</span>
+                <span style={{ width: 124, flex: 'none', textAlign: 'right', fontSize: 14, fontWeight: 700, color: m.tagFg }}>{m.monto}</span>
               </div>
             ))}
           </ScrollArea>

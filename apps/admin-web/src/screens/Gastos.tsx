@@ -67,7 +67,7 @@ export function Gastos({ v }: { v: View }) {
             <SortableHeader label="Chofer" sortKey="driver" state={sort} onSort={onSort} width={174} align="left" />
             <SortableHeader label="Detalle" sortKey="description" state={sort} onSort={onSort} grow />
             <SortableHeader label="Categoría" sortKey="category" state={sort} onSort={onSort} width={116} align="left" />
-            <SortableHeader label="Monto" sortKey="amount" state={sort} onSort={onSort} width={112} align="right" />
+            <SortableHeader label="Monto" sortKey="amount" state={sort} onSort={onSort} width={124} align="right" />
           </div>
           {!v.gastosRows.length && <Vacio titulo={filtrados ? 'Ningún gasto coincide' : 'No hay gastos en el período'} detalle={filtrados ? 'Probá con otra búsqueda o categoría.' : 'Los gastos registrados de la flota van a aparecer acá.'} />}
           {gastos.map((m) => (
@@ -88,7 +88,7 @@ export function Gastos({ v }: { v: View }) {
                 {m.comprobante && <span style={{ display: 'inline-block', marginTop: 6, fontSize: 11, color: '#8a641c' }}>Tiene comprobante</span>}
               </span>
               <span style={{ width: 116, flex: 'none', paddingTop: 5, textAlign: 'center' }}><span style={{ display: 'inline-block', padding: '5px 9px', borderRadius: 11, background: `${CATCOLORS[m.category] || '#f4f0e8'}22`, color: CATCOLORS[m.category] || '#6b665c', fontSize: 10, fontWeight: 700 }}>{m.category}</span></span>
-              <span style={{ width: 112, flex: 'none', textAlign: 'center', paddingTop: 7, fontSize: 14, fontWeight: 700, color: '#c0553f' }}>{m.amount}</span>
+              <span style={{ width: 124, flex: 'none', textAlign: 'right', paddingTop: 7, fontSize: 14, fontWeight: 700, color: '#c0553f' }}>{m.amount}</span>
             </div>
           ))}
         </ScrollArea>
@@ -100,7 +100,7 @@ export function Gastos({ v }: { v: View }) {
           <span style={{ fontSize: 12, color: '#6b665c' }}>{v.gastosTotal}</span>
         </div>
         <ScrollArea style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-          {v.gastosCats.map((c) => <div key={c.label} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}><span style={{ width: 104, flex: 'none', fontSize: 13, color: '#3d3a34' }}>{c.label}</span><span style={{ flex: 1, height: 10, borderRadius: 5, background: '#f4f0e8', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', borderRadius: 5, background: c.color, width: c.pct }} /></span><span style={{ width: 76, flex: 'none', textAlign: 'right', fontSize: 13, fontWeight: 700 }}>{c.amt}</span><span style={{ width: 38, flex: 'none', textAlign: 'right', fontSize: 12, color: '#6b665c' }}>{c.share}</span></div>)}
+          {v.gastosCats.map((c) => <div key={c.label} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}><span style={{ width: 104, flex: 'none', fontSize: 13, color: '#3d3a34' }}>{c.label}</span><span style={{ flex: 1, height: 10, borderRadius: 5, background: '#f4f0e8', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', borderRadius: 5, background: c.color, width: c.pct }} /></span><span style={{ width: 96, flex: 'none', textAlign: 'right', fontSize: 13, fontWeight: 700 }}>{c.amt}</span><span style={{ width: 38, flex: 'none', textAlign: 'right', fontSize: 12, color: '#6b665c' }}>{c.share}</span></div>)}
         </ScrollArea>
         <div style={{ borderTop: '1px solid #f0ebe0', paddingTop: 13, display: 'flex', flexDirection: 'column', gap: 9, flex: 'none' }}>
           <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', fontSize: 13 }}><span style={{ color: '#6b665c' }}>Registros</span><span style={{ fontWeight: 700 }}>{v.gastosTotalRows}</span></div>

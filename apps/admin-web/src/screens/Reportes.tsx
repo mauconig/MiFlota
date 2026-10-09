@@ -45,7 +45,7 @@ export function Reportes({ v }: { v: View }) {
             <SortableHeader label="Tipo" sortKey="type" state={sort} onSort={onSort} width={34} />
             <SortableHeader label="Detalle" sortKey="description" state={sort} onSort={onSort} grow />
             <SortableHeader label="Asociado" sortKey="sub" state={sort} onSort={onSort} width={220} />
-            <SortableHeader label="Monto" sortKey="amount" state={sort} onSort={onSort} width={96} align="right" />
+            <SortableHeader label="Monto" sortKey="amount" state={sort} onSort={onSort} width={124} align="right" />
           </div>
           {!v.movRows.length && <Vacio titulo="Sin movimientos con estos filtros" detalle="Los pagos efectivos y los gastos registrados del período van a aparecer acá." />}
           {movimientos.map((m, i) => (
@@ -57,7 +57,7 @@ export function Reportes({ v }: { v: View }) {
                 <span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>{m.desc}</span>
               </span>
               <span style={{ width: 220, flex: 'none', minWidth: 0, fontSize: 11, color: '#6b665c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.sub}</span>
-              <span style={{ width: 96, flex: 'none', textAlign: 'right', fontSize: 13, fontWeight: 700, color: m.amtFg }}>{m.amt}</span>
+              <span style={{ width: 124, flex: 'none', textAlign: 'right', fontSize: 13, fontWeight: 700, color: m.amtFg }}>{m.amt}</span>
             </div>
           ))}
         </ScrollArea>
