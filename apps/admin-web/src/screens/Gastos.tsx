@@ -41,7 +41,7 @@ export function Gastos({ v }: { v: View }) {
   const onSort = (key: string) => setSort((current) => current.key === key ? { key, direction: current.direction === 1 ? -1 : 1 } : { key, direction: 1 });
   const gastos = [...v.gastosRows].sort((a, b) => compareSortableRows(a, b, sort));
   return (
-    <Screen label="Gastos" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(300px, 26%)', gap: 18, minHeight: 0 }}>
+    <Screen label="Gastos" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(320px, 31%)', gap: 18, minHeight: 0 }}>
       <div style={{ ...card, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, borderBottom: '1px solid #f0ebe0', flex: 'none', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 220 }}>
