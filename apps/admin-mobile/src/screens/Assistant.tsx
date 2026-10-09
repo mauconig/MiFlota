@@ -330,6 +330,7 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
   const [sending, setSending] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [recSeconds, setRecSeconds] = useState(0);
   const [tableSheet, setTableSheet] = useState<TableSheetState | null>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const listRef = useRef<React.ElementRef<typeof KeyboardChatScrollView>>(null);
@@ -340,6 +341,7 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
   // La pantalla se desmonta al navegar, así que el estado en memoria no alcanza:
   // la conversación se guarda en disco y se recupera al volver a entrar.
   const inFlight = useRef(false);
+  const canceladoVoiceRef = useRef(false);
 
   useEffect(() => () => controller.current?.abort(), []);
 
@@ -453,6 +455,12 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
 
   const addSystemError = (text: string) => setMessages((current) => [...current, { id: `m${nextId.current++}`, role: 'assistant', text, error: true }]);
 
+  useEffect(() => {
+    if (!recording) return;
+    const timer = setInterval(() => setRecSeconds((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, [recording]);
+
   const startVoice = async () => {
     if (recording || transcribing || sending || inFlight.current) return;
     try {
@@ -463,7 +471,9 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
       }
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       await recorder.prepareToRecordAsync();
+      canceladoVoiceRef.current = false;
       recorder.record();
+      setRecSeconds(0);
       setRecording(true);
     } catch {
       addSystemError('No pude iniciar la grabación. Probá de nuevo.');
@@ -475,6 +485,7 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
     setRecording(false);
     try {
       await recorder.stop();
+      if (canceladoVoiceRef.current) { canceladoVoiceRef.current = false; return; }
       const uri = recorder.uri;
       if (!uri) return;
       setTranscribing(true);
@@ -490,6 +501,12 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
       }
       addSystemError(error instanceof Error ? error.message : 'No pude transcribir el audio.');
     }
+  };
+
+  const cancelVoice = async () => {
+    if (!recording) return;
+    canceladoVoiceRef.current = true;
+    await stopVoice();
   };
 
   const confirmDraft = async (items: AssistantExpenseInput[]) => {
@@ -610,51 +627,64 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
       </KeyboardChatScrollView>
 
       <KeyboardStickyView
-        style={styles.composer}
+        style={[styles.composer, recording && styles.recordingBar]}
         onLayout={(event) => {
           composerHeight.value = event.nativeEvent.layout.height;
         }}
       >
-        <TextInput
-          value={draft}
-          onChangeText={setDraft}
-          placeholder={recording ? 'Grabando… hablá y tocá el cuadrado' : 'Preguntá o dictá sobre tu flota'}
-          placeholderTextColor="#8b857b"
-          multiline
-          maxLength={600}
-          editable={!sending && !recording && hydrated}
-          style={styles.input}
-          accessibilityLabel="Pregunta para el asistente"
-        />
-        <Pressable
-          onPress={() => void (recording ? stopVoice() : startVoice())}
-          disabled={sending || transcribing || !hydrated}
-          accessibilityRole="button"
-          accessibilityLabel={recording ? 'Detener grabación' : 'Grabar mensaje de voz'}
-          style={({ pressed }) => [styles.micButton, recording && styles.micButtonRecording, (sending || transcribing || !hydrated) && styles.sendDisabled, pressed && styles.sendPressed]}
-        >
-          {recording ? (
-            <View style={styles.micStop} />
-          ) : (
-            <Svg viewBox="0 0 24 24" width={20} height={20} fill="none" stroke="#6b5837" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <Path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-              <Path d="M5 11a7 7 0 0 0 14 0" />
-              <Path d="M12 18v3" />
-            </Svg>
-          )}
-        </Pressable>
-        <Pressable
-          onPress={() => void send(draft)}
-          disabled={!draft.trim() || sending || recording || !hydrated}
-          accessibilityRole="button"
-          accessibilityLabel="Enviar pregunta"
-          style={({ pressed }) => [styles.sendButton, (!draft.trim() || sending || recording || !hydrated) && styles.sendDisabled, pressed && styles.sendPressed]}
-        >
-          <Svg viewBox="0 0 24 24" width={20} height={20} fill="none" stroke="#16150f" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-            <Path d="m22 2-7 20-4-9-9-4Z" />
-            <Path d="M22 2 11 13" />
-          </Svg>
-        </Pressable>
+        {recording ? (
+          <>
+            <View style={styles.recDot} />
+            <Text style={styles.recLabel}>Grabando…</Text>
+            <Text style={styles.recTime}>{Math.floor(recSeconds / 60)}:{String(recSeconds % 60).padStart(2, '0')}</Text>
+            <View style={styles.recSpacer} />
+            <Pressable onPress={() => void cancelVoice()} accessibilityRole="button" accessibilityLabel="Cancelar grabación" style={({ pressed }) => [styles.recCancel, pressed && styles.sendPressed]}>
+              <Text style={styles.recCancelText}>Cancelar</Text>
+            </Pressable>
+            <Pressable onPress={() => void stopVoice()} accessibilityRole="button" accessibilityLabel="Detener y enviar" style={({ pressed }) => [styles.recStop, pressed && styles.sendPressed]}>
+              <Text style={styles.recStopText}>Detener</Text>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Preguntá o dictá sobre tu flota"
+              placeholderTextColor="#8b857b"
+              multiline
+              maxLength={600}
+              editable={!sending && hydrated}
+              style={styles.input}
+              accessibilityLabel="Pregunta para el asistente"
+            />
+            <Pressable
+              onPress={() => void startVoice()}
+              disabled={sending || transcribing || !hydrated}
+              accessibilityRole="button"
+              accessibilityLabel="Grabar mensaje de voz"
+              style={({ pressed }) => [styles.micButton, (sending || transcribing || !hydrated) && styles.sendDisabled, pressed && styles.sendPressed]}
+            >
+              <Svg viewBox="0 0 24 24" width={20} height={20} fill="none" stroke="#6b5837" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <Path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                <Path d="M5 11a7 7 0 0 0 14 0" />
+                <Path d="M12 18v3" />
+              </Svg>
+            </Pressable>
+            <Pressable
+              onPress={() => void send(draft)}
+              disabled={!draft.trim() || sending || !hydrated}
+              accessibilityRole="button"
+              accessibilityLabel="Enviar pregunta"
+              style={({ pressed }) => [styles.sendButton, (!draft.trim() || sending || !hydrated) && styles.sendDisabled, pressed && styles.sendPressed]}
+            >
+              <Svg viewBox="0 0 24 24" width={20} height={20} fill="none" stroke="#16150f" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <Path d="m22 2-7 20-4-9-9-4Z" />
+                <Path d="M22 2 11 13" />
+              </Svg>
+            </Pressable>
+          </>
+        )}
       </KeyboardStickyView>
       <AssistantTableSheet table={tableSheet} onAction={activateAction} onClose={() => setTableSheet(null)} />
     </View>
@@ -737,6 +767,15 @@ const styles = StyleSheet.create({
   micButton: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: '#ddd4c5', backgroundColor: '#f8f4ec', alignItems: 'center', justifyContent: 'center' },
   micButtonRecording: { backgroundColor: '#b94e3c', borderColor: '#b94e3c' },
   micStop: { width: 13, height: 13, borderRadius: 3, backgroundColor: '#fff' },
+  recordingBar: { alignItems: 'center' },
+  recDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#b94e3c' },
+  recLabel: { color: '#934f37', fontSize: 13, fontWeight: '700' },
+  recTime: { color: '#756e5f', fontSize: 13, fontVariant: ['tabular-nums'] },
+  recSpacer: { flex: 1 },
+  recCancel: { borderRadius: 14, borderWidth: 1, borderColor: '#ddd3c0', backgroundColor: '#fffdf8', paddingHorizontal: 13, paddingVertical: 9 },
+  recCancelText: { color: '#6b5837', fontSize: 12, fontWeight: '700' },
+  recStop: { borderRadius: 14, backgroundColor: '#b94e3c', paddingHorizontal: 15, paddingVertical: 9 },
+  recStopText: { color: '#fff', fontSize: 12, fontWeight: '800' },
   sendDisabled: { opacity: 0.4 },
   sendPressed: { transform: [{ scale: 0.96 }] },
   draft: { alignSelf: 'stretch', marginTop: 4, gap: 9, borderWidth: 1, borderColor: '#d8cdb8', borderRadius: 16, backgroundColor: '#fffdf8', padding: 13 },

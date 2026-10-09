@@ -136,11 +136,13 @@ export function AssistantChat({ ask, transcribe, onOpenCar, onConfirmExpenses }:
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [recSeconds, setRecSeconds] = useState(0);
   const [launcherVisible, setLauncherVisible] = useState(true);
   const busyRef = useRef(false);
   const controller = useRef<AbortController | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const stream = useRef<MediaStream | null>(null);
+  const canceladoRef = useRef(false);
   const launcher = useRef<HTMLButtonElement>(null);
   const lastScrollTop = useRef(0);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -151,6 +153,11 @@ export function AssistantChat({ ask, transcribe, onOpenCar, onConfirmExpenses }:
     stream.current?.getTracks().forEach((track) => track.stop());
   }, []);
   useEffect(() => { if (open) input.current?.focus(); }, [open]);
+  useEffect(() => {
+    if (!recording) return;
+    const timer = setInterval(() => setRecSeconds((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, [recording]);
   useEffect(() => { if (open) bottom.current?.scrollIntoView({ block: 'nearest' }); }, [open, exchanges, busy]);
   useEffect(() => {
     const scrollContainer = launcher.current?.closest('main');
@@ -199,6 +206,7 @@ export function AssistantChat({ ask, transcribe, onOpenCar, onConfirmExpenses }:
         media.getTracks().forEach(track => track.stop());
         stream.current = null;
         setRecording(false);
+        if (canceladoRef.current) { canceladoRef.current = false; return; }
         const blob = new Blob(chunks, { type: mediaRecorder.mimeType || 'audio/webm' });
         if (!blob.size) return;
         setTranscribing(true);
@@ -213,13 +221,20 @@ export function AssistantChat({ ask, transcribe, onOpenCar, onConfirmExpenses }:
       };
       recorder.current = mediaRecorder;
       stream.current = media;
+      canceladoRef.current = false;
       mediaRecorder.start();
+      setRecSeconds(0);
       setRecording(true);
     } catch {
       mostrarErrorVoz('No pude acceder al micrófono. Revisá los permisos.');
     }
   };
   const stopRecording = () => { if (recorder.current && recorder.current.state !== 'inactive') recorder.current.stop(); };
+  const cancelRecording = () => {
+    canceladoRef.current = true;
+    if (recorder.current && recorder.current.state !== 'inactive') recorder.current.stop();
+    else { stream.current?.getTracks().forEach((track) => track.stop()); stream.current = null; setRecording(false); }
+  };
   return <>
     <button ref={launcher} className={'ai-launcher' + (launcherVisible ? '' : ' ai-launcher-hidden')} onClick={() => setOpen(v => !v)} aria-label={open ? 'Minimizar asistente MiFlota' : 'Abrir asistente MiFlota'} aria-expanded={open} aria-controls="miflota-chat">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M20 11.5a8 8 0 0 1-8 8H5l-4 3 1.5-6A8 8 0 1 1 20 11.5Z" /><path d="M7 11h8M7 7h5" /></svg>
@@ -247,7 +262,17 @@ export function AssistantChat({ ask, transcribe, onOpenCar, onConfirmExpenses }:
         {transcribing && <div className="ai-loading" role="status"><span className="ai-dot" /> Transcribiendo el audio…</div>}
         <div ref={bottom} />
       </div>
-      <form className="ai-composer" onSubmit={e => { e.preventDefault(); void submit(draft); }}><label className="ai-sr-only" htmlFor="ai-question">Tu pregunta</label><textarea ref={input} id="ai-question" placeholder={recording ? 'Grabando… hablá y tocá el cuadrado para terminar' : 'Preguntá o dictá sobre tu flota…'} value={draft} maxLength={600} rows={2} disabled={recording} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if(e.key==='Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(draft); } }} /><button type="button" className={'ai-mic' + (recording ? ' ai-mic-recording' : '')} onClick={() => recording ? stopRecording() : void startRecording()} disabled={busy || transcribing} aria-label={recording ? 'Detener grabación' : 'Grabar mensaje de voz'} title={recording ? 'Detener y enviar' : 'Mensaje de voz'}>{recording ? <span className="ai-mic-stop" /> : <MicIcon />}</button><button type="submit" disabled={busy || recording || !draft.trim()} aria-label="Enviar pregunta">↑</button><small>{recording ? 'Grabando · tocá el cuadrado para enviar' : 'Enter para enviar · Shift+Enter para otra línea · 🎤 para dictar'}</small></form>
+      {recording ? (
+        <div className="ai-recording" role="status" aria-live="polite">
+          <span className="ai-rec-dot" aria-hidden="true" />
+          <span className="ai-rec-label">Grabando…</span>
+          <span className="ai-rec-time">{Math.floor(recSeconds / 60)}:{String(recSeconds % 60).padStart(2, '0')}</span>
+          <button type="button" className="ai-rec-cancel" onClick={cancelRecording}>Cancelar</button>
+          <button type="button" className="ai-rec-stop" onClick={stopRecording} aria-label="Detener y enviar">Detener</button>
+        </div>
+      ) : (
+        <form className="ai-composer" onSubmit={e => { e.preventDefault(); void submit(draft); }}><label className="ai-sr-only" htmlFor="ai-question">Tu pregunta</label><textarea ref={input} id="ai-question" placeholder="Preguntá o dictá sobre tu flota…" value={draft} maxLength={600} rows={2} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if(e.key==='Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(draft); } }} /><button type="button" className="ai-mic" onClick={() => void startRecording()} disabled={busy || transcribing} aria-label="Grabar mensaje de voz" title="Mensaje de voz"><MicIcon /></button><button type="submit" disabled={busy || !draft.trim()} aria-label="Enviar pregunta">↑</button><small>Enter para enviar · Shift+Enter para otra línea · 🎤 para dictar</small></form>
+      )}
     </section>}
   </>;
 }
