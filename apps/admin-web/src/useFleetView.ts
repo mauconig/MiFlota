@@ -565,6 +565,13 @@ export interface View {
   movNetTotal: string;
   exportar: () => void;
   exportarPdf: () => void;
+  /** Cobros del bloque "quincena" cargados a mano. */
+  repCobrosManual: boolean;
+  setRepCobrosManual: (on: boolean) => void;
+  repCobrosActual: string;
+  setRepCobrosActual: (v: string) => void;
+  repCobrosAnterior: string;
+  setRepCobrosAnterior: (v: string) => void;
   /** Notas del reporte: la pregunta previa al PDF y el recorrido auto por auto. */
   notas: NotasEstado | null;
   notasSi: () => void;
@@ -2096,7 +2103,8 @@ export function useFleetView(
   // ---- notas del reporte: pregunta previa y recorrido auto por auto ----
   const reportBasePayload = (): Omit<ReportExportPayload, 'format'> => {
     const period = { type: st.period, ...(st.period === 'custom' ? { from: st.cFrom, to: st.cTo } : { to: isoLocal(TODAY) }) } as ReportExportPayload['period'];
-    return { period, include: reportInclude, carIds: 'todos', categories: reportCategories, search: st.movQ.trim() || undefined };
+    const cobrosManuales = st.repCobrosManual ? { actual: numFromInput(st.repCobrosActual), anterior: numFromInput(st.repCobrosAnterior) } : null;
+    return { period, include: reportInclude, carIds: 'todos', categories: reportCategories, search: st.movQ.trim() || undefined, cobrosManuales };
   };
 
   const descargarReporte = async (formato: 'pdf' | 'xlsx') => {
@@ -2603,6 +2611,12 @@ export function useFleetView(
     exportarPdf: () => {
       abrirNotas();
     },
+    repCobrosManual: st.repCobrosManual,
+    setRepCobrosManual: (on: boolean) => update({ repCobrosManual: on }),
+    repCobrosActual: st.repCobrosActual,
+    setRepCobrosActual: (v: string) => update({ repCobrosActual: v }),
+    repCobrosAnterior: st.repCobrosAnterior,
+    setRepCobrosAnterior: (v: string) => update({ repCobrosAnterior: v }),
     notas,
     notasSi,
     notasNo,

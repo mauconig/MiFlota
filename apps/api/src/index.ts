@@ -575,6 +575,8 @@ interface FleetReportExportBody {
   carIds?: FleetReportSelection;
   categories?: FleetReportCategorySelection;
   search?: string;
+  /** Cobros cargados a mano para el bloque "quincena": reemplazan lo calculado. */
+  cobrosManuales?: { actual?: number; anterior?: number } | null;
   format?: 'pdf' | 'xlsx';
 }
 
@@ -623,6 +625,10 @@ async function pdfFromFleetReport(data: {
   incomeRows: FleetReportIncomeRow[];
   expenseRows: FleetReportExpenseRow[];
   incomeTotal: number;
+  /** Cobros del período anterior (misma duración); se compara contra incomeTotal. */
+  incomePrevTotal?: number;
+  /** Si viene, el bloque "quincena" usa estos valores en lugar de lo calculado. */
+  cobrosManuales?: { actual: number; anterior: number } | null;
   expenseTotal: number;
   resultTotal: number;
   sectionOrder: string[];
@@ -943,6 +949,27 @@ async function pdfFromFleetReport(data: {
       ? [reportMoney(tallerTotal), reportMoney(mantenimientoTotal), reportMoney(otrosTotal), reportMoney(data.incomeTotal), reportMoney(data.resultTotal)]
       : [reportMoney(tallerTotal), reportMoney(mantenimientoTotal), reportMoney(otrosTotal), reportMoney(-data.expenseTotal)], true);
 
+    // Comparación de cobros contra el período anterior (la quincena previa).
+    // Si el usuario cargó los cobros a mano, esos reemplazan lo calculado.
+    const manual = data.cobrosManuales;
+    if (data.incomeRows.length || manual) {
+      doc.y += 18;
+      blockBanner('Cobros vs quincena anterior');
+      const actual = manual ? manual.actual : data.incomeTotal;
+      const prev = manual ? manual.anterior : data.incomePrevTotal ?? 0;
+      const diff = actual - prev;
+      const linea = (label: string, value: string, color = REPORT_COLORS.ink) => {
+        ensureSpace(20);
+        const y = doc.y;
+        doc.fillColor(REPORT_COLORS.ink).font('Helvetica-Bold').fontSize(10).text(label, margin + 10, y, { width: width - 200, lineBreak: false });
+        doc.fillColor(color).font('Helvetica-Bold').fontSize(11).text(value, margin + width - 190, y, { width: 180, align: 'right', lineBreak: false });
+        doc.y = y + 20;
+      };
+      linea('Total cobros quincena', reportMoney(actual));
+      linea('Quincena anterior', reportMoney(prev));
+      linea('Diferencia', `${diff >= 0 ? '(+) ' : '(-) '}${reportMoney(Math.abs(diff))}`, diff >= 0 ? REPORT_COLORS.green : REPORT_COLORS.red);
+    }
+
     doc.y += 14;
     doc.font('Helvetica').fontSize(9).fillColor(REPORT_COLORS.muted).text(`${data.incomeRows.length + data.expenseRows.length} movimientos incluidos · datos filtrados según la selección`, margin, doc.y);
     doc.end();
@@ -976,12 +1003,33 @@ function reportSelection(value: FleetReportSelection | undefined): 'todos' | Set
   return new Set(value.map((id) => String(id).trim()).filter(Boolean));
 }
 
+/** Período anterior para comparar cobros. Si el rango es una quincena
+ *  (1-15 o 16-fin de mes) devuelve la quincena que le precede; si no, el tramo
+ *  de la misma duración inmediatamente anterior. */
+function periodoAnterior(from: string, to: string): { from: string; to: string } {
+  const [y, m, d] = from.split('-').map(Number);
+  const [, , td] = to.split('-').map(Number);
+  const ultimoDia = (yy: number, mm: number) => new Date(yy, mm, 0).getDate();
+  const iso = (yy: number, mm: number, dd: number) => `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+  if (d === 1 && td === 15) {
+    const pm = m === 1 ? 12 : m - 1;
+    const py = m === 1 ? y - 1 : y;
+    return { from: iso(py, pm, 16), to: iso(py, pm, ultimoDia(py, pm)) };
+  }
+  if (d === 16 && to === iso(y, m, ultimoDia(y, m))) return { from: iso(y, m, 1), to: iso(y, m, 15) };
+  const span = Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1;
+  const prevTo = isoOffset(from, -1);
+  return { from: isoOffset(prevTo, -(span - 1)), to: prevTo };
+}
+
 interface ReporteArmado {
   range: { from: string; to: string };
   incomeRows: FleetReportIncomeRow[];
   expenseRows: FleetReportExpenseRow[];
   counts: { ingresos: number; gastos: number; total: number };
   incomeTotal: number;
+  /** Cobros del período inmediatamente anterior, de la misma duración. */
+  incomePrevTotal: number;
   expenseTotal: number;
   resultTotal: number;
   periodLabel: string;
@@ -1036,12 +1084,18 @@ function armarReporte(ownerId: number, body: FleetReportExportBody): ReporteArma
 
   const incomeTotal = incomeRows.reduce((sum, row) => sum + row.monto, 0);
   const expenseTotal = expenseRows.reduce((sum, row) => sum + row.total, 0);
+  // Cobros de la quincena anterior (o del período anterior de igual duración).
+  const prev = periodoAnterior(range.from, range.to);
+  const incomePrevTotal = (selPagos.all(ownerId) as PagoRow[])
+    .filter((pago) => pago.tipo === 'pago' && pago.fecha >= prev.from && pago.fecha <= prev.to && carAllowed(pago.car_id))
+    .reduce((sum, pago) => sum + pago.monto, 0);
   return {
     range,
     incomeRows,
     expenseRows,
     counts,
     incomeTotal,
+    incomePrevTotal,
     expenseTotal,
     resultTotal: incomeTotal - expenseTotal,
     periodLabel: reportPeriodLabel(range.from, range.to),
@@ -1053,7 +1107,11 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
   const format = body.format;
   if (!['pdf', 'xlsx'].includes(format ?? '')) throw new Error('Los filtros del reporte no son válidos');
   const reporte = armarReporte(ownerId, body);
-  const { incomeRows, expenseRows, counts, incomeTotal, expenseTotal, resultTotal, periodLabel } = reporte;
+  const { incomeRows, expenseRows, counts, incomeTotal, incomePrevTotal, expenseTotal, resultTotal, periodLabel } = reporte;
+  const manualRaw = body.cobrosManuales;
+  const cobrosManuales = manualRaw && (typeof manualRaw.actual === 'number' || typeof manualRaw.anterior === 'number')
+    ? { actual: Math.max(0, Math.round(Number(manualRaw.actual) || 0)), anterior: Math.max(0, Math.round(Number(manualRaw.anterior) || 0)) }
+    : null;
   const extension = format === 'xlsx' ? 'xlsx' : 'pdf';
   const id = randomUUID();
   const name = `MiFlota-reporte-${reportFileTimestamp()}-${id.slice(0, 8)}.${extension}`;
@@ -1090,6 +1148,8 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
       incomeRows,
       expenseRows,
       incomeTotal,
+      incomePrevTotal,
+      cobrosManuales,
       expenseTotal,
       resultTotal,
       sectionOrder: reporte.sectionOrder,

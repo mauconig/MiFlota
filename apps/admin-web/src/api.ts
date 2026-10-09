@@ -154,6 +154,8 @@ export interface ReportExportPayload {
   carIds: 'todos' | string[];
   categories: 'todas' | string[];
   search?: string;
+  /** Cobros del bloque "quincena" cargados a mano (reemplazan lo calculado). */
+  cobrosManuales?: { actual: number; anterior: number } | null;
   format: 'pdf' | 'xlsx';
 }
 

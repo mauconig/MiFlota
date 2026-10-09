@@ -182,6 +182,10 @@ export interface UIState {
   cTo: string;
   movType: MovType;
   movCat: string;
+  /** Cobros del bloque "quincena" cargados a mano (reemplazan lo calculado). */
+  repCobrosManual: boolean;
+  repCobrosActual: string;
+  repCobrosAnterior: string;
   alertKind: string;
   pendKind: string;
   /** 'todas' | 'aldia' | 'debe'. */
