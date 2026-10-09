@@ -1472,7 +1472,7 @@ export function useFleetView(
           date: m.date,
           type: 'egreso' as const,
           carId: m.carId,
-          vehicle: m.carId == null ? 'SIN AUTO' : c ? c.plate + ' · ' + c.model + ' · ' + gpsTagLabel(c) : 'Vehículo eliminado',
+          vehicle: m.carId == null ? 'Repuesto para stock' : c ? c.plate + ' · ' + c.model + ' · ' + gpsTagLabel(c) : 'Vehículo eliminado',
           driver: c?.driver || 'Sin chofer',
           desc: m.desc,
           category: m.cat || 'Otros',

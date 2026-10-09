@@ -508,7 +508,7 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
     return {
       carId: mov.car_id,
       fecha: mov.date,
-      vehiculo: mov.car_id == null ? 'SIN AUTO' : car?.plate ?? 'Vehículo eliminado',
+      vehiculo: mov.car_id == null ? 'Repuesto para stock' : car?.plate ?? 'Vehículo eliminado',
       seccion: sectionById.get(car?.section_id ?? -1) ?? 'Sin sección',
       modelo: car?.model ?? '',
       gpsTag: car?.gps_tag ?? '',
@@ -1053,9 +1053,10 @@ function armarReporte(ownerId: number, body: FleetReportExportBody): ReporteArma
   const carSection = (carId: string | null) => sectionById.get(carById.get(carId ?? '')?.section_id ?? -1) ?? 'Sin sección';
   const carModel = (carId: string | null) => carById.get(carId ?? '')?.model ?? '';
   const carGpsTag = (carId: string | null) => carById.get(carId ?? '')?.gps_tag ?? '';
-  /** Rótulo del auto en el reporte: "SIN AUTO" para los gastos generales (car_id
-   *  null) y "Vehículo eliminado" cuando el auto referenciado ya no existe. */
-  const carPlate = (carId: string | null) => (carId == null ? 'SIN AUTO' : carById.get(carId)?.plate ?? 'Vehículo eliminado');
+  /** Rótulo del auto en el reporte: "Repuesto para stock" para los gastos
+   *  generales (car_id null) y "Vehículo eliminado" cuando el auto referenciado
+   *  ya no existe. */
+  const carPlate = (carId: string | null) => (carId == null ? 'Repuesto para stock' : carById.get(carId)?.plate ?? 'Vehículo eliminado');
   const selectedCars = reportSelection(body.carIds);
   if (selectedCars !== 'todos' && [...selectedCars].some((id) => !carById.has(id))) throw new Error('Uno de los vehículos no pertenece a tu flota');
   const selectedCategories = body.categories === 'todas' ? 'todos' : reportSelection(body.categories);
@@ -1076,7 +1077,7 @@ function armarReporte(ownerId: number, body: FleetReportExportBody): ReporteArma
       return matchesSearch(mov.descripcion, mov.cat || 'Otros', car?.plate, car?.model, car?.driver);
     })
     .map((mov) => {
-      return { carId: mov.car_id, fecha: mov.date, vehiculo: carPlate(mov.car_id), seccion: carSection(mov.car_id), modelo: carModel(mov.car_id), gpsTag: carGpsTag(mov.car_id), categoria: mov.cat || 'Otros', detalle: mov.descripcion, total: mov.amount };
+      return { carId: mov.car_id, fecha: mov.date, vehiculo: carPlate(mov.car_id), seccion: mov.car_id == null ? 'Repuesto para stock' : carSection(mov.car_id), modelo: carModel(mov.car_id), gpsTag: carGpsTag(mov.car_id), categoria: mov.cat || 'Otros', detalle: mov.descripcion, total: mov.amount };
     });
 
   const counts = { ingresos: incomeRows.length, gastos: expenseRows.length, total: incomeRows.length + expenseRows.length };

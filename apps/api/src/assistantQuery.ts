@@ -208,7 +208,7 @@ export function queryFleetData(db: Database.Database, ownerId: number, r: Assist
       const status = income ? debt === 0 ? 'pagado' : debt < m.amount ? 'parcial' : 'pendiente' : 'registrado';
       const value = metric === 'cantidad' ? 1 : entity === 'deudas' ? debt : metric === 'ganancia' ? -m.amount : m.amount;
       add({ label: m.descripcion, carId: m.car_id ?? undefined, driver: driverName(m.driver_id, m.driver || byId.get(m.car_id ?? '')?.driver || null), category: m.cat || (income ? 'Cuota' : 'Sin categoría'), status, date: m.date, value,
-        details: { Fecha: m.date, Vehículo: byId.get(m.car_id ?? '')?.plate ?? 'SIN AUTO', Chofer: driverName(m.driver_id, m.driver || byId.get(m.car_id ?? '')?.driver || null), Tipo: income ? 'Cuota' : 'Gasto', Estado: status, Monto: money(m.amount), ...(income ? { 'Saldo pendiente': money(debt) } : {}), Comprobante: m.comprobante_nombre || 'Sin comprobante' } });
+        details: { Fecha: m.date, Vehículo: byId.get(m.car_id ?? '')?.plate ?? 'Repuesto para stock', Chofer: driverName(m.driver_id, m.driver || byId.get(m.car_id ?? '')?.driver || null), Tipo: income ? 'Cuota' : 'Gasto', Estado: status, Monto: money(m.amount), ...(income ? { 'Saldo pendiente': money(debt) } : {}), Comprobante: m.comprobante_nombre || 'Sin comprobante' } });
     }
     for (const p of payments) {
       if (!dateAllowed(p.fecha)) continue;

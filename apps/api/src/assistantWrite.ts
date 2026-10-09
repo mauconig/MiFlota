@@ -125,7 +125,7 @@ export function applyExpenseDraft(db: Database.Database, ownerId: number, value:
     items: prepared.map((item, index) => ({
       id: String(inserted[index].lastInsertRowid),
       carId: item.car?.id ?? null,
-      plate: item.car?.plate ?? 'SIN AUTO',
+      plate: item.car?.plate ?? 'Repuesto para stock',
       description: item.description,
       amount: item.amount,
       displayAmount: money(item.amount),
