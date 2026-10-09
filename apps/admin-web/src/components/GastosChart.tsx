@@ -4,7 +4,6 @@ import { card, linkBtn, linkBtnHover, sectionTitle } from '../styles';
 
 const SHORT_LABEL: Record<string, string> = {
   Taller: 'Taller',
-  Combustible: 'Combust.',
   Seguro: 'Seguro',
   Multas: 'Multas',
   Documentación: 'Docum.',

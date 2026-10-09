@@ -162,7 +162,7 @@ export function generateFleetData(): { cars: SeedCar[]; movs: SeedMov[] } {
         amt = 250000 + R() * 1100000;
         desc = TALLERD[Math.floor(R() * TALLERD.length)];
       } else if (r < 0.52) {
-        cat = 'Combustible';
+        cat = 'Otros';
         amt = 120000 + R() * 180000;
         desc = 'Carga de combustible';
       } else if (r < 0.7) {

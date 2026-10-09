@@ -408,6 +408,9 @@ function migrarOwner(db: Database.Database) {
   // "Neumáticos" se usó en algunos datos de prueba pero nunca estuvo en la lista
   // de categorías de la app: un cambio de cubiertas es un trabajo de taller.
   db.exec("UPDATE movs SET cat = 'Taller' WHERE cat = 'Neumáticos'");
+  // "Combustible" dejó de ser una categoría: el gasto de combustible ahora se
+  // cuenta en "Otros". Idempotente: solo toca las filas que todavía la tienen.
+  db.exec("UPDATE movs SET cat = 'Otros' WHERE cat = 'Combustible'");
   db.exec(`
     CREATE TABLE IF NOT EXISTS kilometraje_alertas (
       owner_id INTEGER NOT NULL,
