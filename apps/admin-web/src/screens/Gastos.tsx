@@ -41,7 +41,7 @@ export function Gastos({ v }: { v: View }) {
   const onSort = (key: string) => setSort((current) => current.key === key ? { key, direction: current.direction === 1 ? -1 : 1 } : { key, direction: 1 });
   const gastos = [...v.gastosRows].sort((a, b) => compareSortableRows(a, b, sort));
   return (
-    <Screen label="Gastos" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(300px, 38%)', gap: 18, minHeight: 0 }}>
+    <Screen label="Gastos" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(300px, 26%)', gap: 18, minHeight: 0 }}>
       <div style={{ ...card, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, borderBottom: '1px solid #f0ebe0', flex: 'none', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 220 }}>
@@ -100,7 +100,7 @@ export function Gastos({ v }: { v: View }) {
           <span style={{ fontSize: 12, color: '#6b665c' }}>{v.gastosTotal}</span>
         </div>
         <ScrollArea style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-          {v.gastosCats.map((c) => <div key={c.label} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}><span style={{ width: 104, flex: 'none', fontSize: 13, color: '#3d3a34' }}>{c.label}</span><span style={{ flex: 1, height: 10, borderRadius: 5, background: '#f4f0e8', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', borderRadius: 5, background: c.color, width: c.pct }} /></span><span style={{ width: 96, flex: 'none', textAlign: 'right', fontSize: 13, fontWeight: 700 }}>{c.amt}</span><span style={{ width: 38, flex: 'none', textAlign: 'right', fontSize: 12, color: '#6b665c' }}>{c.share}</span></div>)}
+          {v.gastosCats.map((c) => <div key={c.label} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10 }}><span style={{ width: 88, flex: 'none', fontSize: 13, color: '#3d3a34' }}>{c.label}</span><span style={{ flex: 1, height: 10, borderRadius: 5, background: '#f4f0e8', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', borderRadius: 5, background: c.color, width: c.pct }} /></span><span style={{ width: 96, flex: 'none', textAlign: 'right', fontSize: 13, fontWeight: 700 }}>{c.amt}</span><span style={{ width: 34, flex: 'none', textAlign: 'right', fontSize: 12, color: '#6b665c' }}>{c.share}</span></div>)}
         </ScrollArea>
         <div style={{ borderTop: '1px solid #f0ebe0', paddingTop: 13, display: 'flex', flexDirection: 'column', gap: 9, flex: 'none' }}>
           <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', fontSize: 13 }}><span style={{ color: '#6b665c' }}>Registros</span><span style={{ fontWeight: 700 }}>{v.gastosTotalRows}</span></div>
