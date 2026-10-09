@@ -362,13 +362,13 @@ const reportCategoryMatches = (value: string, filter: string) => {
   return !!needle && (candidate.includes(needle) || needle.includes(candidate));
 };
 
-/** Categorías que el dueño cuenta como "gastos de talleres"; el resto del
- *  egreso va a "Otros gastos". Es el corte con el que arma su reporte quincenal.
- *  Los repuestos entran acá: cuando se compra una pieza para un arreglo, el dueño
- *  la cuenta como gasto de taller, así que "Repuestos" ya no es una categoría
- *  suelta (queda solo para las filas viejas). "Service" se renombró a
- *  "Mantenimiento", pero se deja la clave vieja para no romper el histórico. */
-const REPORT_WORKSHOP_CATEGORIES = new Set(['taller', 'service', 'mantenimiento', 'repuestos']);
+/** Corte del reporte en tres bloques: Gastos de Talleres, Gastos de
+ *  Mantenimiento y Otros Gastos, en ese orden. "Repuestos" queda del lado de
+ *  talleres (una pieza comprada para un arreglo) y "Service" del lado de
+ *  mantenimiento: son las claves viejas, se conservan para no romper el
+ *  histórico. Todo el resto de las categorías de egreso va a "Otros". */
+const REPORT_TALLER_CATEGORIES = new Set(['taller', 'repuestos']);
+const REPORT_MANTENIMIENTO_CATEGORIES = new Set(['mantenimiento', 'service']);
 const reportCategoryKey = (value: string) => reportFilterNorm(value).replace(/[^a-z0-9]/g, '');
 
 interface FleetReportVehicleRef { vehiculo: string; seccion: string; modelo: string; gpsTag: string }
@@ -405,8 +405,21 @@ function groupReportRows<T extends FleetReportVehicleRef>(rows: T[], amountOf: (
     });
 }
 
-/** Categorías que el dueño cuenta como gasto de taller (ver REPORT_WORKSHOP_CATEGORIES). */
-const esGastoDeTaller = (categoria: string) => REPORT_WORKSHOP_CATEGORIES.has(reportCategoryKey(categoria));
+/** Los tres cortes del reporte (ver REPORT_TALLER_CATEGORIES). */
+const esGastoDeTaller = (categoria: string) => REPORT_TALLER_CATEGORIES.has(reportCategoryKey(categoria));
+const esGastoDeMantenimiento = (categoria: string) => REPORT_MANTENIMIENTO_CATEGORIES.has(reportCategoryKey(categoria));
+const esGastoOtro = (categoria: string) => !esGastoDeTaller(categoria) && !esGastoDeMantenimiento(categoria);
+
+/** Letra de una sección dentro de un bloque: A, B, C… (vuelve a AA si hiciera falta). */
+function letraDeSeccion(index: number): string {
+  let n = index;
+  let out = '';
+  do {
+    out = String.fromCharCode(65 + (n % 26)) + out;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return out;
+}
 
 /** Largo máximo de la nota de un auto en el reporte. */
 const NOTA_MAX = 300;
@@ -418,18 +431,19 @@ function notasDelPeriodo(ownerId: number, from: string, to: string): Map<string,
   return notas;
 }
 
-type NotaTipo = 'talleres' | 'otros';
+type NotaTipo = 'talleres' | 'mantenimiento' | 'otros';
 interface NotaBloque { tipo: NotaTipo; titulo: string; total: number; filas: { detalle: string; total: number; fecha: string }[]; nota: string }
 interface NotaAuto { carId: string; label: string; seccion: string; total: number; bloques: NotaBloque[] }
 
 /** Recorrido de notas: los autos con gastos del período, en el mismo orden en
- *  que salen en el PDF (tipo de gasto → sección → auto), cada uno con sus dos
+ *  que salen en el PDF (tipo de gasto → sección → auto), cada uno con sus tres
  *  bloques y la nota que ya tenga guardada. */
 function autosParaNotas(rows: FleetReportExpenseRow[], notas: Map<string, string>, sectionOrder: string[]): NotaAuto[] {
   const autos = new Map<string, NotaAuto>();
   const bloques: { tipo: NotaTipo; titulo: string; rows: FleetReportExpenseRow[] }[] = [
     { tipo: 'talleres', titulo: 'GASTOS DE TALLERES', rows: rows.filter((row) => esGastoDeTaller(row.categoria)) },
-    { tipo: 'otros', titulo: 'OTROS GASTOS', rows: rows.filter((row) => !esGastoDeTaller(row.categoria)) },
+    { tipo: 'mantenimiento', titulo: 'GASTOS DE MANTENIMIENTO', rows: rows.filter((row) => esGastoDeMantenimiento(row.categoria)) },
+    { tipo: 'otros', titulo: 'OTROS GASTOS', rows: rows.filter((row) => esGastoOtro(row.categoria)) },
   ];
   for (const bloque of bloques) {
     if (!bloque.rows.length) continue;
@@ -607,7 +621,7 @@ async function pdfFromFleetReport(data: {
   expenseTotal: number;
   resultTotal: number;
   sectionOrder: string[];
-  /** Notas del reporte, indexadas por `carId:tipo` ('talleres' | 'otros'). */
+  /** Notas del reporte, indexadas por `carId:tipo` ('talleres' | 'mantenimiento' | 'otros'). */
   notas: Map<string, string>;
 }): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -741,7 +755,9 @@ async function pdfFromFleetReport(data: {
     };
 
     const sectionOf = (row: FleetReportVehicleRef) => row.seccion?.trim() || 'Sin sección';
-    const isWorkshop = (row: FleetReportExpenseRow) => REPORT_WORKSHOP_CATEGORIES.has(reportCategoryKey(row.categoria));
+    const isWorkshop = (row: FleetReportExpenseRow) => esGastoDeTaller(row.categoria);
+    const isMantenimiento = (row: FleetReportExpenseRow) => esGastoDeMantenimiento(row.categoria);
+    const isOtro = (row: FleetReportExpenseRow) => esGastoOtro(row.categoria);
     const sumExpenses = (rows: FleetReportExpenseRow[]) => rows.reduce((sum, row) => sum + row.total, 0);
     const sumIncome = (rows: FleetReportIncomeRow[]) => rows.reduce((sum, row) => sum + row.monto, 0);
 
@@ -759,22 +775,24 @@ async function pdfFromFleetReport(data: {
 
     /** Bloques de autos de una sección. `closingHeight` es el alto de los totales
      *  que vienen después: el último auto se lleva el cierre con él. La nota del
-     *  reporte de ese auto (si hay) va abajo del "Total del auto". */
+     *  reporte de ese auto (si hay) va abajo del "Total del auto". Los autos van
+     *  numerados `1)`, `2)`… y la numeración reinicia en cada sección. */
     const renderExpenseVehicles = (rows: FleetReportExpenseRow[], closingHeight = 0, tipo: NotaTipo = 'talleres') => {
       const vehicles = groupVehicles(rows, (row) => row.total);
       vehicles.forEach((vehicle, index) => {
         const isLast = index === vehicles.length - 1;
+        const label = `${index + 1}) ${vehicle.label}`;
         const nota = notaDe(vehicle.rows[0].carId, tipo);
-        const blockHeight = vehicleBlockHeight(vehicle.label, vehicle.rows, 10, nota) + (isLast ? closingHeight : 0);
+        const blockHeight = vehicleBlockHeight(label, vehicle.rows, 10, nota) + (isLast ? closingHeight : 0);
         if (blockHeight <= pageInner) {
           ensureSpace(blockHeight);
         } else {
           // El auto tiene más gastos de los que entran en una página: al menos
           // el rótulo viaja con su primera fila.
           const firstRow = vehicle.rows[0];
-          ensureSpace(vehicleHeaderHeight(vehicle.label) + (firstRow ? amountRowHeight(firstRow.detalle, 30) : 0));
+          ensureSpace(vehicleHeaderHeight(label) + (firstRow ? amountRowHeight(firstRow.detalle, 30) : 0));
         }
-        vehicleHeader(vehicle.label);
+        vehicleHeader(label);
         for (const row of vehicle.rows) {
           amountRow(row.detalle, row.total, 30);
         }
@@ -785,12 +803,13 @@ async function pdfFromFleetReport(data: {
 
     // ---- gastos: un bloque por tipo de gasto y, adentro, una sección por ----
     // El orden del informe es tipo de gasto → sección → auto → gasto, así que
-    // primero van TODOS los gastos de talleres (con sus secciones) y después
-    // todos los otros gastos. Un auto con gastos de los dos tipos aparece en
-    // los dos bloques, que es lo correcto con este orden.
+    // primero van TODOS los gastos de talleres (con sus secciones), después los
+    // de mantenimiento y al final los otros gastos. Un auto con gastos de más de
+    // un tipo aparece en cada bloque, que es lo correcto con este orden.
     const expenseBlocks = ([
       { title: 'GASTOS DE TALLERES', total: 'TOTAL TALLERES', tipo: 'talleres', rows: data.expenseRows.filter(isWorkshop) },
-      { title: 'OTROS GASTOS', total: 'TOTAL OTROS GASTOS', tipo: 'otros', rows: data.expenseRows.filter((row) => !isWorkshop(row)) },
+      { title: 'GASTOS DE MANTENIMIENTO', total: 'TOTAL MANTENIMIENTO', tipo: 'mantenimiento', rows: data.expenseRows.filter(isMantenimiento) },
+      { title: 'OTROS GASTOS', total: 'TOTAL OTROS GASTOS', tipo: 'otros', rows: data.expenseRows.filter(isOtro) },
     ] as { title: string; total: string; tipo: NotaTipo; rows: FleetReportExpenseRow[] }[]).filter((block) => block.rows.length > 0);
 
     if (!expenseBlocks.length && !data.incomeRows.length) {
@@ -809,16 +828,18 @@ async function pdfFromFleetReport(data: {
       pageHeader();
     };
 
-    for (const block of expenseBlocks) {
+    for (const [blockIndex, block] of expenseBlocks.entries()) {
       abrirPagina();
-      blockBanner(block.title);
-      for (const section of orderedSections(block.rows)) {
+      blockBanner(`${blockIndex + 1}) ${block.title}`);
+      const secciones = orderedSections(block.rows);
+      for (const [sectionIndex, section] of secciones.entries()) {
         const rows = block.rows.filter((row) => sectionOf(row) === section);
-        const subtotal = totalRowHeight('Subtotal de la sección', 16);
+        const sectionTotalLabel = `Total gastos ${section}`;
+        const subtotal = totalRowHeight(sectionTotalLabel, 16);
         const primero = firstVehicleBlock(rows);
-        sectionBanner(section, keepWithBlock(primero, SECTION_BAR_TOTAL, primero ? notaDe(primero.rows[0].carId, block.tipo) : ''));
+        sectionBanner(`${letraDeSeccion(sectionIndex)}) ${section}`, keepWithBlock(primero, SECTION_BAR_TOTAL, primero ? notaDe(primero.rows[0].carId, block.tipo) : ''));
         renderExpenseVehicles(rows, subtotal, block.tipo);
-        totalRow('Subtotal de la sección', sumExpenses(rows), 16);
+        totalRow(sectionTotalLabel, sumExpenses(rows), 16);
       }
       ensureSpace(totalRowHeight(block.total, 10));
       totalRow(block.total, sumExpenses(block.rows), 10);
@@ -872,18 +893,19 @@ async function pdfFromFleetReport(data: {
 
     const showIncome = data.incomeRows.length > 0;
     const summarySections = orderedSections([...data.expenseRows, ...data.incomeRows]);
-    const labelWidth = Math.round(width * (showIncome ? 0.34 : 0.44));
-    const columnWidth = Math.round((width - labelWidth) / (showIncome ? 4 : 3));
-    const columns = showIncome ? ['Talleres', 'Otros', 'Cobros', 'Neto'] : ['Talleres', 'Otros', 'Neto'];
+    const labelWidth = Math.round(width * (showIncome ? 0.28 : 0.32));
+    const columnWidth = Math.round((width - labelWidth) / (showIncome ? 5 : 4));
+    const columns = showIncome ? ['Talleres', 'Mantenimiento', 'Otros', 'Cobros', 'Neto'] : ['Talleres', 'Mantenimiento', 'Otros', 'Neto'];
     const totalsFor = (section: string) => {
       const expenses = data.expenseRows.filter((row) => sectionOf(row) === section);
       const incomes = data.incomeRows.filter((row) => sectionOf(row) === section);
       const taller = sumExpenses(expenses.filter(isWorkshop));
-      const otros = sumExpenses(expenses.filter((row) => !isWorkshop(row)));
+      const mantenimiento = sumExpenses(expenses.filter(isMantenimiento));
+      const otros = sumExpenses(expenses.filter(isOtro));
       const cobros = sumIncome(incomes);
       return showIncome
-        ? [reportMoney(taller), reportMoney(otros), reportMoney(cobros), reportMoney(cobros - taller - otros)]
-        : [reportMoney(taller), reportMoney(otros), reportMoney(-(taller + otros))];
+        ? [reportMoney(taller), reportMoney(mantenimiento), reportMoney(otros), reportMoney(cobros), reportMoney(cobros - taller - mantenimiento - otros)]
+        : [reportMoney(taller), reportMoney(mantenimiento), reportMoney(otros), reportMoney(-(taller + mantenimiento + otros))];
     };
 
     const summaryRow = (label: string, cells: string[], bold: boolean) => {
@@ -910,10 +932,11 @@ async function pdfFromFleetReport(data: {
 
     for (const section of summarySections) summaryRow(section, totalsFor(section), false);
     const tallerTotal = sumExpenses(data.expenseRows.filter(isWorkshop));
-    const otrosTotal = sumExpenses(data.expenseRows.filter((row) => !isWorkshop(row)));
+    const mantenimientoTotal = sumExpenses(data.expenseRows.filter(isMantenimiento));
+    const otrosTotal = sumExpenses(data.expenseRows.filter(isOtro));
     summaryRow('TOTAL', showIncome
-      ? [reportMoney(tallerTotal), reportMoney(otrosTotal), reportMoney(data.incomeTotal), reportMoney(data.resultTotal)]
-      : [reportMoney(tallerTotal), reportMoney(otrosTotal), reportMoney(-data.expenseTotal)], true);
+      ? [reportMoney(tallerTotal), reportMoney(mantenimientoTotal), reportMoney(otrosTotal), reportMoney(data.incomeTotal), reportMoney(data.resultTotal)]
+      : [reportMoney(tallerTotal), reportMoney(mantenimientoTotal), reportMoney(otrosTotal), reportMoney(-data.expenseTotal)], true);
 
     doc.y += 14;
     doc.font('Helvetica').fontSize(9).fillColor(REPORT_COLORS.muted).text(`${data.incomeRows.length + data.expenseRows.length} movimientos incluidos · datos filtrados según la selección`, margin, doc.y);
@@ -1314,7 +1337,7 @@ app.get<{ Params: { id: string } }>('/api/reports/files/:id', async (req, reply)
 });
 
 /** Recorrido de notas del reporte: los autos con gastos del período, en el
- *  orden del PDF, con sus dos bloques y la nota que ya tengan guardada. Es la
+ *  orden del PDF, con sus bloques y la nota que ya tengan guardada. Es la
  *  misma data que arma el PDF, para que el recorrido muestre lo que va a salir. */
 app.post<{ Body: FleetReportExportBody }>('/api/report-notes/preview', async (req, reply) => {
   const u = quien(req);
@@ -1353,7 +1376,7 @@ app.put<{ Body: ReportNotasBody }>('/api/report-notes', async (req, reply) => {
         const carId = String(item?.carId ?? '');
         const tipo = String(item?.tipo ?? '');
         if (!carIds.has(carId)) throw new Error('Uno de los vehículos no pertenece a tu flota');
-        if (tipo !== 'talleres' && tipo !== 'otros') throw new Error('El tipo de gasto de la nota no es válido');
+        if (tipo !== 'talleres' && tipo !== 'mantenimiento' && tipo !== 'otros') throw new Error('El tipo de gasto de la nota no es válido');
         const nota = String(item?.nota ?? '').trim().slice(0, NOTA_MAX);
         if (nota) {
           upsertReportNota.run({ owner_id: u.id, car_id: carId, tipo, desde: from, hasta: to, nota, actualizado: ahora });

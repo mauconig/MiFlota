@@ -10,7 +10,7 @@ import { COLORS, TODAY, addD, addM, dLbl, dLblFull, daysBetween, durLbl, fmt, fm
 /** Un bloque de gastos de un auto dentro del recorrido de notas. `notaGuardada`
  *  es la que ya estaba en el servidor: sirve para "Saltar" sin guardar cambios. */
 export interface NotasBloque {
-  tipo: 'talleres' | 'otros';
+  tipo: 'talleres' | 'mantenimiento' | 'otros';
   titulo: string;
   total: number;
   filas: { detalle: string; total: number; fecha: string }[];

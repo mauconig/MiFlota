@@ -17,7 +17,7 @@ function fechaCorta(iso: string) {
   return iso ? dLbl(new Date(iso + 'T12:00:00')) : '';
 }
 
-function Boton({ label, onPress, primary = false, disabled = false, flex = 0 }: { label: string; onPress: () => void; primary?: boolean; disabled?: boolean; flex?: number }) {
+function Boton({ label, onPress, primary = false, disabled = false, flex = 0, compact = false }: { label: string; onPress: () => void; primary?: boolean; disabled?: boolean; flex?: number; compact?: boolean }) {
   return (
     <Pressable
       onPress={onPress}
@@ -26,16 +26,17 @@ function Boton({ label, onPress, primary = false, disabled = false, flex = 0 }: 
       style={{
         minHeight: 46,
         borderRadius: 15,
-        paddingHorizontal: 16,
+        paddingHorizontal: compact ? 10 : 16,
         alignItems: 'center',
         justifyContent: 'center',
         flex: flex || undefined,
+        minWidth: 0,
         backgroundColor: primary ? (disabled ? '#bdb4a6' : INK) : PAPER,
         borderWidth: primary ? 0 : 1,
         borderColor: disabled ? '#e2dbcf' : BORDER,
       }}
     >
-      <Text style={{ color: primary ? PAPER : disabled ? '#a9a293' : INK, fontSize: 14, fontWeight: '700' }}>{label}</Text>
+      <Text numberOfLines={1} style={{ color: primary ? PAPER : disabled ? '#a9a293' : INK, fontSize: compact ? 13 : 14, fontWeight: '700', flexShrink: 1 }}>{label}</Text>
     </Pressable>
   );
 }
@@ -53,7 +54,7 @@ export function ReporteNotas({ v }: { v: MobileView }) {
         <View style={{ width: '100%', maxWidth: 360, backgroundColor: PAPER, borderRadius: 22, borderWidth: 1, borderColor: BORDER, padding: 18, gap: 12 }}>
           <Text style={{ color: INK, fontSize: 19, fontWeight: '800' }}>¿Deseás agregar notas?</Text>
           <Text style={{ color: MUTED, fontSize: 13, lineHeight: 19 }}>
-            Las notas se imprimen abajo del total de cada auto, en el PDF del período. Podés escribir una para los gastos de taller y otra para los otros gastos.
+            Las notas se imprimen abajo del total de cada auto, en el PDF del período. Podés escribir una para los gastos de taller, otra para los de mantenimiento y otra para los otros gastos.
           </Text>
           <View style={{ gap: 9, marginTop: 2 }}>
             <Boton label="Sí, agregar notas" onPress={v.reportes.notasSi} primary />
@@ -136,14 +137,15 @@ export function ReporteNotas({ v }: { v: MobileView }) {
         {!!n.error && <Text style={{ color: '#b34732', backgroundColor: '#fbe9e5', borderRadius: 12, padding: 12, fontSize: 13 }}>{n.error}</Text>}
       </ScrollView>
 
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
-        <Boton label="Saltar auto" onPress={v.reportes.notasSaltar} />
-        <View style={{ flex: 1 }} />
-        <Boton label="Anterior" onPress={v.reportes.notasAnterior} disabled={n.paso === 0} />
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        {!esUltimo && <Boton label="Saltar auto" onPress={v.reportes.notasSaltar} compact />}
+        <Boton label="Anterior" onPress={v.reportes.notasAnterior} disabled={n.paso === 0} compact />
         <Boton
           label={esUltimo ? (n.guardando ? 'Guardando…' : 'Guardar y generar') : 'Siguiente'}
           onPress={esUltimo ? v.reportes.notasGuardarYExportar : v.reportes.notasSiguiente}
           primary
+          compact
+          flex={1}
           disabled={esUltimo && n.guardando}
         />
       </View>

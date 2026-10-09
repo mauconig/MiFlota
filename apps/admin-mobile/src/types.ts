@@ -195,7 +195,7 @@ export type ReportCategorySelection = 'todas' | string[];
 
 /** Notas del reporte: una por auto y tipo de gasto, atada al período. Se cargan
  *  en un recorrido antes de generar el PDF y se imprimen bajo el total del auto. */
-export type ReportNoteTipo = 'talleres' | 'otros';
+export type ReportNoteTipo = 'talleres' | 'mantenimiento' | 'otros';
 
 export interface NotasBloque {
   tipo: ReportNoteTipo;

@@ -23,7 +23,7 @@ export function NotasModal({ v }: { v: View }) {
             <Btn onClick={v.notasCerrar} ariaLabel="Cerrar" style={modalCloseBtn} hoverStyle={modalCloseBtnHover}>✕</Btn>
           </div>
           <div style={{ fontSize: 13, color: '#6b665c', lineHeight: 1.55 }}>
-            Las notas se imprimen abajo del total de cada auto, en el PDF del período. Podés escribir una para los gastos de taller y otra para los otros gastos.
+            Las notas se imprimen abajo del total de cada auto, en el PDF del período. Podés escribir una para los gastos de taller, otra para los de mantenimiento y otra para los otros gastos.
           </div>
           <div style={{ ...modalFooter, justifyContent: 'flex-end' }}>
             <Btn onClick={v.notasNo} style={btnSecondary} hoverStyle={btnSecondaryHover}>No, exportar directo</Btn>

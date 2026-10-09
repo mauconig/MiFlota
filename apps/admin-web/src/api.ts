@@ -152,7 +152,7 @@ export const exportFleetReport = (payload: ReportExportPayload) => req<ReportExp
 
 /** Notas del reporte: se piden con los mismos filtros del export y se guardan
  *  por período, así el recorrido muestra lo que va a salir en el PDF. */
-export type ReportNoteTipo = 'talleres' | 'otros';
+export type ReportNoteTipo = 'talleres' | 'mantenimiento' | 'otros';
 
 export interface ReportNoteFila {
   detalle: string;

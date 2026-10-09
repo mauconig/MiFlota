@@ -415,12 +415,13 @@ function migrarOwner(db: Database.Database) {
   `);
   // Notas del reporte: una explicación por auto y por tipo de gasto, atada al
   // período que se está informando (no al auto ni al movimiento). Se imprimen
-  // abajo del "Total del auto" en el PDF.
+  // abajo del "Total del auto" en el PDF. Tres tipos: taller, mantenimiento y
+  // otros gastos.
   db.exec(`
     CREATE TABLE IF NOT EXISTS report_notas (
       owner_id INTEGER NOT NULL,
       car_id TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
-      tipo TEXT NOT NULL CHECK (tipo IN ('talleres','otros')),
+      tipo TEXT NOT NULL CHECK (tipo IN ('talleres','mantenimiento','otros')),
       desde TEXT NOT NULL,
       hasta TEXT NOT NULL,
       nota TEXT NOT NULL,
@@ -428,6 +429,38 @@ function migrarOwner(db: Database.Database) {
       PRIMARY KEY (owner_id, car_id, tipo, desde, hasta)
     );
   `);
+
+  // El reporte pasó de dos tipos de nota (talleres/otros) a tres: se agrega
+  // 'mantenimiento' como bloque propio. SQLite no permite modificar un CHECK,
+  // así que si la tabla vieja todavía no lo admite, se reconstruye. El flag en
+  // `meta` evita repetirlo; el chequeo del SQL cubre las bases nuevas, que ya
+  // nacen con los tres tipos.
+  const yaNotasTres = () => !!db.prepare("SELECT 1 FROM meta WHERE key = 'report_notas_tres_tipos_v1'").get();
+  if (!yaNotasTres()) {
+    db.transaction(() => {
+      if (yaNotasTres()) return;
+      const sql = (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'report_notas'").get() as { sql: string } | undefined)?.sql ?? '';
+      if (!sql.includes("'mantenimiento'")) {
+        db.exec(`
+          CREATE TABLE report_notas_nueva (
+            owner_id INTEGER NOT NULL,
+            car_id TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+            tipo TEXT NOT NULL CHECK (tipo IN ('talleres','mantenimiento','otros')),
+            desde TEXT NOT NULL,
+            hasta TEXT NOT NULL,
+            nota TEXT NOT NULL,
+            actualizado TEXT NOT NULL,
+            PRIMARY KEY (owner_id, car_id, tipo, desde, hasta)
+          );
+          INSERT INTO report_notas_nueva (owner_id, car_id, tipo, desde, hasta, nota, actualizado)
+            SELECT owner_id, car_id, tipo, desde, hasta, nota, actualizado FROM report_notas;
+          DROP TABLE report_notas;
+          ALTER TABLE report_notas_nueva RENAME TO report_notas;
+        `);
+      }
+      db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('report_notas_tres_tipos_v1', '1')").run();
+    }).immediate();
+  }
 
   // Chofer al que corresponde cada cobro. Null en las filas viejas: el
   // chofer actual del auto sigue siendo el valor por defecto para esas, así
