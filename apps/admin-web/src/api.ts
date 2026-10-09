@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Car, CarLocation, LocationHistory, Mov, Pago, Reporte, ReportStatus } from './types';
-import type { ChatHistory, ChatReply } from './components/AssistantChat';
+import type { ChatHistory, ChatReply, ExpenseItemInput } from './components/AssistantChat';
 import { optimizarComprobante } from './comprobanteImage';
 
 export const consultarAsistente = (question: string, history: ChatHistory[], signal: AbortSignal) => req<ChatReply>('/api/assistant/query', {
   method: 'POST', signal, body: JSON.stringify({ question, history: history.slice(-6), capabilities: { lineCharts: true } }),
+});
+
+/** Guarda una carga de gastos ya confirmada (desde el chat o desde el alta
+ *  manual). El servidor revalida vehículo, categoría y montos contra el dueño. */
+export const confirmarGastosAsistente = (items: ExpenseItemInput[]) => req<{ created: number; total: number }>('/api/assistant/expenses', {
+  method: 'POST', body: JSON.stringify({ items }),
 });
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`. Se parsean a mediodía UTC para que
@@ -232,6 +238,7 @@ export interface FleetStore {
   updateReporte: (id: number, estado: Extract<ReportStatus, 'en_taller' | 'resuelta'>) => Promise<Reporte>;
   registrarService: (id: string, datos: RegistrarServicePayload) => Promise<{ car: Car; mov?: Mov }>;
   exportReport: (payload: ReportExportPayload) => Promise<ReportExportResponse>;
+  cargarGastos: (items: ExpenseItemInput[]) => Promise<{ created: number; total: number }>;
   addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
   deletePago: (id: number) => Promise<void>;
   addSection: (name: string) => Promise<void>;
@@ -461,6 +468,14 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
 
   const exportReport = useCallback((payload: ReportExportPayload) => exportFleetReport(payload), []);
 
+  // Carga de gastos (alta manual o confirmada desde el chat). Después de
+  // guardar se recarga el estado para que los totales y el libro queden al día.
+  const cargarGastos = useCallback(async (items: ExpenseItemInput[]) => {
+    const r = await confirmarGastosAsistente(items);
+    await recargar();
+    return r;
+  }, [recargar]);
+
   // Un pago no se aplica en optimista: cuánto cancela de cada cuota lo decide
   // la imputación sobre el conjunto, así que hasta que el servidor no lo
   // confirma no hay forma de saber qué mostrar.
@@ -497,6 +512,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     updateReporte,
     registrarService,
     exportReport,
+    cargarGastos,
     addPago,
     deletePago,
   };

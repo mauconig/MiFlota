@@ -43,6 +43,8 @@ import {
 import { imputar } from './cobranza.js';
 import { answerAssistant, type AssistantFile, type AssistantHistoryItem, type AssistantReportRequest } from './assistant.js';
 import { queryFleetData } from './assistantQuery.js';
+import { applyExpenseDraft, proposeExpenseDraft } from './assistantWrite.js';
+import { CATS_EGRESO, MAX_EGRESO_MONTO, normalizarCategoria } from './expenseCategories.js';
 import { sendOwnerPush } from './push.js';
 import { startDailyAlertDigest } from './ownerNotifications.js';
 import { localDateISO } from './time.js';
@@ -1251,6 +1253,10 @@ interface AssistantQueryBody {
   capabilities?: { lineCharts?: boolean };
 }
 
+interface AssistantExpensesBody {
+  items?: unknown;
+}
+
 // Evita que dobles taps o clientes reintentando en paralelo consuman dos
 // respuestas del modelo para el mismo dueño. También serializa las respuestas
 // locales, cuya sección crítica dura apenas unos milisegundos.
@@ -1298,6 +1304,7 @@ app.post<{ Body: AssistantQueryBody }>('/api/assistant/query', async (req, reply
       signal: controller.signal,
       generateReport: (request) => createAssistantReport(u.id, request),
       queryFleet: (request) => Promise.resolve(queryFleetData(db, u.id, request)),
+      proposeExpenses: (args) => Promise.resolve(proposeExpenseDraft(db, u.id, args, hoyISO())),
     });
   } catch (error) {
     const errorDetails = error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : { message: String(error) };
@@ -1307,6 +1314,22 @@ app.post<{ Body: AssistantQueryBody }>('/api/assistant/query', async (req, reply
     clearTimeout(timeout);
     assistantInFlight.delete(u.id);
     req.log.info({ ownerId: u.id, elapsedMs: Date.now() - started }, 'assistant_finished');
+  }
+});
+
+/** Confirmación de una carga de gastos propuesta por el asistente. El borrador
+ *  viaja desde el cliente (pudo editarlo), así que se revalida todo contra el
+ *  dueño antes de escribir. Es la única puerta por la que el chat graba datos. */
+app.post<{ Body: AssistantExpensesBody }>('/api/assistant/expenses', async (req, reply) => {
+  const u = quien(req);
+  if (!allowAssistantRequest(u.id)) return reply.code(429).send({ error: 'Demasiadas cargas seguidas. Esperá un minuto.' });
+  try {
+    const result = applyExpenseDraft(db, u.id, req.body ?? {}, hoyISO());
+    req.log.info({ ownerId: u.id, created: result.created, total: result.total }, 'carga de gastos del asistente');
+    return reply.code(201).send(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudo cargar el gasto';
+    return reply.code(400).send({ error: message });
   }
 });
 
@@ -1944,19 +1967,6 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/taller', async (req, reply) 
   });
 });
 
-/** Categorías válidas para un gasto suelto. Mismo set que `CATS` en el cliente:
- *  "Repuestos" ya no es una categoría suelta (cuenta como taller) y "Service" se
- *  renombró a "Mantenimiento". */
-const CATS_EGRESO = new Set(['Mantenimiento', 'Taller', 'Combustible', 'Seguro', 'Multas', 'Documentación', 'Otros']);
-
-/** Categorías que ya no se ofrecen pero siguen llegando de clientes viejos. */
-const CATS_EGRESO_VIEJAS: Record<string, string> = {
-  service: 'Mantenimiento',
-  repuestos: 'Taller',
-};
-
-const normalizarCategoria = (value: string) => CATS_EGRESO_VIEJAS[value.trim().toLowerCase()] ?? value.trim();
-
 /** Gasto genérico con comprobante opcional, sin efecto sobre el estado del auto:
  *  a diferencia de `/taller`, esta ruta no saca al vehículo de circulación —
  *  eso sigue siendo una decisión aparte, tomada en la ficha del auto. */
@@ -2001,7 +2011,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
 
   if (!razon) return reply.code(400).send({ error: 'Indicá de qué es el gasto' });
   if (!CATS_EGRESO.has(cat)) return reply.code(400).send({ error: 'Elegí una categoría válida' });
-  if (monto <= 0 || monto > 1_000_000_000) return reply.code(400).send({ error: 'Indicá cuánto se gastó' });
+  if (monto <= 0 || monto > MAX_EGRESO_MONTO) return reply.code(400).send({ error: 'Indicá cuánto se gastó' });
   const guardado = await guardarComprobanteParaRuta(archivoPendiente, reply);
   if (!guardado.ok) return;
   const archivo = guardado.archivo;

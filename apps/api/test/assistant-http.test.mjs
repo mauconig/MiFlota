@@ -41,6 +41,14 @@ test('HTTP authentication, tenant isolation, concurrency, rate limits and provid
  const a=await(await ask(tokenA)).json(),b=await(await ask(tokenB)).json();
  assert.match(a.answer,/OWNER1/);assert.doesNotMatch(JSON.stringify(a),/OWNER2/);
  assert.match(b.answer,/OWNER2/);assert.doesNotMatch(JSON.stringify(b),/OWNER1/);
+ // Carga de gastos confirmada: sin sesión 401, validación 400 y aislamiento.
+ const carga=(token,items)=>fetch(base+'/api/assistant/expenses',{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify({items})});
+ assert.equal((await carga(null,[{carId:'a',description:'x',amount:1000,category:'Taller'}])).status,401);
+ assert.equal((await carga(tokenA,[])).status,400);
+ assert.equal((await carga(tokenA,[{carId:'b',description:'ajeno',amount:1000,category:'Taller'}])).status,400);
+ const cargaOk=await carga(tokenA,[{carId:'a',description:'Cubierta usada',amount:120000,category:'Taller'}]);
+ assert.equal(cargaOk.status,201);assert.equal((await cargaOk.json()).created,1);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM movs WHERE owner_id=1 AND car_id='a' AND type='egreso'").get().n,1);
  slow=true;const pending=ask(tokenA);for(let i=0;i<100&&!release;i++)await new Promise(r=>setTimeout(r,10));assert.ok(release);
  assert.equal((await ask(tokenA)).status,429);release();assert.equal((await pending).status,200);
  fail=true;const failure=await ask(tokenB);assert.equal(failure.status,502);assert.deepEqual(Object.keys(await failure.json()),['error']);fail=false;

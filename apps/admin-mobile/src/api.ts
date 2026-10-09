@@ -303,6 +303,32 @@ export interface AssistantFollowUp {
   question: string;
 }
 
+export interface AssistantExpenseDraftItem {
+  id: string;
+  description: string;
+  amount: number;
+  displayAmount: string;
+}
+
+export interface AssistantExpenseDraft {
+  id: string;
+  kind: 'gastos';
+  vehicle: { carId: string; plate: string; model: string };
+  category: string;
+  date: string;
+  items: AssistantExpenseDraftItem[];
+  total: number;
+  displayTotal: string;
+}
+
+export interface AssistantExpenseInput {
+  carId: string;
+  description: string;
+  amount: number;
+  category: string;
+  date?: string;
+}
+
 export interface AssistantReply {
   answer: string;
   cards: AssistantCard[];
@@ -315,6 +341,7 @@ export interface AssistantReply {
   mode: 'local' | 'openrouter' | 'fallback';
   notice?: string;
   files?: { name: string; url: string; mimeType: string }[];
+  drafts?: AssistantExpenseDraft[];
 }
 
 export type ReportPeriodType = 'semana' | 'mes' | 'jul' | 'd90' | 'custom';
@@ -342,6 +369,13 @@ export function askAssistant(question: string, history: AssistantHistoryItem[], 
     method: 'POST',
     signal,
     body: JSON.stringify({ question, history: history.slice(-6), capabilities: { lineCharts: true } }),
+  });
+}
+
+export function confirmAssistantExpenses(items: AssistantExpenseInput[]): Promise<{ created: number; total: number }> {
+  return req<{ created: number; total: number }>('/api/assistant/expenses', {
+    method: 'POST',
+    body: JSON.stringify({ items }),
   });
 }
 

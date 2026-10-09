@@ -1,5 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import type { AssistantCard, AssistantChart, AssistantFollowUp, AssistantTable } from './api';
+import type { AssistantCard, AssistantChart, AssistantExpenseDraft, AssistantFollowUp, AssistantTable } from './api';
 
 /** Un mensaje del chat de MiFlota IA tal como se guarda en disco. */
 export interface AssistantChatMessage {
@@ -14,6 +14,7 @@ export interface AssistantChatMessage {
   asOf?: string;
   notice?: string;
   files?: { name: string; url: string; mimeType: string }[];
+  drafts?: AssistantExpenseDraft[];
   error?: boolean;
   retryQuestion?: string;
 }

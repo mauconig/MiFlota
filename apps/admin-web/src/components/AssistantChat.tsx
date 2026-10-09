@@ -1,5 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
+import { MoneyInput } from './MoneyInput';
 import './AssistantChat.css';
+
+export interface ExpenseItemInput { carId: string; description: string; amount: number; category: string; date?: string }
+export interface ExpenseDraftItem { id: string; description: string; amount: number; displayAmount: string }
+export interface ExpenseDraft {
+  id: string;
+  kind: 'gastos';
+  vehicle: { carId: string; plate: string; model: string };
+  category: string;
+  date: string;
+  items: ExpenseDraftItem[];
+  total: number;
+  displayTotal: string;
+}
 
 export interface ChatReply {
   answer: string;
@@ -10,10 +24,69 @@ export interface ChatReply {
   table?: { columns: { key: string; label: string }[]; rows: { id: string; cells: Record<string, string>; action?: { kind: string; carId?: string; label: string } }[] };
   followUps?: { label: string; question: string }[];
   files?: { name: string; url: string }[];
+  drafts?: ExpenseDraft[];
 }
 export interface ChatHistory { role: 'user' | 'assistant'; content: string }
 interface Exchange { question: string; reply?: ChatReply; error?: string }
-interface Props { ask: (question: string, history: ChatHistory[], signal: AbortSignal) => Promise<ChatReply>; onOpenCar: (id: string) => void }
+interface Props {
+  ask: (question: string, history: ChatHistory[], signal: AbortSignal) => Promise<ChatReply>;
+  onOpenCar: (id: string) => void;
+  onConfirmExpenses: (items: ExpenseItemInput[]) => Promise<{ created: number; total: number }>;
+}
+
+interface DraftRow { key: string; description: string; amount: string }
+
+function ExpenseDraftCard({ draft, onConfirm, onOpenCar }: { draft: ExpenseDraft; onConfirm: Props['onConfirmExpenses']; onOpenCar: (id: string) => void }) {
+  const [rows, setRows] = useState<DraftRow[]>(() => draft.items.map((item) => ({ key: item.id, description: item.description, amount: new Intl.NumberFormat('es-PY').format(item.amount) })));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState<{ created: number; total: number } | null>(null);
+  const [discarded, setDiscarded] = useState(false);
+  const [error, setError] = useState('');
+  const total = rows.reduce((sum, row) => sum + (Number(row.amount.replace(/\D/g, '')) || 0), 0);
+  const editar = (key: string, patch: Partial<DraftRow>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  const quitar = (key: string) => setRows((rs) => rs.filter((r) => r.key !== key));
+  const agregar = () => setRows((rs) => [...rs, { key: `n${Date.now()}${rs.length}`, description: '', amount: '' }]);
+  const confirmar = async () => {
+    const items: ExpenseItemInput[] = rows
+      .map((row) => ({ carId: draft.vehicle.carId, description: row.description.trim(), amount: Number(row.amount.replace(/\D/g, '')) || 0, category: draft.category, date: draft.date }))
+      .filter((item) => item.description && item.amount > 0);
+    if (!items.length) { setError('Agregá al menos una línea con descripción y monto.'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      setSaved(await onConfirm(items));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo cargar el gasto.');
+    } finally {
+      setSaving(false);
+    }
+  };
+  if (saved) return <div className="ai-draft ai-draft-saved"><strong>Carga confirmada</strong><p>Se guardaron {saved.created} gasto{saved.created === 1 ? '' : 's'} por Gs. {new Intl.NumberFormat('es-PY').format(saved.total)}.</p></div>;
+  if (discarded) return <div className="ai-draft ai-draft-discarded">Carga descartada. No se guardó nada.</div>;
+  return <section className="ai-draft" aria-label="Carga de gastos pendiente">
+    <header className="ai-draft-head">
+      <div><span className="ai-eyebrow">CARGA PENDIENTE</span><strong>{draft.vehicle.plate} · {draft.category}</strong><small>{draft.vehicle.model} · {draft.date}</small></div>
+      <button type="button" className="ai-draft-link" onClick={() => onOpenCar(draft.vehicle.carId)}>Ver vehículo</button>
+    </header>
+    <div className="ai-draft-rows">
+      {rows.map((row) => <div className="ai-draft-row" key={row.key}>
+        <input value={row.description} onChange={(e) => editar(row.key, { description: e.target.value })} placeholder="Qué se gastó" aria-label="Descripción del gasto" maxLength={120} />
+        <span className="ai-draft-money"><span>₲</span><MoneyInput value={row.amount} onChange={(v) => editar(row.key, { amount: v })} placeholder="0" ariaLabel="Monto del gasto" /></span>
+        <button type="button" className="ai-draft-remove" onClick={() => quitar(row.key)} aria-label="Borrar línea">×</button>
+      </div>)}
+    </div>
+    <button type="button" className="ai-draft-add" onClick={agregar}>+ Agregar línea</button>
+    {error && <p className="ai-draft-error" role="alert">{error}</p>}
+    <div className="ai-draft-foot">
+      <span>Total <strong>Gs. {new Intl.NumberFormat('es-PY').format(total)}</strong></span>
+      <div>
+        <button type="button" className="ai-draft-discard" disabled={saving} onClick={() => setDiscarded(true)}>Descartar</button>
+        <button type="button" className="ai-draft-confirm" disabled={saving || !rows.length} onClick={() => void confirmar()}>{saving ? 'Guardando…' : 'Confirmar carga'}</button>
+      </div>
+    </div>
+  </section>;
+}
+
 
 function AssistantResultTable({ table, onOpenCar, initiallyOpen = true }: { table: NonNullable<ChatReply['table']>; onOpenCar: (id: string) => void; initiallyOpen?: boolean }) {
   const [sort, setSort] = useState<{ key: string; direction: 1 | -1 }>({ key: table.columns[0]?.key || '', direction: 1 });
@@ -55,7 +128,7 @@ function Chart({ chart }: { chart: NonNullable<ChatReply['chart']> }) {
   </figure>;
 }
 
-export function AssistantChat({ ask, onOpenCar }: Props) {
+export function AssistantChat({ ask, onOpenCar, onConfirmExpenses }: Props) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
@@ -113,7 +186,7 @@ export function AssistantChat({ ask, onOpenCar }: Props) {
     {open && <section id="miflota-chat" className="ai-panel" role="dialog" aria-modal="false" aria-labelledby="ai-title" onKeyDown={e => { if(e.key === 'Escape') { e.stopPropagation(); close(); } }}>
       <header className="ai-header"><div><h2 id="ai-title">Tu flota, en una conversación</h2><span>Asistente MiFlota</span></div><button aria-label="Nueva conversación" title="Nueva conversación" disabled={busy} onClick={() => { setExchanges([]); setDraft(''); input.current?.focus(); }}>＋</button><button onClick={close} aria-label="Minimizar chat" title="Minimizar">−</button></header>
       <div className="ai-messages" role="log" aria-label="Conversación" aria-live="polite" aria-relevant="additions text">
-        {!exchanges.length && <div className="ai-welcome"><span className="ai-eyebrow">¿QUÉ QUERÉS SABER?</span><h3>Consultá los datos de tu flota</h3><p>Autos, choferes, cobros y gastos. Te ayudo a encontrar respuestas y comparar resultados.</p><div className="ai-suggestions">{['¿Quién maneja BYJ 066?', 'Mostrame los autos por modelo', '¿Cuánto cobramos este mes?'].map(q => <button key={q} onClick={() => void submit(q)}>{q}<span aria-hidden="true">↗</span></button>)}</div></div>}
+        {!exchanges.length && <div className="ai-welcome"><span className="ai-eyebrow">¿QUÉ QUERÉS SABER?</span><h3>Consultá y cargá los datos de tu flota</h3><p>Autos, choferes, cobros y gastos. Te ayudo a encontrar respuestas, comparar resultados y preparar cargas de gastos que confirmás vos.</p><div className="ai-suggestions">{['¿Quién maneja BYJ 066?', 'Mostrame los autos por modelo', '¿Cuánto cobramos este mes?'].map(q => <button key={q} onClick={() => void submit(q)}>{q}<span aria-hidden="true">↗</span></button>)}</div></div>}
         {exchanges.map((exchange,index) => <div className="ai-exchange" key={index}>
           <div className="ai-question"><span className="ai-sr-only">Vos: </span>{exchange.question}</div>
           {exchange.reply && <article className="ai-answer"><span className="ai-eyebrow">MIFLOTA IA</span><p>{exchange.reply.answer}</p>
@@ -121,6 +194,7 @@ export function AssistantChat({ ask, onOpenCar }: Props) {
             {!!exchange.reply.cards?.length && <div className="ai-metrics">{exchange.reply.cards.map((c,n) => <div key={n}><span>{c.title}</span><strong>{c.value}</strong>{c.subtitle && <small>{c.subtitle}</small>}</div>)}</div>}
             {exchange.reply.chart && <Chart chart={exchange.reply.chart} />}
             {exchange.reply.table && <AssistantResultTable table={exchange.reply.table} initiallyOpen={!exchange.reply.chart} onOpenCar={id => { close(); onOpenCar(id); }} />}
+            {exchange.reply.drafts?.map(draft => <ExpenseDraftCard key={draft.id} draft={draft} onConfirm={onConfirmExpenses} onOpenCar={id => { close(); onOpenCar(id); }} />)}
             {exchange.reply.files?.filter(f => f.url.startsWith('/api/assistant/files/')).map(f => <a key={f.url} href={f.url} target="_blank" rel="noreferrer">{f.name}</a>)}
             <small className="ai-date">Datos al {exchange.reply.asOf}</small>
             {index === exchanges.length - 1 && !!exchange.reply.followUps?.length && <div className="ai-followups">{exchange.reply.followUps.map(f => <button key={f.question} disabled={busy} onClick={() => void submit(f.question)}>{f.label}</button>)}</div>}

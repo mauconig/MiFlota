@@ -3,7 +3,7 @@ import { ActivityIndicator, Keyboard, Linking, Modal, Pressable, ScrollView, Sty
 import { KeyboardChatScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useSharedValue } from 'react-native-reanimated';
 import Svg, { Circle, Line, Path, Polyline, Text as SvgText } from 'react-native-svg';
-import { askAssistant, SinSesion, type AssistantAction, type AssistantCard, type AssistantChart, type AssistantHistoryItem, type AssistantTable } from '../api';
+import { askAssistant, confirmAssistantExpenses, SinSesion, type AssistantAction, type AssistantCard, type AssistantChart, type AssistantExpenseDraft, type AssistantExpenseInput, type AssistantHistoryItem, type AssistantTable } from '../api';
 import { API_BASE } from '../config';
 import { Pagination } from '../components/Pagination';
 import { clearAssistantChat, loadAssistantChat, saveAssistantChat, type AssistantChatMessage } from '../assistantChat';
@@ -257,6 +257,71 @@ function AssistantTableSheet({ table, onAction, onClose }: { table: TableSheetSt
   );
 }
 
+const money = (value: number) => 'Gs. ' + new Intl.NumberFormat('es-PY').format(value);
+
+interface DraftRow { key: string; description: string; amount: string }
+
+function ExpenseDraftCard({ draft, onConfirm, onOpenCar }: { draft: AssistantExpenseDraft; onConfirm: (items: AssistantExpenseInput[]) => Promise<{ created: number; total: number }>; onOpenCar: (carId: string) => void }) {
+  const [rows, setRows] = useState<DraftRow[]>(() => draft.items.map((item) => ({ key: item.id, description: item.description, amount: String(item.amount) })));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState<{ created: number; total: number } | null>(null);
+  const [discarded, setDiscarded] = useState(false);
+  const [error, setError] = useState('');
+  const total = rows.reduce((sum, row) => sum + (Number(row.amount.replace(/\D/g, '')) || 0), 0);
+  const editar = (key: string, patch: Partial<DraftRow>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  const quitar = (key: string) => setRows((rs) => rs.filter((r) => r.key !== key));
+  const agregar = () => setRows((rs) => [...rs, { key: `n${Date.now()}${rs.length}`, description: '', amount: '' }]);
+  const confirmar = async () => {
+    const items: AssistantExpenseInput[] = rows
+      .map((row) => ({ carId: draft.vehicle.carId, description: row.description.trim(), amount: Number(row.amount.replace(/\D/g, '')) || 0, category: draft.category, date: draft.date }))
+      .filter((item) => item.description && item.amount > 0);
+    if (!items.length) { setError('Agregá al menos una línea con descripción y monto.'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      setSaved(await onConfirm(items));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo cargar el gasto.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (saved) return <View style={[styles.draft, styles.draftSaved]}>
+    <Text style={styles.draftSavedTitle}>Carga confirmada</Text>
+    <Text style={styles.draftSavedText}>Se guardaron {saved.created} gasto{saved.created === 1 ? '' : 's'} por {money(saved.total)}.</Text>
+  </View>;
+  if (discarded) return <View style={styles.draft}><Text style={styles.draftDiscarded}>Carga descartada. No se guardó nada.</Text></View>;
+  return <View style={styles.draft}>
+    <View style={styles.draftHead}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.draftEyebrow}>CARGA PENDIENTE</Text>
+        <Text style={styles.draftTitle}>{draft.vehicle.plate} · {draft.category}</Text>
+        <Text style={styles.draftSubtitle} numberOfLines={1}>{draft.vehicle.model} · {dateLabel(draft.date)}</Text>
+      </View>
+      <Pressable onPress={() => onOpenCar(draft.vehicle.carId)} accessibilityRole="button" accessibilityLabel="Ver vehículo">
+        <Text style={styles.draftLink}>Ver vehículo</Text>
+      </Pressable>
+    </View>
+    <View style={{ gap: 7 }}>
+      {rows.map((row) => <View key={row.key} style={styles.draftRow}>
+        <TextInput value={row.description} onChangeText={(v) => editar(row.key, { description: v })} placeholder="Qué se gastó" placeholderTextColor="#a09a8d" maxLength={120} style={styles.draftInput} accessibilityLabel="Descripción del gasto" />
+        <TextInput value={row.amount} onChangeText={(v) => editar(row.key, { amount: v.replace(/\D/g, '') })} placeholder="0" placeholderTextColor="#a09a8d" keyboardType="number-pad" style={styles.draftAmount} accessibilityLabel="Monto del gasto" />
+        <Pressable onPress={() => quitar(row.key)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Borrar línea"><Text style={styles.draftRemove}>×</Text></Pressable>
+      </View>)}
+    </View>
+    <Pressable onPress={agregar} style={styles.draftAdd} accessibilityRole="button"><Text style={styles.draftAddText}>+ Agregar línea</Text></Pressable>
+    {!!error && <Text style={styles.draftError}>{error}</Text>}
+    <View style={styles.draftFoot}>
+      <Text style={styles.draftTotal}>Total <Text style={styles.draftTotalValue}>{money(total)}</Text></Text>
+      <View style={{ flexDirection: 'row', gap: 7 }}>
+        <Pressable onPress={() => setDiscarded(true)} disabled={saving} style={styles.draftDiscard} accessibilityRole="button"><Text style={styles.draftDiscardText}>Descartar</Text></Pressable>
+        <Pressable onPress={() => void confirmar()} disabled={saving || !rows.length} style={styles.draftConfirm} accessibilityRole="button"><Text style={styles.draftConfirmText}>{saving ? 'Guardando…' : 'Confirmar carga'}</Text></Pressable>
+      </View>
+    </View>
+  </View>;
+}
+
 export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: () => void; onOpenCar: (carId: string) => void; usuario: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([INTRO]);
   const [hydrated, setHydrated] = useState(false);
@@ -345,6 +410,7 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
           table: reply.table,
           followUps: reply.followUps ?? reply.filters,
           filters: reply.filters,
+          drafts: reply.drafts,
           asOf: reply.asOf,
           notice: reply.notice,
           files: reply.files,
@@ -381,6 +447,15 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
     else void send(action.question);
   };
 
+  const confirmDraft = async (items: AssistantExpenseInput[]) => {
+    try {
+      return await confirmAssistantExpenses(items);
+    } catch (error) {
+      if (error instanceof SinSesion) onSinSesion();
+      throw error;
+    }
+  };
+
   const resetConversation = () => {
     if (sending) return;
     inFlight.current = false;
@@ -413,6 +488,7 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
         )}
         {showChart && item.chart && <ResultChart chart={item.chart} />}
         {showTable && item.table && <ResultTable table={item.table} onAction={activateAction} onOpen={setTableSheet} />}
+        {!!item.drafts?.length && item.drafts.map((draft) => <ExpenseDraftCard key={draft.id} draft={draft} onConfirm={confirmDraft} onOpenCar={onOpenCar} />)}
         {!!(item.followUps ?? item.filters)?.length && !item.error && (
           <View style={styles.followUps}>
             <Text style={styles.followUpsLabel}>TAMBIÉN PODÉS PREGUNTAR</Text>
@@ -592,4 +668,28 @@ const styles = StyleSheet.create({
   sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#e8a13a', alignItems: 'center', justifyContent: 'center' },
   sendDisabled: { opacity: 0.4 },
   sendPressed: { transform: [{ scale: 0.96 }] },
+  draft: { alignSelf: 'stretch', marginTop: 4, gap: 9, borderWidth: 1, borderColor: '#d8cdb8', borderRadius: 16, backgroundColor: '#fffdf8', padding: 13 },
+  draftSaved: { borderColor: '#bcd6c6', backgroundColor: '#f1f7f2' },
+  draftSavedTitle: { color: '#2e7d5b', fontSize: 13, fontWeight: '800' },
+  draftSavedText: { color: '#3b3831', fontSize: 12, marginTop: 3 },
+  draftDiscarded: { color: '#8a7e68', fontSize: 12 },
+  draftHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  draftEyebrow: { color: '#8a5d16', fontSize: 9, fontWeight: '800', letterSpacing: 1 },
+  draftTitle: { color: '#2a2823', fontSize: 13, fontWeight: '800', marginTop: 2 },
+  draftSubtitle: { color: '#817b71', fontSize: 10, marginTop: 2 },
+  draftLink: { color: '#6e4a13', fontSize: 11, fontWeight: '700' },
+  draftRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  draftInput: { flex: 1, minWidth: 0, borderWidth: 1, borderColor: '#e0d7c6', borderRadius: 9, backgroundColor: '#fff', color: '#1a1a18', fontSize: 12, paddingHorizontal: 9, paddingVertical: 8 },
+  draftAmount: { width: 104, borderWidth: 1, borderColor: '#e0d7c6', borderRadius: 9, backgroundColor: '#fff', color: '#1a1a18', fontSize: 12, paddingHorizontal: 9, paddingVertical: 8, textAlign: 'right' },
+  draftRemove: { color: '#a8412f', fontSize: 20, lineHeight: 22, paddingHorizontal: 2 },
+  draftAdd: { alignSelf: 'flex-start', borderWidth: 1, borderColor: '#cfc3ac', borderStyle: 'dashed', borderRadius: 9, backgroundColor: '#faf7ef', paddingHorizontal: 10, paddingVertical: 7 },
+  draftAddText: { color: '#6b5837', fontSize: 11, fontWeight: '600' },
+  draftError: { color: '#934f37', fontSize: 11 },
+  draftFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderTopWidth: 1, borderTopColor: '#ece5d6', paddingTop: 9 },
+  draftTotal: { color: '#6b665c', fontSize: 11 },
+  draftTotalValue: { color: '#24271f', fontSize: 13, fontWeight: '800' },
+  draftDiscard: { borderWidth: 1, borderColor: '#d8cdb8', borderRadius: 9, backgroundColor: '#faf7ef', paddingHorizontal: 11, paddingVertical: 8 },
+  draftDiscardText: { color: '#6b5837', fontSize: 11, fontWeight: '700' },
+  draftConfirm: { borderRadius: 9, backgroundColor: '#30382c', paddingHorizontal: 13, paddingVertical: 9 },
+  draftConfirmText: { color: '#fffaf0', fontSize: 11, fontWeight: '800' },
 });

@@ -30,6 +30,7 @@ import { QuotaDetailModal } from './components/QuotaDetailModal';
 import { ReportDetailModal } from './components/ReportDetailModal';
 import { isoLocal } from './format';
 import { AssistantChat, type ChatHistory, type ChatReply } from './components/AssistantChat';
+import { CargaGastos } from './components/CargaGastos';
 import { consultarAsistente, SinSesion } from './api';
 
 function initialState(): UIState {
@@ -162,7 +163,8 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
       <QuotaDetailModal v={v} />
       <ReportDetailModal v={v} />
       <Toast v={v} />
-      {v.sResumen && <AssistantChat ask={askAssistant} onOpenCar={id => update({ detailId: id })} />}
+      {v.sResumen && <AssistantChat ask={askAssistant} onOpenCar={id => update({ detailId: id })} onConfirmExpenses={store.cargarGastos} />}
+      {v.sResumen && <CargaGastos cars={store.cars} onSave={store.cargarGastos} />}
     </div>
   );
 }
