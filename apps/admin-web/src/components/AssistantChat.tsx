@@ -242,6 +242,18 @@ export function AssistantChat({ ask, transcribe, onOpenCar, onConfirmExpenses }:
     </button>
     {open && <section id="miflota-chat" className="ai-panel" role="dialog" aria-modal="false" aria-labelledby="ai-title" onKeyDown={e => { if(e.key === 'Escape') { e.stopPropagation(); close(); } }}>
       <header className="ai-header"><div><h2 id="ai-title">Tu flota, en una conversación</h2><span>Asistente MiFlota</span></div><button aria-label="Nueva conversación" title="Nueva conversación" disabled={busy} onClick={() => { setExchanges([]); setDraft(''); input.current?.focus(); }}>＋</button><button onClick={close} aria-label="Minimizar chat" title="Minimizar">−</button></header>
+      {recording ? (
+        <div className="ai-recording" role="status" aria-live="polite">
+          <span className="ai-rec-big" aria-hidden="true" />
+          <span className="ai-rec-label">Grabando…</span>
+          <span className="ai-rec-time">{Math.floor(recSeconds / 60)}:{String(recSeconds % 60).padStart(2, '0')}</span>
+          <div className="ai-rec-actions">
+            <button type="button" className="ai-rec-cancel" onClick={cancelRecording}>Cancelar</button>
+            <button type="button" className="ai-rec-stop" onClick={stopRecording} aria-label="Detener y enviar">Detener</button>
+          </div>
+        </div>
+      ) : (
+        <>
       <div className="ai-messages" role="log" aria-label="Conversación" aria-live="polite" aria-relevant="additions text">
         {!exchanges.length && <div className="ai-welcome"><span className="ai-eyebrow">¿QUÉ QUERÉS SABER?</span><h3>Consultá y cargá los datos de tu flota</h3><p>Autos, choferes, cobros y gastos. Te ayudo a encontrar respuestas, comparar resultados y preparar cargas de gastos que confirmás vos.</p><div className="ai-suggestions">{['¿Quién maneja BYJ 066?', 'Mostrame los autos por modelo', '¿Cuánto cobramos este mes?'].map(q => <button key={q} onClick={() => void submit(q)}>{q}<span aria-hidden="true">↗</span></button>)}</div></div>}
         {exchanges.map((exchange,index) => <div className="ai-exchange" key={index}>
@@ -262,16 +274,8 @@ export function AssistantChat({ ask, transcribe, onOpenCar, onConfirmExpenses }:
         {transcribing && <div className="ai-loading" role="status"><span className="ai-dot" /> Transcribiendo el audio…</div>}
         <div ref={bottom} />
       </div>
-      {recording ? (
-        <div className="ai-recording" role="status" aria-live="polite">
-          <span className="ai-rec-dot" aria-hidden="true" />
-          <span className="ai-rec-label">Grabando…</span>
-          <span className="ai-rec-time">{Math.floor(recSeconds / 60)}:{String(recSeconds % 60).padStart(2, '0')}</span>
-          <button type="button" className="ai-rec-cancel" onClick={cancelRecording}>Cancelar</button>
-          <button type="button" className="ai-rec-stop" onClick={stopRecording} aria-label="Detener y enviar">Detener</button>
-        </div>
-      ) : (
         <form className="ai-composer" onSubmit={e => { e.preventDefault(); void submit(draft); }}><label className="ai-sr-only" htmlFor="ai-question">Tu pregunta</label><textarea ref={input} id="ai-question" placeholder="Preguntá o dictá sobre tu flota…" value={draft} maxLength={600} rows={2} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if(e.key==='Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(draft); } }} /><button type="button" className="ai-mic" onClick={() => void startRecording()} disabled={busy || transcribing} aria-label="Grabar mensaje de voz" title="Mensaje de voz"><MicIcon /></button><button type="submit" disabled={busy || !draft.trim()} aria-label="Enviar pregunta">↑</button><small>Enter para enviar · Shift+Enter para otra línea · 🎤 para dictar</small></form>
+        </>
       )}
     </section>}
   </>;

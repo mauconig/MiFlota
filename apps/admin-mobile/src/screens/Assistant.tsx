@@ -579,6 +579,22 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
 
   return (
     <View style={styles.screen}>
+      {recording ? (
+        <View style={styles.recordingFull}>
+          <View style={styles.recBig} />
+          <Text style={styles.recFullLabel}>Grabando…</Text>
+          <Text style={styles.recFullTime}>{Math.floor(recSeconds / 60)}:{String(recSeconds % 60).padStart(2, '0')}</Text>
+          <View style={styles.recFullActions}>
+            <Pressable onPress={() => void cancelVoice()} accessibilityRole="button" accessibilityLabel="Cancelar grabación" style={({ pressed }) => [styles.recCancel, pressed && styles.sendPressed]}>
+              <Text style={styles.recCancelText}>Cancelar</Text>
+            </Pressable>
+            <Pressable onPress={() => void stopVoice()} accessibilityRole="button" accessibilityLabel="Detener y enviar" style={({ pressed }) => [styles.recStop, pressed && styles.sendPressed]}>
+              <Text style={styles.recStopText}>Detener</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <>
       {messages.length > 1 && (
         <View style={styles.conversationActions}>
           <Pressable onPress={resetConversation} disabled={sending} accessibilityRole="button" accessibilityLabel="Nueva conversación">
@@ -627,27 +643,12 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
       </KeyboardChatScrollView>
 
       <KeyboardStickyView
-        style={[styles.composer, recording && styles.recordingBar]}
+        style={styles.composer}
         onLayout={(event) => {
           composerHeight.value = event.nativeEvent.layout.height;
         }}
       >
-        {recording ? (
-          <>
-            <View style={styles.recDot} />
-            <Text style={styles.recLabel}>Grabando…</Text>
-            <Text style={styles.recTime}>{Math.floor(recSeconds / 60)}:{String(recSeconds % 60).padStart(2, '0')}</Text>
-            <View style={styles.recSpacer} />
-            <Pressable onPress={() => void cancelVoice()} accessibilityRole="button" accessibilityLabel="Cancelar grabación" style={({ pressed }) => [styles.recCancel, pressed && styles.sendPressed]}>
-              <Text style={styles.recCancelText}>Cancelar</Text>
-            </Pressable>
-            <Pressable onPress={() => void stopVoice()} accessibilityRole="button" accessibilityLabel="Detener y enviar" style={({ pressed }) => [styles.recStop, pressed && styles.sendPressed]}>
-              <Text style={styles.recStopText}>Detener</Text>
-            </Pressable>
-          </>
-        ) : (
-          <>
-            <TextInput
+        <TextInput
               value={draft}
               onChangeText={setDraft}
               placeholder="Preguntá o dictá sobre tu flota"
@@ -683,9 +684,9 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
                 <Path d="M22 2 11 13" />
               </Svg>
             </Pressable>
-          </>
-        )}
       </KeyboardStickyView>
+        </>
+      )}
       <AssistantTableSheet table={tableSheet} onAction={activateAction} onClose={() => setTableSheet(null)} />
     </View>
   );
@@ -767,15 +768,15 @@ const styles = StyleSheet.create({
   micButton: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: '#ddd4c5', backgroundColor: '#f8f4ec', alignItems: 'center', justifyContent: 'center' },
   micButtonRecording: { backgroundColor: '#b94e3c', borderColor: '#b94e3c' },
   micStop: { width: 13, height: 13, borderRadius: 3, backgroundColor: '#fff' },
-  recordingBar: { alignItems: 'center' },
-  recDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#b94e3c' },
-  recLabel: { color: '#934f37', fontSize: 13, fontWeight: '700' },
-  recTime: { color: '#756e5f', fontSize: 13, fontVariant: ['tabular-nums'] },
-  recSpacer: { flex: 1 },
-  recCancel: { borderRadius: 14, borderWidth: 1, borderColor: '#ddd3c0', backgroundColor: '#fffdf8', paddingHorizontal: 13, paddingVertical: 9 },
-  recCancelText: { color: '#6b5837', fontSize: 12, fontWeight: '700' },
-  recStop: { borderRadius: 14, backgroundColor: '#b94e3c', paddingHorizontal: 15, paddingVertical: 9 },
-  recStopText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  recordingFull: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, paddingHorizontal: 24, backgroundColor: '#fff6f2' },
+  recBig: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#b94e3c' },
+  recFullLabel: { color: '#934f37', fontSize: 18, fontWeight: '700' },
+  recFullTime: { color: '#24271f', fontSize: 44, fontWeight: '800', fontVariant: ['tabular-nums'], letterSpacing: 1 },
+  recFullActions: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  recCancel: { borderRadius: 14, borderWidth: 1, borderColor: '#ddd3c0', backgroundColor: '#fffdf8', paddingHorizontal: 22, paddingVertical: 13 },
+  recCancelText: { color: '#6b5837', fontSize: 14, fontWeight: '700' },
+  recStop: { borderRadius: 14, backgroundColor: '#b94e3c', paddingHorizontal: 26, paddingVertical: 13 },
+  recStopText: { color: '#fff', fontSize: 14, fontWeight: '800' },
   sendDisabled: { opacity: 0.4 },
   sendPressed: { transform: [{ scale: 0.96 }] },
   draft: { alignSelf: 'stretch', marginTop: 4, gap: 9, borderWidth: 1, borderColor: '#d8cdb8', borderRadius: 16, backgroundColor: '#fffdf8', padding: 13 },
