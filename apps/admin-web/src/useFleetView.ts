@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Car, CarLocation, Mov, Pago, Reporte, UIState, NewCarForm, NewDriverForm, EditCarForm, DriverCredentialsEdit } from './types';
 import type { DriverCredentials, NuevoCarPayload, NuevoPagoPayload, ReportExportPayload } from './api';
 import { previewReportNotes, saveReportNotes } from './api';
@@ -24,6 +24,32 @@ export interface NotasAuto {
   seccion: string;
   total: number;
   bloques: NotasBloque[];
+}
+
+/** Borrador de las notas del reporte en progreso, guardado en el navegador para
+ *  no perderlo si se cierra el panel por accidente. Se limpia al guardar. */
+type NotasDraft = Record<string, Record<string, string>>;
+const notasDraftKey = (from: string, to: string) => `miflota-notas-borrador:${from}:${to}`;
+function leerNotasDraft(from: string, to: string): NotasDraft {
+  try {
+    const raw = localStorage.getItem(notasDraftKey(from, to));
+    return raw ? (JSON.parse(raw) as NotasDraft) : {};
+  } catch { return {}; }
+}
+function guardarNotasDraft(from: string, to: string, autos: NotasAuto[]) {
+  try {
+    const draft: NotasDraft = {};
+    for (const auto of autos) {
+      for (const bloque of auto.bloques) {
+        if (bloque.nota.trim()) (draft[auto.carId] ??= {})[bloque.tipo] = bloque.nota;
+      }
+    }
+    if (Object.keys(draft).length) localStorage.setItem(notasDraftKey(from, to), JSON.stringify(draft));
+    else localStorage.removeItem(notasDraftKey(from, to));
+  } catch { /* localStorage puede estar bloqueado: no es crítico */ }
+}
+function borrarNotasDraft(from: string, to: string) {
+  try { localStorage.removeItem(notasDraftKey(from, to)); } catch { /* idem */ }
 }
 
 /** Estado del modal de notas: primero la pregunta y después el recorrido. */
@@ -930,6 +956,12 @@ export function useFleetView(
   // por auto. Vive acá porque es un paso previo a exportar el PDF, no un estado
   // de la pantalla.
   const [notas, setNotas] = useState<NotasEstado | null>(null);
+
+  // Persiste el borrador de las notas en el navegador ante cada cambio, así no
+  // se pierde si el panel se cierra por accidente.
+  useEffect(() => {
+    if (notas && notas.fase === 'recorrido') guardarNotasDraft(notas.from, notas.to, notas.autos);
+  }, [notas]);
 
   const toast = (m: string) => {
     clearTimeout(toastTimer.current);
@@ -2146,16 +2178,27 @@ export function useFleetView(
         await exportarSinNotas();
         return;
       }
+      // Recupera el borrador local (si quedó uno de una salida accidental).
+      const draft = leerNotasDraft(previa.from, previa.to);
+      const restaurado = Object.keys(draft).length > 0;
       setNotas({
         fase: 'recorrido',
         payload,
         from: previa.from,
         to: previa.to,
-        autos: previa.autos.map((auto) => ({ ...auto, bloques: auto.bloques.map((bloque) => ({ ...bloque, notaGuardada: bloque.nota })) })),
+        autos: previa.autos.map((auto) => ({
+          ...auto,
+          bloques: auto.bloques.map((bloque) => ({
+            ...bloque,
+            notaGuardada: bloque.nota,
+            nota: draft[auto.carId]?.[bloque.tipo] ?? bloque.nota,
+          })),
+        })),
         paso: 0,
         guardando: false,
         error: '',
       });
+      if (restaurado) toast('Recuperé las notas que habías empezado');
     } catch (e) {
       setNotas(null);
       toast('No se pudo preparar el reporte: ' + (e as Error).message);
@@ -2192,6 +2235,7 @@ export function useFleetView(
     try {
       await saveReportNotes({ from: estado.from, to: estado.to, notes });
       await descargarReporte('pdf');
+      borrarNotasDraft(estado.from, estado.to);
       setNotas(null);
     } catch (e) {
       setNotas({ ...estado, guardando: false, error: (e as Error).message || 'No se pudieron guardar las notas' });
