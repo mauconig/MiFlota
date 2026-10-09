@@ -1148,7 +1148,7 @@ export function useFleetView(
   const carDe = new Map(cars.map((c) => [c.id, c]));
   const cuotas = movs.filter((m) => m.type === 'ingreso');
   const { aplicaciones, cobrado, saldoAFavor } = imputar(cuotas, pagos, (m) => {
-    const c = carDe.get(m.carId);
+    const c = carDe.get(m.carId ?? '');
     return claveChofer(m, c);
   });
   const cobradoDe = (m: Mov) => cobrado.get(m.id) ?? 0;
@@ -1177,7 +1177,7 @@ export function useFleetView(
   const cobrosVistaDeuda = cobrosVista.reduce((a, x) => a + x.debe, 0);
 
   const choferDeCuota = (m: Mov) => {
-    const c = carDe.get(m.carId);
+    const c = carDe.get(m.carId ?? '');
     return claveChofer(m, c);
   };
   // La deuda de un chofer es sobre todo su historial, no sobre el período: un
@@ -1459,13 +1459,13 @@ export function useFleetView(
     ...movs
       .filter((m) => m.type === 'egreso')
       .map((m) => {
-        const c = carDe.get(m.carId);
+        const c = m.carId ? carDe.get(m.carId ?? '') : undefined;
         return {
           id: 'egreso-' + m.id,
           date: m.date,
           type: 'egreso' as const,
           carId: m.carId,
-          vehicle: c ? c.plate + ' · ' + c.model + ' · ' + gpsTagLabel(c) : 'Vehículo eliminado',
+          vehicle: m.carId == null ? 'SIN AUTO' : c ? c.plate + ' · ' + c.model + ' · ' + gpsTagLabel(c) : 'Vehículo eliminado',
           driver: c?.driver || 'Sin chofer',
           desc: m.desc,
           category: m.cat || 'Otros',
@@ -1553,7 +1553,7 @@ export function useFleetView(
       .filter((a) => p && a.pagoId === p.id)
       .map((a) => {
         const quota = cuotas.find((m) => m.id === a.movId);
-        const quotaCar = quota ? carDe.get(quota.carId) : undefined;
+        const quotaCar = quota ? carDe.get(quota.carId ?? '') : undefined;
         return {
           id: a.movId,
           dateLbl: quota ? dLbl(quota.date) : 'Cuota',
@@ -1595,7 +1595,7 @@ export function useFleetView(
   const quotaDetail: QuotaDetailView | null = (() => {
     const m = st.quotaDetailId == null ? undefined : cuotas.find((x) => x.id === st.quotaDetailId);
     if (!m) return null;
-    const c = carDe.get(m.carId);
+    const c = carDe.get(m.carId ?? '');
     const collected = cobradoDe(m);
     const due = Math.max(0, m.amount - collected);
     const status = due === 0 ? 'Cobrado' : collected > 0 ? 'Parcial' : 'Pendiente';
@@ -2508,7 +2508,7 @@ export function useFleetView(
       return [...porChofer.entries()]
         .map(([key, grupo]) => {
           const c = grupo[0];
-          const propios = (m: Mov) => claveChofer(m, carDe.get(m.carId)) === key;
+          const propios = (m: Mov) => claveChofer(m, carDe.get(m.carId ?? '')) === key;
           const dStats = stats(movs, aplicaciones, (m) => propios(m) && inR(m), (a) => a.driver === key && inRA(a), pagos, (p) => (p.driverId != null ? String(p.driverId) : p.driver) === key && inRP(p));
           const pend = grupo.reduce((acc, car) => acc + pendMovs.filter((m) => m.carId === car.id && propios(m)).reduce((a, m) => a + deudaDe(m), 0), 0);
           const ok = pend === 0;

@@ -87,7 +87,7 @@ export function proposeExpenseDraft(db: Database.Database, ownerId: number, valu
 
 /** Escribe el borrador ya confirmado. Revalida todo contra el dueño: el
  *  cliente pudo editar las líneas, así que nada de lo que llega se confía. */
-export function applyExpenseDraft(db: Database.Database, ownerId: number, value: unknown, today = localDateISO()): { created: number; total: number; items: (AssistantExpenseDraftItem & { carId: string; plate: string; category: string; date: string })[] } {
+export function applyExpenseDraft(db: Database.Database, ownerId: number, value: unknown, today = localDateISO()): { created: number; total: number; items: (AssistantExpenseDraftItem & { carId: string | null; plate: string; category: string; date: string })[] } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Carga de gastos inválida.');
   const items = (value as { items?: unknown }).items;
   if (!Array.isArray(items) || !items.length) throw Error('La carga no tiene ninguna línea de gasto.');
@@ -98,9 +98,13 @@ export function applyExpenseDraft(db: Database.Database, ownerId: number, value:
      VALUES (?, ?, 'egreso', ?, ?, ?, ?, NULL, NULL, NULL, NULL)`,
   );
   const prepared = (items as AssistantExpenseInput[]).map((raw) => {
-    const carId = typeof raw.carId === 'string' ? raw.carId : '';
-    const car = selectCar.get(carId, ownerId) as CarRow | undefined;
-    if (!car) throw Error('Uno de los vehículos de la carga no existe o no es tuyo.');
+    const rawCarId = typeof raw.carId === 'string' ? raw.carId.trim() : '';
+    // carId vacío = gasto "sin auto" (general del dueño): se guarda con car_id NULL.
+    let car: CarRow | null = null;
+    if (rawCarId) {
+      car = (selectCar.get(rawCarId, ownerId) as CarRow | undefined) ?? null;
+      if (!car) throw Error('Uno de los vehículos de la carga no existe o no es tuyo.');
+    }
     const { description, amount } = cleanItem(raw);
     const category = normalizarCategoria(typeof raw.category === 'string' ? raw.category : '');
     if (!CATS_EGRESO.has(category)) throw Error(`Elegí una categoría válida (${[...CATS_EGRESO].join(', ')}).`);
@@ -112,7 +116,7 @@ export function applyExpenseDraft(db: Database.Database, ownerId: number, value:
     }
     return { car, description, amount, category, date };
   });
-  const run = db.transaction(() => prepared.map((item) => insert.run(ownerId, item.car.id, item.amount, item.date, item.description, item.category)));
+  const run = db.transaction(() => prepared.map((item) => insert.run(ownerId, item.car?.id ?? null, item.amount, item.date, item.description, item.category)));
   const inserted = run();
   const total = prepared.reduce((sum, item) => sum + item.amount, 0);
   return {
@@ -120,8 +124,8 @@ export function applyExpenseDraft(db: Database.Database, ownerId: number, value:
     total,
     items: prepared.map((item, index) => ({
       id: String(inserted[index].lastInsertRowid),
-      carId: item.car.id,
-      plate: item.car.plate,
+      carId: item.car?.id ?? null,
+      plate: item.car?.plate ?? 'SIN AUTO',
       description: item.description,
       amount: item.amount,
       displayAmount: money(item.amount),

@@ -31,7 +31,7 @@ import { ReportDetailModal } from './components/ReportDetailModal';
 import { isoLocal } from './format';
 import { AssistantChat, type ChatHistory, type ChatReply } from './components/AssistantChat';
 import { CargaGastos } from './components/CargaGastos';
-import { consultarAsistente, SinSesion } from './api';
+import { consultarAsistente, transcribirAsistente, SinSesion } from './api';
 
 function initialState(): UIState {
   const today = new Date();
@@ -102,6 +102,10 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
     try { return await consultarAsistente(question, history, signal); }
     catch (error) { if (error instanceof SinSesion) onSalir(); throw error; }
   }, [onSalir]);
+  const transcribirAssistant = useCallback(async (audio: Blob): Promise<{ text: string }> => {
+    try { return await transcribirAsistente(audio); }
+    catch (error) { if (error instanceof SinSesion) onSalir(); throw error; }
+  }, [onSalir]);
 
   const update = (patch: Partial<UIState> | ((s: UIState) => Partial<UIState>)) => {
     setState((s) => ({ ...s, ...(typeof patch === 'function' ? patch(s) : patch) }));
@@ -163,7 +167,7 @@ function Panel({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
       <QuotaDetailModal v={v} />
       <ReportDetailModal v={v} />
       <Toast v={v} />
-      {v.sResumen && <AssistantChat ask={askAssistant} onOpenCar={id => update({ detailId: id })} onConfirmExpenses={store.cargarGastos} />}
+      {v.sResumen && <AssistantChat ask={askAssistant} transcribe={transcribirAssistant} onOpenCar={id => update({ detailId: id })} onConfirmExpenses={store.cargarGastos} />}
       {v.sResumen && <CargaGastos cars={store.cars} onSave={store.cargarGastos} />}
     </div>
   );

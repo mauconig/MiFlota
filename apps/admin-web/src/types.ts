@@ -52,7 +52,8 @@ export type MovEstado = 'pagado' | 'pendiente' | 'parcial';
 
 export interface Mov {
   id: number;
-  carId: string;
+  /** Null en los egresos "sin auto" (gastos generales del dueño). */
+  carId: string | null;
   type: 'ingreso' | 'egreso';
   /** Lo facturado: en un ingreso, la cuota emitida, se haya cobrado o no.
       Cuánto se cobró de ella no se guarda: sale de imputar los pagos

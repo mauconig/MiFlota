@@ -73,7 +73,7 @@ export function imputar(cargos: MovRow[], pagos: PagoRow[], choferDe: (m: MovRow
         const aplica = Math.min(resto, falta);
         if (aplica > 0) {
           const cargo = c.cargos[i];
-          aplicaciones.push({ pagoId: p.id, movId: cargo.id, monto: aplica, fecha: p.fecha, carId: cargo.car_id, driver, tipo: p.tipo });
+          aplicaciones.push({ pagoId: p.id, movId: cargo.id, monto: aplica, fecha: p.fecha, carId: cargo.car_id ?? '', driver, tipo: p.tipo });
           cobrado.set(cargo.id, (cobrado.get(cargo.id) ?? 0) + aplica);
           resto -= aplica;
           falta -= aplica;

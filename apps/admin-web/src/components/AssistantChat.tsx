@@ -30,6 +30,7 @@ export interface ChatHistory { role: 'user' | 'assistant'; content: string }
 interface Exchange { question: string; reply?: ChatReply; error?: string }
 interface Props {
   ask: (question: string, history: ChatHistory[], signal: AbortSignal) => Promise<ChatReply>;
+  transcribe: (audio: Blob) => Promise<{ text: string }>;
   onOpenCar: (id: string) => void;
   onConfirmExpenses: (items: ExpenseItemInput[]) => Promise<{ created: number; total: number }>;
 }
@@ -128,19 +129,27 @@ function Chart({ chart }: { chart: NonNullable<ChatReply['chart']> }) {
   </figure>;
 }
 
-export function AssistantChat({ ask, onOpenCar, onConfirmExpenses }: Props) {
+export function AssistantChat({ ask, transcribe, onOpenCar, onConfirmExpenses }: Props) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
   const [busy, setBusy] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const [launcherVisible, setLauncherVisible] = useState(true);
   const busyRef = useRef(false);
   const controller = useRef<AbortController | null>(null);
+  const recorder = useRef<MediaRecorder | null>(null);
+  const stream = useRef<MediaStream | null>(null);
   const launcher = useRef<HTMLButtonElement>(null);
   const lastScrollTop = useRef(0);
   const input = useRef<HTMLTextAreaElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
-  useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => () => {
+    controller.current?.abort();
+    recorder.current?.stop();
+    stream.current?.getTracks().forEach((track) => track.stop());
+  }, []);
   useEffect(() => { if (open) input.current?.focus(); }, [open]);
   useEffect(() => { if (open) bottom.current?.scrollIntoView({ block: 'nearest' }); }, [open, exchanges, busy]);
   useEffect(() => {
@@ -178,6 +187,39 @@ export function AssistantChat({ ask, onOpenCar, onConfirmExpenses }: Props) {
       if (!abort.signal.aborted) { busyRef.current = false; setBusy(false); }
     }
   };
+  const mostrarErrorVoz = (message: string) => setExchanges(prev => [...prev, { question: '🎤 Mensaje de voz', error: message }]);
+  const startRecording = async () => {
+    if (busyRef.current || recording || transcribing) return;
+    try {
+      const media = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const chunks: BlobPart[] = [];
+      const mediaRecorder = new MediaRecorder(media);
+      mediaRecorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      mediaRecorder.onstop = async () => {
+        media.getTracks().forEach(track => track.stop());
+        stream.current = null;
+        setRecording(false);
+        const blob = new Blob(chunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        if (!blob.size) return;
+        setTranscribing(true);
+        try {
+          const { text } = await transcribe(blob);
+          setTranscribing(false);
+          void submit(text);
+        } catch (error) {
+          setTranscribing(false);
+          mostrarErrorVoz(error instanceof Error ? error.message : 'No pude transcribir el audio.');
+        }
+      };
+      recorder.current = mediaRecorder;
+      stream.current = media;
+      mediaRecorder.start();
+      setRecording(true);
+    } catch {
+      mostrarErrorVoz('No pude acceder al micrófono. Revisá los permisos.');
+    }
+  };
+  const stopRecording = () => { if (recorder.current && recorder.current.state !== 'inactive') recorder.current.stop(); };
   return <>
     <button ref={launcher} className={'ai-launcher' + (launcherVisible ? '' : ' ai-launcher-hidden')} onClick={() => setOpen(v => !v)} aria-label={open ? 'Minimizar asistente MiFlota' : 'Abrir asistente MiFlota'} aria-expanded={open} aria-controls="miflota-chat">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M20 11.5a8 8 0 0 1-8 8H5l-4 3 1.5-6A8 8 0 1 1 20 11.5Z" /><path d="M7 11h8M7 7h5" /></svg>
@@ -202,9 +244,14 @@ export function AssistantChat({ ask, onOpenCar, onConfirmExpenses }: Props) {
           {exchange.error && <div className="ai-error" role="alert"><p>{exchange.error}</p>{index === exchanges.length-1 && <button disabled={busy} onClick={() => void submit(exchange.question, true)}>Reintentar</button>}</div>}
         </div>)}
         {busy && <div className="ai-loading" role="status"><span className="ai-dot" /> Consultando tu flota…</div>}
+        {transcribing && <div className="ai-loading" role="status"><span className="ai-dot" /> Transcribiendo el audio…</div>}
         <div ref={bottom} />
       </div>
-      <form className="ai-composer" onSubmit={e => { e.preventDefault(); void submit(draft); }}><label className="ai-sr-only" htmlFor="ai-question">Tu pregunta</label><textarea ref={input} id="ai-question" placeholder="Preguntá sobre tu flota…" value={draft} maxLength={600} rows={2} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if(e.key==='Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(draft); } }} /><button type="submit" disabled={busy || !draft.trim()} aria-label="Enviar pregunta">↑</button><small>Enter para enviar · Shift+Enter para otra línea</small></form>
+      <form className="ai-composer" onSubmit={e => { e.preventDefault(); void submit(draft); }}><label className="ai-sr-only" htmlFor="ai-question">Tu pregunta</label><textarea ref={input} id="ai-question" placeholder={recording ? 'Grabando… hablá y tocá el cuadrado para terminar' : 'Preguntá o dictá sobre tu flota…'} value={draft} maxLength={600} rows={2} disabled={recording} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if(e.key==='Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(draft); } }} /><button type="button" className={'ai-mic' + (recording ? ' ai-mic-recording' : '')} onClick={() => recording ? stopRecording() : void startRecording()} disabled={busy || transcribing} aria-label={recording ? 'Detener grabación' : 'Grabar mensaje de voz'} title={recording ? 'Detener y enviar' : 'Mensaje de voz'}>{recording ? <span className="ai-mic-stop" /> : <MicIcon />}</button><button type="submit" disabled={busy || recording || !draft.trim()} aria-label="Enviar pregunta">↑</button><small>{recording ? 'Grabando · tocá el cuadrado para enviar' : 'Enter para enviar · Shift+Enter para otra línea · 🎤 para dictar'}</small></form>
     </section>}
   </>;
+}
+
+function MicIcon() {
+  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="2.5" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /></svg>;
 }

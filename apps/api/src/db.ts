@@ -42,7 +42,8 @@ export interface CarRow {
 
 export interface MovRow {
   id: number;
-  car_id: string;
+  /** Nullable: un egreso puede ser "sin auto" (gasto general del dueño). */
+  car_id: string | null;
   type: string;
   /** Lo facturado. En un ingreso es la cuota emitida, se haya cobrado o no.
    *  Cuánto se cobró de ella no vive acá: sale de imputar los pagos (ver
@@ -198,7 +199,9 @@ export function openDb() {
     CREATE TABLE IF NOT EXISTS movs (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       owner_id    INTEGER NOT NULL DEFAULT 0,
-      car_id      TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+      -- Nullable: un egreso puede ser "sin auto" (gasto general del dueño, p. ej.
+      -- pilas de GPS o cuota de monitoreo). Los ingresos siempre tienen auto.
+      car_id      TEXT REFERENCES cars(id) ON DELETE CASCADE,
       type        TEXT NOT NULL CHECK (type IN ('ingreso','egreso')),
       amount      INTEGER NOT NULL,
       date        TEXT NOT NULL,
@@ -459,6 +462,47 @@ function migrarOwner(db: Database.Database) {
         `);
       }
       db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('report_notas_tres_tipos_v1', '1')").run();
+    }).immediate();
+  }
+
+  // Los egresos pueden ser "sin auto" (gasto general del dueño), así que
+  // `movs.car_id` deja de ser NOT NULL. SQLite no permite quitar el NOT NULL
+  // con ALTER, así que se reconstruye la tabla y se recrean sus índices. El
+  // flag en `meta` evita repetirlo; el chequeo del PRAGMA cubre las bases
+  // nuevas, que ya nacen nullable.
+  const yaSinAuto = () => !!db.prepare("SELECT 1 FROM meta WHERE key = 'movs_sin_auto_v1'").get();
+  if (!yaSinAuto()) {
+    db.transaction(() => {
+      if (yaSinAuto()) return;
+      const cols = db.prepare('PRAGMA table_info(movs)').all() as { name: string; notnull: number }[];
+      if (cols.find((c) => c.name === 'car_id')?.notnull === 1) {
+        db.exec(`
+          CREATE TABLE movs_sin_auto (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id    INTEGER NOT NULL DEFAULT 0,
+            car_id      TEXT REFERENCES cars(id) ON DELETE CASCADE,
+            type        TEXT NOT NULL CHECK (type IN ('ingreso','egreso')),
+            amount      INTEGER NOT NULL,
+            date        TEXT NOT NULL,
+            descripcion TEXT NOT NULL,
+            cat         TEXT,
+            estado      TEXT CHECK (estado IN ('pagado','pendiente','parcial')),
+            driver      TEXT,
+            driver_id   INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+            comprobante        TEXT,
+            comprobante_nombre TEXT,
+            comprobante_tipo   TEXT
+          );
+          INSERT INTO movs_sin_auto (id, owner_id, car_id, type, amount, date, descripcion, cat, estado, driver, driver_id, comprobante, comprobante_nombre, comprobante_tipo)
+            SELECT id, owner_id, car_id, type, amount, date, descripcion, cat, estado, driver, driver_id, comprobante, comprobante_nombre, comprobante_tipo FROM movs;
+          DROP TABLE movs;
+          ALTER TABLE movs_sin_auto RENAME TO movs;
+          CREATE INDEX IF NOT EXISTS idx_movs_car ON movs(car_id);
+          CREATE INDEX IF NOT EXISTS idx_movs_date ON movs(date);
+          CREATE INDEX IF NOT EXISTS idx_movs_owner ON movs(owner_id);
+        `);
+      }
+      db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('movs_sin_auto_v1', '1')").run();
     }).immediate();
   }
 

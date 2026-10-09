@@ -13,6 +13,14 @@ export const confirmarGastosAsistente = (items: ExpenseItemInput[]) => req<{ cre
   method: 'POST', body: JSON.stringify({ items }),
 });
 
+/** Dictado por voz: manda el audio grabado y devuelve el texto transcripto. */
+export const transcribirAsistente = (audio: Blob, signal?: AbortSignal) => {
+  const ext = audio.type.includes('mp4') ? 'm4a' : audio.type.includes('ogg') ? 'ogg' : 'webm';
+  const fd = new FormData();
+  fd.append('audio', audio, `dictado.${ext}`);
+  return req<{ text: string }>('/api/assistant/transcribe', { method: 'POST', signal, body: fd });
+};
+
 /** Las fechas viajan como ISO `YYYY-MM-DD`. Se parsean a mediodía UTC para que
  *  ningún huso horario corra el día al construir el Date. */
 function parseDate(s: string): Date {

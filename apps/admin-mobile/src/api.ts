@@ -379,6 +379,15 @@ export function confirmAssistantExpenses(items: AssistantExpenseInput[]): Promis
   });
 }
 
+/** Dictado por voz: sube el audio grabado y devuelve el texto transcripto.
+ *  React Native no tiene `File`: el archivo va como {uri,name,type}, igual que
+ *  los comprobantes. */
+export function transcribeAssistantAudio(audio: { uri: string; name: string; type: string }): Promise<{ text: string }> {
+  const fd = new FormData();
+  fd.append('audio', { uri: audio.uri, name: audio.name, type: audio.type } as unknown as Blob);
+  return req<{ text: string }>('/api/assistant/transcribe', { method: 'POST', body: fd });
+}
+
 export function exportFleetReport(payload: ReportExportPayload): Promise<ReportExportResponse> {
   return req<ReportExportResponse>('/api/reports/export', {
     method: 'POST',

@@ -452,6 +452,8 @@ function autosParaNotas(rows: FleetReportExpenseRow[], notas: Map<string, string
     for (const grupo of groupReportRows(bloque.rows, (row) => row.total, sectionOrder)) {
       for (const vehicle of grupo.vehicles) {
         const carId = vehicle.rows[0].carId;
+        // Los gastos sin auto no llevan nota (report_notas.car_id es NOT NULL).
+        if (!carId) continue;
         const auto = autos.get(carId) ?? { carId, label: reportVehicleLabel(vehicle.rows[0]), seccion: grupo.name, total: 0, bloques: [] };
         const total = vehicle.rows.reduce((sum, row) => sum + row.total, 0);
         auto.total += total;
@@ -496,17 +498,17 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
   const sectionById = new Map(sections.map((section) => [section.id, section.name]));
   const movements = (selMovs.all(ownerId) as MovRow[]).filter((mov) => {
     if (mov.type !== 'egreso' || mov.date > to || (from && mov.date < from)) return false;
-    const car = carById.get(mov.car_id);
+    const car = carById.get(mov.car_id ?? '');
     if (request.vehicle && (!car || !reportFilterNorm(`${car.id} ${car.plate}`).includes(reportFilterNorm(request.vehicle)))) return false;
     if (request.category && !reportCategoryMatches(mov.cat ?? 'Otro', request.category)) return false;
     return true;
   });
   const rows = movements.map((mov) => {
-    const car = carById.get(mov.car_id);
+    const car = carById.get(mov.car_id ?? '');
     return {
       carId: mov.car_id,
       fecha: mov.date,
-      vehiculo: car?.plate ?? 'Vehículo eliminado',
+      vehiculo: mov.car_id == null ? 'SIN AUTO' : car?.plate ?? 'Vehículo eliminado',
       seccion: sectionById.get(car?.section_id ?? -1) ?? 'Sin sección',
       modelo: car?.model ?? '',
       gpsTag: car?.gps_tag ?? '',
@@ -577,8 +579,9 @@ interface FleetReportExportBody {
 }
 
 interface FleetReportExpenseRow {
-  /** Auto al que pertenece el gasto: con esto se buscan las notas del reporte. */
-  carId: string;
+  /** Auto al que pertenece el gasto: con esto se buscan las notas del reporte.
+   *  Null en los gastos "sin auto" (generales): no llevan nota. */
+  carId: string | null;
   fecha: string;
   vehiculo: string;
   /** Sección del vehículo: es el título con el que se agrupa en el PDF. */
@@ -784,7 +787,7 @@ async function pdfFromFleetReport(data: {
       vehicles.forEach((vehicle, index) => {
         const isLast = index === vehicles.length - 1;
         const label = `${index + 1}) ${vehicle.label}`;
-        const nota = notaDe(vehicle.rows[0].carId, tipo);
+        const nota = notaDe(vehicle.rows[0].carId ?? '', tipo);
         const blockHeight = vehicleBlockHeight(label, vehicle.rows, 10, nota) + (isLast ? closingHeight : 0);
         if (blockHeight <= pageInner) {
           ensureSpace(blockHeight);
@@ -839,7 +842,7 @@ async function pdfFromFleetReport(data: {
         const sectionTotalLabel = `Total gastos ${section}`;
         const subtotal = totalRowHeight(sectionTotalLabel, 16);
         const primero = firstVehicleBlock(rows);
-        sectionBanner(`${letraDeSeccion(sectionIndex)}) ${section}`, keepWithBlock(primero, SECTION_BAR_TOTAL, primero ? notaDe(primero.rows[0].carId, block.tipo) : ''));
+        sectionBanner(`${letraDeSeccion(sectionIndex)}) ${section}`, keepWithBlock(primero, SECTION_BAR_TOTAL, primero ? notaDe(primero.rows[0].carId ?? '', block.tipo) : ''));
         renderExpenseVehicles(rows, subtotal, block.tipo);
         totalRow(sectionTotalLabel, sumExpenses(rows), 16);
       }
@@ -1002,6 +1005,9 @@ function armarReporte(ownerId: number, body: FleetReportExportBody): ReporteArma
   const carSection = (carId: string | null) => sectionById.get(carById.get(carId ?? '')?.section_id ?? -1) ?? 'Sin sección';
   const carModel = (carId: string | null) => carById.get(carId ?? '')?.model ?? '';
   const carGpsTag = (carId: string | null) => carById.get(carId ?? '')?.gps_tag ?? '';
+  /** Rótulo del auto en el reporte: "SIN AUTO" para los gastos generales (car_id
+   *  null) y "Vehículo eliminado" cuando el auto referenciado ya no existe. */
+  const carPlate = (carId: string | null) => (carId == null ? 'SIN AUTO' : carById.get(carId)?.plate ?? 'Vehículo eliminado');
   const selectedCars = reportSelection(body.carIds);
   if (selectedCars !== 'todos' && [...selectedCars].some((id) => !carById.has(id))) throw new Error('Uno de los vehículos no pertenece a tu flota');
   const selectedCategories = body.categories === 'todas' ? 'todos' : reportSelection(body.categories);
@@ -1018,11 +1024,11 @@ function armarReporte(ownerId: number, body: FleetReportExportBody): ReporteArma
   const expenseRows: FleetReportExpenseRow[] = include === 'ingresos' ? [] : (selMovs.all(ownerId) as MovRow[])
     .filter((mov) => mov.type === 'egreso' && mov.date >= range.from && mov.date <= range.to && carAllowed(mov.car_id) && categoryAllowed(mov.cat || 'Otros'))
     .filter((mov) => {
-      const car = carById.get(mov.car_id);
+      const car = carById.get(mov.car_id ?? '');
       return matchesSearch(mov.descripcion, mov.cat || 'Otros', car?.plate, car?.model, car?.driver);
     })
     .map((mov) => {
-      return { carId: mov.car_id, fecha: mov.date, vehiculo: carById.get(mov.car_id)?.plate ?? 'Vehículo eliminado', seccion: carSection(mov.car_id), modelo: carModel(mov.car_id), gpsTag: carGpsTag(mov.car_id), categoria: mov.cat || 'Otros', detalle: mov.descripcion, total: mov.amount };
+      return { carId: mov.car_id, fecha: mov.date, vehiculo: carPlate(mov.car_id), seccion: carSection(mov.car_id), modelo: carModel(mov.car_id), gpsTag: carGpsTag(mov.car_id), categoria: mov.cat || 'Otros', detalle: mov.descripcion, total: mov.amount };
     });
 
   const counts = { ingresos: incomeRows.length, gastos: expenseRows.length, total: incomeRows.length + expenseRows.length };
@@ -1330,6 +1336,89 @@ app.post<{ Body: AssistantExpensesBody }>('/api/assistant/expenses', async (req,
   } catch (error) {
     const message = error instanceof Error ? error.message : 'No se pudo cargar el gasto';
     return reply.code(400).send({ error: message });
+  }
+});
+
+/** Formatos de audio que acepta el dictado (Whisper de Groq). */
+const AUDIO_TIPOS: Record<string, string> = {
+  'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a', 'audio/m4a': 'm4a',
+  'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav',
+  'audio/flac': 'flac', 'audio/x-flac': 'flac', 'audio/aac': 'aac', 'audio/3gpp': '3gp',
+};
+
+const GROQ_TRANSCRIBE_URL = process.env.GROQ_TRANSCRIBE_URL ?? 'https://api.groq.com/openai/v1/audio/transcriptions';
+const GROQ_TRANSCRIBE_MODEL = process.env.GROQ_TRANSCRIBE_MODEL ?? 'whisper-large-v3-turbo';
+
+/** Dictado por voz: el audio se manda a Groq (Whisper) y vuelve el texto. La
+ *  clave de Groq vive solo acá; el cliente nunca la ve. */
+app.post('/api/assistant/transcribe', async (req, reply) => {
+  const u = quien(req);
+  const apiKey = process.env.GROQ_API_KEY?.trim();
+  if (!apiKey) return reply.code(503).send({ error: 'El dictado por voz no está configurado' });
+  if (!allowAssistantRequest(u.id)) return reply.code(429).send({ error: 'Demasiados pedidos seguidos. Esperá un minuto.' });
+
+  let audio: Buffer | null = null;
+  let mimetype = 'audio/webm';
+  let filename = 'dictado.webm';
+  try {
+    for await (const parte of req.parts()) {
+      if (parte.type === 'field') continue;
+      if (parte.fieldname !== 'audio') {
+        await parte.toBuffer();
+        continue;
+      }
+      // MediaRecorder agrega el codec ("audio/webm;codecs=opus"): se ignora.
+      const base = parte.mimetype.split(';')[0].trim();
+      const ext = AUDIO_TIPOS[base];
+      if (!ext) {
+        await parte.toBuffer();
+        return reply.code(415).send({ error: 'Formato de audio no soportado' });
+      }
+      const buf = await parte.toBuffer();
+      if (buf.length) {
+        audio = buf;
+        mimetype = base;
+        filename = `dictado.${ext}`;
+      }
+    }
+  } catch (e) {
+    const err = e as { code?: string };
+    if (err.code === 'FST_REQ_FILE_TOO_LARGE') return reply.code(413).send({ error: 'El audio es demasiado largo' });
+    throw e;
+  }
+  if (!audio?.length) return reply.code(400).send({ error: 'No recibí ningún audio' });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45_000);
+  const started = Date.now();
+  try {
+    const form = new FormData();
+    form.append('file', new Blob([audio], { type: mimetype }), filename);
+    form.append('model', GROQ_TRANSCRIBE_MODEL);
+    form.append('language', 'es');
+    form.append('response_format', 'json');
+    form.append('temperature', '0');
+    const res = await fetch(GROQ_TRANSCRIBE_URL, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+    });
+    if (!res.ok) {
+      req.log.warn({ status: res.status }, 'falló la transcripción en Groq');
+      return reply.code(502).send({ error: 'No pude entender el audio. Probá de nuevo.' });
+    }
+    const data = (await res.json()) as { text?: string };
+    const text = (data.text ?? '').trim().slice(0, 600);
+    if (!text) return reply.code(422).send({ error: 'No entendí el audio. Hablá un poco más claro.' });
+    req.log.info({ ownerId: u.id, elapsedMs: Date.now() - started, chars: text.length }, 'audio transcripto');
+    return { text };
+  } catch (error) {
+    const aborted = controller.signal.aborted;
+    req.log.warn({ err: error instanceof Error ? error.message : String(error) }, 'error de transcripción');
+    return reply.code(aborted ? 504 : 502).send({ error: 'No pude transcribir el audio. Volvé a intentar.' });
+  } finally {
+    clearTimeout(timeout);
   }
 });
 
@@ -2409,7 +2498,7 @@ app.get('/api/chofer/resumen', async (req, reply) => {
   const driverDeCar = new Map(flota.map((c) => [c.id, c.driver]));
   // Todo lo que sigue es de un solo chofer; la clave de imputación es su id.
   const choferDe = () => s.driverId;
-  const esEste = (m: MovRow) => (m.driver_id != null ? m.driver_id === s.driverId : (m.driver ?? driverDeCar.get(m.car_id)) === s.driver);
+  const esEste = (m: MovRow) => (m.driver_id != null ? m.driver_id === s.driverId : (m.driver ?? driverDeCar.get(m.car_id ?? '')) === s.driver);
 
   const cargos = (db.prepare("SELECT * FROM movs WHERE owner_id = ? AND type = 'ingreso'").all(s.ownerId) as MovRow[]).filter((m) => m.date <= hoy && esEste(m));
   const pagos = (db.prepare('SELECT * FROM pagos WHERE owner_id = ?').all(s.ownerId) as PagoRow[]).filter((p) =>

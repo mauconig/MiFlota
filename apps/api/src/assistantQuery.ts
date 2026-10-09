@@ -197,7 +197,7 @@ export function queryFleetData(db: Database.Database, ownerId: number, r: Assist
     const movements = db.prepare('SELECT m.id,m.car_id,m.type,m.amount,m.date,m.descripcion,m.cat,m.estado,m.driver,m.driver_id,m.comprobante_nombre FROM movs m JOIN cars c ON c.id=m.car_id WHERE m.owner_id=? AND c.owner_id=? AND m.date<=?').all(ownerId, ownerId, range.to) as MovRow[];
     const payments = db.prepare('SELECT p.id,p.owner_id,p.car_id,p.driver,p.driver_id,p.fecha,p.monto,p.tipo,p.medio,p.nota,p.comprobante_nombre FROM pagos p LEFT JOIN cars c ON c.id=p.car_id WHERE p.owner_id=? AND (p.car_id IS NULL OR c.owner_id=?) AND p.fecha<=?').all(ownerId, ownerId, range.to) as PagoRow[];
     // Allocate against the entire account first; vehicle/date filters must not move payments to other quotas.
-    const allocation = imputar(movements.filter(m => m.type === 'ingreso'), payments, m => m.driver_id ?? driverName(null, m.driver || byId.get(m.car_id)?.driver || null));
+    const allocation = imputar(movements.filter(m => m.type === 'ingreso'), payments, m => m.driver_id ?? driverName(null, m.driver || byId.get(m.car_id ?? '')?.driver || null));
     for (const m of movements) {
       if (!dateAllowed(m.date)) continue;
       const income = m.type === 'ingreso';
@@ -207,8 +207,8 @@ export function queryFleetData(db: Database.Database, ownerId: number, r: Assist
       if (!include || entity === 'deudas' && debt === 0) continue;
       const status = income ? debt === 0 ? 'pagado' : debt < m.amount ? 'parcial' : 'pendiente' : 'registrado';
       const value = metric === 'cantidad' ? 1 : entity === 'deudas' ? debt : metric === 'ganancia' ? -m.amount : m.amount;
-      add({ label: m.descripcion, carId: m.car_id, driver: driverName(m.driver_id, m.driver || byId.get(m.car_id)?.driver || null), category: m.cat || (income ? 'Cuota' : 'Sin categoría'), status, date: m.date, value,
-        details: { Fecha: m.date, Vehículo: byId.get(m.car_id)!.plate, Chofer: driverName(m.driver_id, m.driver || byId.get(m.car_id)?.driver || null), Tipo: income ? 'Cuota' : 'Gasto', Estado: status, Monto: money(m.amount), ...(income ? { 'Saldo pendiente': money(debt) } : {}), Comprobante: m.comprobante_nombre || 'Sin comprobante' } });
+      add({ label: m.descripcion, carId: m.car_id ?? undefined, driver: driverName(m.driver_id, m.driver || byId.get(m.car_id ?? '')?.driver || null), category: m.cat || (income ? 'Cuota' : 'Sin categoría'), status, date: m.date, value,
+        details: { Fecha: m.date, Vehículo: byId.get(m.car_id ?? '')?.plate ?? 'SIN AUTO', Chofer: driverName(m.driver_id, m.driver || byId.get(m.car_id ?? '')?.driver || null), Tipo: income ? 'Cuota' : 'Gasto', Estado: status, Monto: money(m.amount), ...(income ? { 'Saldo pendiente': money(debt) } : {}), Comprobante: m.comprobante_nombre || 'Sin comprobante' } });
     }
     for (const p of payments) {
       if (!dateAllowed(p.fecha)) continue;

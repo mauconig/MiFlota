@@ -3,7 +3,8 @@ import { ActivityIndicator, Keyboard, Linking, Modal, Pressable, ScrollView, Sty
 import { KeyboardChatScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useSharedValue } from 'react-native-reanimated';
 import Svg, { Circle, Line, Path, Polyline, Text as SvgText } from 'react-native-svg';
-import { askAssistant, confirmAssistantExpenses, SinSesion, type AssistantAction, type AssistantCard, type AssistantChart, type AssistantExpenseDraft, type AssistantExpenseInput, type AssistantHistoryItem, type AssistantTable } from '../api';
+import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
+import { askAssistant, confirmAssistantExpenses, transcribeAssistantAudio, SinSesion, type AssistantAction, type AssistantCard, type AssistantChart, type AssistantExpenseDraft, type AssistantExpenseInput, type AssistantHistoryItem, type AssistantTable } from '../api';
 import { API_BASE } from '../config';
 import { Pagination } from '../components/Pagination';
 import { clearAssistantChat, loadAssistantChat, saveAssistantChat, type AssistantChatMessage } from '../assistantChat';
@@ -327,7 +328,10 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
   const [hydrated, setHydrated] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const [tableSheet, setTableSheet] = useState<TableSheetState | null>(null);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const listRef = useRef<React.ElementRef<typeof KeyboardChatScrollView>>(null);
   const composerHeight = useSharedValue(0);
   const nextId = useRef(1);
@@ -447,6 +451,47 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
     else void send(action.question);
   };
 
+  const addSystemError = (text: string) => setMessages((current) => [...current, { id: `m${nextId.current++}`, role: 'assistant', text, error: true }]);
+
+  const startVoice = async () => {
+    if (recording || transcribing || sending || inFlight.current) return;
+    try {
+      const perm = await requestRecordingPermissionsAsync();
+      if (!perm.granted) {
+        addSystemError('Necesito permiso para usar el micrófono.');
+        return;
+      }
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      setRecording(true);
+    } catch {
+      addSystemError('No pude iniciar la grabación. Probá de nuevo.');
+    }
+  };
+
+  const stopVoice = async () => {
+    if (!recording) return;
+    setRecording(false);
+    try {
+      await recorder.stop();
+      const uri = recorder.uri;
+      if (!uri) return;
+      setTranscribing(true);
+      const ext = (uri.split('.').pop() ?? 'm4a').split('?')[0];
+      const { text } = await transcribeAssistantAudio({ uri, name: `dictado.${ext}`, type: ext === 'webm' ? 'audio/webm' : 'audio/m4a' });
+      setTranscribing(false);
+      void send(text);
+    } catch (error) {
+      setTranscribing(false);
+      if (error instanceof SinSesion) {
+        onSinSesion();
+        return;
+      }
+      addSystemError(error instanceof Error ? error.message : 'No pude transcribir el audio.');
+    }
+  };
+
   const confirmDraft = async (items: AssistantExpenseInput[]) => {
     try {
       return await confirmAssistantExpenses(items);
@@ -554,6 +599,12 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
                 <Text style={styles.loadingText}>Consultando la flota…</Text>
               </View>
             )}
+            {transcribing && (
+              <View style={styles.loadingBubble}>
+                <ActivityIndicator color="#8a5d16" size="small" />
+                <Text style={styles.loadingText}>Transcribiendo el audio…</Text>
+              </View>
+            )}
           </View>
         </View>
       </KeyboardChatScrollView>
@@ -567,20 +618,37 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
         <TextInput
           value={draft}
           onChangeText={setDraft}
-          placeholder="Preguntá sobre tu flota"
+          placeholder={recording ? 'Grabando… hablá y tocá el cuadrado' : 'Preguntá o dictá sobre tu flota'}
           placeholderTextColor="#8b857b"
           multiline
           maxLength={600}
-          editable={!sending && hydrated}
+          editable={!sending && !recording && hydrated}
           style={styles.input}
           accessibilityLabel="Pregunta para el asistente"
         />
         <Pressable
+          onPress={() => void (recording ? stopVoice() : startVoice())}
+          disabled={sending || transcribing || !hydrated}
+          accessibilityRole="button"
+          accessibilityLabel={recording ? 'Detener grabación' : 'Grabar mensaje de voz'}
+          style={({ pressed }) => [styles.micButton, recording && styles.micButtonRecording, (sending || transcribing || !hydrated) && styles.sendDisabled, pressed && styles.sendPressed]}
+        >
+          {recording ? (
+            <View style={styles.micStop} />
+          ) : (
+            <Svg viewBox="0 0 24 24" width={20} height={20} fill="none" stroke="#6b5837" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <Path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+              <Path d="M5 11a7 7 0 0 0 14 0" />
+              <Path d="M12 18v3" />
+            </Svg>
+          )}
+        </Pressable>
+        <Pressable
           onPress={() => void send(draft)}
-          disabled={!draft.trim() || sending || !hydrated}
+          disabled={!draft.trim() || sending || recording || !hydrated}
           accessibilityRole="button"
           accessibilityLabel="Enviar pregunta"
-          style={({ pressed }) => [styles.sendButton, (!draft.trim() || sending || !hydrated) && styles.sendDisabled, pressed && styles.sendPressed]}
+          style={({ pressed }) => [styles.sendButton, (!draft.trim() || sending || recording || !hydrated) && styles.sendDisabled, pressed && styles.sendPressed]}
         >
           <Svg viewBox="0 0 24 24" width={20} height={20} fill="none" stroke="#16150f" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
             <Path d="m22 2-7 20-4-9-9-4Z" />
@@ -666,6 +734,9 @@ const styles = StyleSheet.create({
   composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 9, backgroundColor: '#fffdf8', borderTopWidth: 1, borderTopColor: '#e6ded0', paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10 },
   input: { flex: 1, maxHeight: 112, minHeight: 44, borderRadius: 22, borderWidth: 1, borderColor: '#ddd4c5', backgroundColor: '#f8f4ec', color: '#1a1a18', fontSize: 14, lineHeight: 19, paddingHorizontal: 15, paddingVertical: 11 },
   sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#e8a13a', alignItems: 'center', justifyContent: 'center' },
+  micButton: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: '#ddd4c5', backgroundColor: '#f8f4ec', alignItems: 'center', justifyContent: 'center' },
+  micButtonRecording: { backgroundColor: '#b94e3c', borderColor: '#b94e3c' },
+  micStop: { width: 13, height: 13, borderRadius: 3, backgroundColor: '#fff' },
   sendDisabled: { opacity: 0.4 },
   sendPressed: { transform: [{ scale: 0.96 }] },
   draft: { alignSelf: 'stretch', marginTop: 4, gap: 9, borderWidth: 1, borderColor: '#d8cdb8', borderRadius: 16, backgroundColor: '#fffdf8', padding: 13 },
