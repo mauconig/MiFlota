@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Keyboard, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { KeyboardChatScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useSharedValue } from 'react-native-reanimated';
 import Svg, { Circle, Line, Path, Polyline, Text as SvgText } from 'react-native-svg';
@@ -466,7 +466,18 @@ export function Assistant({ onSinSesion, onOpenCar, usuario }: { onSinSesion: ()
     try {
       const perm = await requestRecordingPermissionsAsync();
       if (!perm.granted) {
-        addSystemError('Necesito permiso para usar el micrófono.');
+        if (perm.canAskAgain) {
+          addSystemError('Necesito permiso para usar el micrófono. Tocá el micrófono otra vez y elegí "Permitir".');
+        } else {
+          Alert.alert(
+            'Micrófono deshabilitado',
+            'Para dictarle mensajes al asistente, habilitá el permiso de micrófono en los ajustes de MiFlota.',
+            [
+              { text: 'Ahora no', style: 'cancel' },
+              { text: 'Abrir ajustes', onPress: () => { void Linking.openSettings(); } },
+            ],
+          );
+        }
         return;
       }
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });

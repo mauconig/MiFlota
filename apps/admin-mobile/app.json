@@ -18,7 +18,8 @@
       "softwareKeyboardLayoutMode": "resize",
       "package": "com.mauconig.adminmobile",
       "permissions": [
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
