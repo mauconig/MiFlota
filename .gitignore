@@ -40,6 +40,7 @@ apps/api/.localdata
 .env
 /handoff.md
 /apks/
+/apk/
 
 # Diagnosticos locales de dispositivos
 /.phone-driver*
