@@ -2183,7 +2183,7 @@ export function useMobileView(
           const selected = carDe.get(v);
           setF({ carId: v, driver: selected ? claveDeCar(selected) : '' });
         },
-        selCars: active.map((c) => ({ id: c.id, label: c.plate + ' · ' + c.driver })),
+        selCars: active.map((c) => ({ id: c.id, label: c.model + ' · ' + (c.gpsTag || 'Sin GPS') + ' · ' + c.plate })),
         lockCar: f.lockCar,
         driver: f.driver,
         setDriver: (v) => setF({ driver: v }),
@@ -2207,7 +2207,7 @@ export function useMobileView(
         catChips: REG_CATS.map((name) => ({ label: name, ...chipStyle(f.cat === name, 'amber'), pick: () => setF({ cat: name }) })),
         carId: f.carId,
         setCarId: (v) => setF({ carId: v }),
-        selCars: active.map((c) => ({ id: c.id, label: c.plate + ' · ' + c.driver })),
+        selCars: active.map((c) => ({ id: c.id, label: c.model + ' · ' + (c.gpsTag || 'Sin GPS') + ' · ' + c.plate })),
         lockCar: f.lockCar,
         comprobante: f.comprobante,
         setComprobante: (file) => setF({ comprobante: file }),
@@ -2219,7 +2219,7 @@ export function useMobileView(
       service = {
         carId: f.carId,
         setCarId: (v) => setF({ carId: v }),
-        selCars: active.map((c) => ({ id: c.id, label: c.plate + ' · ' + c.driver })),
+        selCars: active.map((c) => ({ id: c.id, label: c.model + ' · ' + (c.gpsTag || 'Sin GPS') + ' · ' + c.plate })),
         lockCar: f.lockCar,
         kilometraje: f.kilometraje,
         setKilometraje: (v) => setF({ kilometraje: v.replace(/\D/g, '').slice(0, 10) }),
