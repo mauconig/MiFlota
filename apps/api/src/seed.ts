@@ -166,15 +166,15 @@ export function generateFleetData(): { cars: SeedCar[]; movs: SeedMov[] } {
         amt = 120000 + R() * 180000;
         desc = 'Carga de combustible';
       } else if (r < 0.7) {
-        cat = 'Seguro';
+        cat = 'Otros';
         amt = 380000 + R() * 60000;
         desc = 'Cuota mensual seguro';
       } else if (r < 0.82) {
-        cat = 'Multas';
+        cat = 'Otros';
         amt = 150000 + R() * 350000;
         desc = 'Multa de tránsito';
       } else if (r < 0.92) {
-        cat = 'Documentación';
+        cat = 'Otros';
         amt = 150000 + R() * 250000;
         desc = DOCD[Math.floor(R() * DOCD.length)];
       } else {

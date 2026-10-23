@@ -411,6 +411,10 @@ function migrarOwner(db: Database.Database) {
   // "Combustible" dejó de ser una categoría: el gasto de combustible ahora se
   // cuenta en "Otros". Idempotente: solo toca las filas que todavía la tienen.
   db.exec("UPDATE movs SET cat = 'Otros' WHERE cat = 'Combustible'");
+  // Seguro, multas y documentación se agruparon en "Otros": el reporte solo
+  // distingue taller / mantenimiento / otros. Las filas viejas se reescriben para
+  // que los filtros y los totales por categoría sigan cerrando.
+  db.exec("UPDATE movs SET cat = 'Otros' WHERE lower(cat) IN ('seguro', 'multas', 'documentación', 'documentacion')");
   db.exec(`
     CREATE TABLE IF NOT EXISTS kilometraje_alertas (
       owner_id INTEGER NOT NULL,

@@ -3,10 +3,8 @@ import { Btn } from './Btn';
 import { card, linkBtn, linkBtnHover, sectionTitle } from '../styles';
 
 const SHORT_LABEL: Record<string, string> = {
+  Mantenimiento: 'Mant.',
   Taller: 'Taller',
-  Seguro: 'Seguro',
-  Multas: 'Multas',
-  Documentación: 'Docum.',
   Otros: 'Otros',
 };
 

@@ -141,6 +141,9 @@ test('editar y borrar movimientos, aislamiento por dueño y fecha del egreso', {
   // Borrar: el gasto se va con su archivo y una cuota emitida no se puede tocar.
   const conAdjunto = await crearEgreso(tokenA, { razon: 'Seguro', monto: 20000, cat: 'Seguro', fecha: ayer }, pdf('borrar'));
   const movAdjunto = (await conAdjunto.json()).mov;
+  // "Seguro" dejó de ser categoría propia: se agrupa en Otros aunque venga de un
+  // cliente viejo.
+  assert.equal(movAdjunto.cat, 'Otros');
   const archivoAdjunto = archivoDe(movAdjunto);
   assert.ok(existsSync(archivoAdjunto));
   const borrado = await fetch(`${base}/api/movs/${movAdjunto.id}`, { method: 'DELETE', headers: auth(tokenA) });

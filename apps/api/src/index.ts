@@ -640,6 +640,9 @@ async function pdfFromFleetReport(data: {
   incluirComparativa?: boolean;
   /** Nota libre debajo de la comparación. */
   comparativaNota?: string;
+  /** Qué columnas de gasto mostrar en el resumen, según las categorías elegidas.
+   *  Ausente = mostrar las tres (compatibilidad con llamadas viejas). */
+  resumenGastos?: { taller: boolean; mantenimiento: boolean; otros: boolean };
   expenseTotal: number;
   resultTotal: number;
   sectionOrder: string[];
@@ -918,19 +921,27 @@ async function pdfFromFleetReport(data: {
 
     const showIncome = data.incomeRows.length > 0;
     const summarySections = orderedSections([...data.expenseRows, ...data.incomeRows]);
-    const labelWidth = Math.round(width * (showIncome ? 0.28 : 0.32));
-    const columnWidth = Math.round((width - labelWidth) / (showIncome ? 5 : 4));
-    const columns = showIncome ? ['Talleres', 'Mantenimiento', 'Otros', 'Cobros', 'Neto'] : ['Talleres', 'Mantenimiento', 'Otros', 'Neto'];
+    // Columnas de gasto según lo que se pidió: si el dueño no marcó
+    // Mantenimiento, esa columna no se imprime (y lo mismo con las otras).
+    const gastoBuckets = [
+      { label: 'Talleres', show: data.resumenGastos?.taller !== false, total: (rows: FleetReportExpenseRow[]) => sumExpenses(rows.filter(isWorkshop)) },
+      { label: 'Mantenimiento', show: data.resumenGastos?.mantenimiento !== false, total: (rows: FleetReportExpenseRow[]) => sumExpenses(rows.filter(isMantenimiento)) },
+      { label: 'Otros', show: data.resumenGastos?.otros !== false, total: (rows: FleetReportExpenseRow[]) => sumExpenses(rows.filter(isOtro)) },
+    ].filter((bucket) => bucket.show);
+    const columnLabels = [...gastoBuckets.map((bucket) => bucket.label), ...(showIncome ? ['Cobros'] : []), 'Neto'];
+    const labelWidth = Math.round(width * (columnLabels.length > 3 ? 0.28 : 0.32));
+    const columnWidth = Math.round((width - labelWidth) / columnLabels.length);
     const totalsFor = (section: string) => {
       const expenses = data.expenseRows.filter((row) => sectionOf(row) === section);
       const incomes = data.incomeRows.filter((row) => sectionOf(row) === section);
-      const taller = sumExpenses(expenses.filter(isWorkshop));
-      const mantenimiento = sumExpenses(expenses.filter(isMantenimiento));
-      const otros = sumExpenses(expenses.filter(isOtro));
+      const gastos = gastoBuckets.map((bucket) => reportMoney(bucket.total(expenses)));
       const cobros = sumIncome(incomes);
-      return showIncome
-        ? [reportMoney(taller), reportMoney(mantenimiento), reportMoney(otros), reportMoney(cobros), reportMoney(cobros - taller - mantenimiento - otros)]
-        : [reportMoney(taller), reportMoney(mantenimiento), reportMoney(otros), reportMoney(-(taller + mantenimiento + otros))];
+      const gastoTotal = sumExpenses(expenses);
+      return [
+        ...gastos,
+        ...(showIncome ? [reportMoney(cobros)] : []),
+        reportMoney(showIncome ? cobros - gastoTotal : -gastoTotal),
+      ];
     };
 
     const summaryRow = (label: string, cells: string[], bold: boolean) => {
@@ -950,18 +961,19 @@ async function pdfFromFleetReport(data: {
     ensureSpace(26 + 22);
     const tableHeadY = doc.y;
     doc.font('Helvetica-Bold').fontSize(8).fillColor(REPORT_COLORS.muted).text('SECCIÓN', margin + 8, tableHeadY + 4, { width: labelWidth - 16, lineBreak: false });
-    columns.forEach((column, index) => {
-      doc.font('Helvetica-Bold').fontSize(8).fillColor(REPORT_COLORS.muted).text(column.toUpperCase(), margin + labelWidth + index * columnWidth, tableHeadY + 4, { width: columnWidth - 8, align: 'right', lineBreak: false });
+    const headerSize = columnLabels.length >= 5 ? 7.5 : 8;
+    columnLabels.forEach((column, index) => {
+      doc.font('Helvetica-Bold').fontSize(headerSize).fillColor(REPORT_COLORS.muted).text(column.toUpperCase(), margin + labelWidth + index * columnWidth, tableHeadY + 4, { width: columnWidth - 8, align: 'right', lineBreak: false });
     });
     doc.y = tableHeadY + 20;
 
     for (const section of summarySections) summaryRow(section, totalsFor(section), false);
-    const tallerTotal = sumExpenses(data.expenseRows.filter(isWorkshop));
-    const mantenimientoTotal = sumExpenses(data.expenseRows.filter(isMantenimiento));
-    const otrosTotal = sumExpenses(data.expenseRows.filter(isOtro));
-    summaryRow('TOTAL', showIncome
-      ? [reportMoney(tallerTotal), reportMoney(mantenimientoTotal), reportMoney(otrosTotal), reportMoney(data.incomeTotal), reportMoney(data.resultTotal)]
-      : [reportMoney(tallerTotal), reportMoney(mantenimientoTotal), reportMoney(otrosTotal), reportMoney(-data.expenseTotal)], true);
+    const gastoTotals = gastoBuckets.map((bucket) => reportMoney(bucket.total(data.expenseRows)));
+    summaryRow('TOTAL', [
+      ...gastoTotals,
+      ...(showIncome ? [reportMoney(data.incomeTotal)] : []),
+      reportMoney(showIncome ? data.resultTotal : -data.expenseTotal),
+    ], true);
 
     // Comparación de cobros contra el período anterior (la quincena previa).
     // Si el usuario cargó los cobros a mano, esos reemplazan lo calculado. El
@@ -1179,6 +1191,18 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
     }
     data = XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   } else {
+    // Columnas del resumen: solo las categorías que el dueño dejó seleccionadas
+    // (con "todas" salen las tres; un reporte solo de ingresos no lleva ninguna).
+    const seleccionColumnas = body.categories === undefined || body.categories === 'todas'
+      ? null
+      : new Set(body.categories.map(normalizarCategoria));
+    const incluyeGastos = body.include !== 'ingresos';
+    const bucket = (canon: string) => incluyeGastos && (!seleccionColumnas || seleccionColumnas.has(canon));
+    const resumenGastos = {
+      taller: bucket('Taller'),
+      mantenimiento: bucket('Mantenimiento'),
+      otros: incluyeGastos && (!seleccionColumnas || [...seleccionColumnas].some((c) => c !== 'Taller' && c !== 'Mantenimiento')),
+    };
     data = await pdfFromFleetReport({
       periodLabel,
       generatedAt: `${hoyISO()} · ${reportFileTimestamp().slice(11).replace(/(\d{2})(\d{2})(\d{2})/, '$1:$2:$3')}`,
@@ -1189,6 +1213,7 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
       cobrosManuales,
       incluirComparativa: body.incluirComparativa !== false,
       comparativaNota: String(body.comparativaNota ?? '').trim().slice(0, 300),
+      resumenGastos,
       expenseTotal,
       resultTotal,
       sectionOrder: reporte.sectionOrder,
