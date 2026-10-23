@@ -1248,7 +1248,22 @@ app.get('/api/state', async (req) => {
     movs: (selMovs.all(u.id) as MovRow[]).map((m) => movToJson(m)),
     pagos: (selPagos.all(u.id) as PagoRow[]).map(pagoToJson),
     reportes: (selReportes.all(u.id) as ReporteRow[]).map(reporteToJson),
+    // Los choferes no se deducen de los autos: uno recién creado todavía no
+    // tiene ninguno y aun así hay que poder elegirlo al registrar un ingreso.
+    drivers: db.prepare("SELECT id, nombre FROM drivers WHERE owner_id = ? AND estado = 'activo' ORDER BY nombre").all(u.id) as { id: number; nombre: string }[],
   };
+});
+
+/** Alta de un chofer sin auto ni credenciales. Es idempotente por nombre: si ya
+ *  existe en la flota, devuelve el mismo, así el flujo de cobro puede crear sin
+ *  miedo a duplicar cuando el dueño vuelve a escribir un nombre que ya cargó. */
+app.post<{ Body: { nombre?: string } }>('/api/drivers', async (req, reply) => {
+  const u = quien(req);
+  const nombre = String(req.body?.nombre ?? '').trim().replace(/\s+/g, ' ');
+  if (!nombre || nombre === 'Sin chofer' || nombre.length > 80) return reply.code(400).send({ error: 'Nombre de chofer inválido' });
+  const id = ensureDriver(db, u.id, nombre);
+  req.log.info({ driver: nombre }, 'chofer creado');
+  return reply.code(201).send({ driver: { id, nombre } });
 });
 
 const sectionName = (value: unknown) => String(value ?? '').trim().replace(/\s+/g, ' ');
@@ -2128,6 +2143,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
   let razon = '';
   let monto = 0;
   let cat = '';
+  let fecha = '';
   let archivoPendiente: ComprobantePendiente | null = null;
 
   try {
@@ -2136,6 +2152,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
         if (parte.fieldname === 'razon') razon = String(parte.value).trim().slice(0, 120);
         if (parte.fieldname === 'monto') monto = Number(String(parte.value).replace(/\D/g, '')) || 0;
         if (parte.fieldname === 'cat') cat = normalizarCategoria(String(parte.value));
+        if (parte.fieldname === 'fecha') fecha = String(parte.value).trim();
         // `items` y `manoObra` quedaron fuera del modelo: si un cliente viejo
         // todavía los manda, se ignoran.
         continue;
@@ -2162,10 +2179,13 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
   if (!razon) return reply.code(400).send({ error: 'Indicá de qué es el gasto' });
   if (!CATS_EGRESO.has(cat)) return reply.code(400).send({ error: 'Elegí una categoría válida' });
   if (monto <= 0 || monto > MAX_EGRESO_MONTO) return reply.code(400).send({ error: 'Indicá cuánto se gastó' });
+  const hoy = hoyISO();
+  // La fecha es opcional para los clientes viejos; si viene, la elegida manda.
+  const fechaMov = fecha || hoy;
+  if (!FECHA.test(fechaMov) || fechaMov > hoy) return reply.code(400).send({ error: 'La fecha del gasto no es válida' });
   const guardado = await guardarComprobanteParaRuta(archivoPendiente, reply);
   if (!guardado.ok) return;
   const archivo = guardado.archivo;
-  const hoy = hoyISO();
   let info;
   try {
     info = db.transaction(() => {
@@ -2174,7 +2194,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
         `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
          VALUES (?, ?, 'egreso', ?, ?, ?, ?, NULL, ?, ?, ?)`,
       )
-      .run(u.id, car.id, monto, hoy, razon, cat, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
+      .run(u.id, car.id, monto, fechaMov, razon, cat, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
     })();
   } catch (error) {
     if (archivo) await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
@@ -2185,6 +2205,107 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
 
   const mov = db.prepare('SELECT * FROM movs WHERE id = ?').get(info.lastInsertRowid) as MovRow;
   return reply.code(201).send({ mov: movToJson(mov) });
+});
+
+/** Corrige un gasto cargado por error. Solo toca egresos: una cuota emitida es
+ *  un cargo del sistema, no un dato que el dueño pueda reescribir. */
+app.patch<{ Params: { id: string } }>('/api/movs/:id', async (req, reply) => {
+  const u = quien(req);
+  const id = Number(req.params.id);
+  const mov = Number.isInteger(id)
+    ? (db.prepare("SELECT * FROM movs WHERE id = ? AND owner_id = ? AND type = 'egreso'").get(id, u.id) as MovRow | undefined)
+    : undefined;
+  if (!mov) return reply.code(404).send({ error: 'Movimiento inexistente' });
+
+  let descripcion = mov.descripcion;
+  let monto = mov.amount;
+  let cat = mov.cat ?? '';
+  let fecha = mov.date;
+  let quitarComprobante = false;
+  let archivoPendiente: ComprobantePendiente | null = null;
+
+  try {
+    for await (const parte of req.parts()) {
+      if (parte.type === 'field') {
+        if (parte.fieldname === 'descripcion') descripcion = String(parte.value).trim().slice(0, 120);
+        if (parte.fieldname === 'monto') monto = Number(String(parte.value).replace(/\D/g, '')) || 0;
+        if (parte.fieldname === 'cat') cat = normalizarCategoria(String(parte.value));
+        if (parte.fieldname === 'fecha') fecha = String(parte.value).trim();
+        if (parte.fieldname === 'quitarComprobante') quitarComprobante = String(parte.value) === '1';
+        continue;
+      }
+      if (parte.fieldname !== 'comprobante') {
+        await parte.toBuffer();
+        continue;
+      }
+      const ext = TIPOS_COMPROBANTE[parte.mimetype];
+      if (!ext) {
+        await parte.toBuffer();
+        return reply.code(415).send({ error: 'El comprobante tiene que ser una foto o un PDF' });
+      }
+      const buf = await parte.toBuffer();
+      if (!buf.length) continue;
+      archivoPendiente = prepararComprobante(buf, parte.filename, parte.mimetype, ext);
+    }
+  } catch (e) {
+    const err = e as { code?: string };
+    if (err.code === 'FST_REQ_FILE_TOO_LARGE') return reply.code(413).send({ error: 'El comprobante no puede pasar de 8 MB' });
+    throw e;
+  }
+
+  if (!descripcion) return reply.code(400).send({ error: 'Contá de qué es el gasto' });
+  if (!CATS_EGRESO.has(cat)) return reply.code(400).send({ error: 'Elegí una categoría válida' });
+  if (monto <= 0 || monto > MAX_EGRESO_MONTO) return reply.code(400).send({ error: 'Indicá cuánto se gastó' });
+  const hoy = hoyISO();
+  if (!FECHA.test(fecha) || fecha > hoy) return reply.code(400).send({ error: 'La fecha del gasto no es válida' });
+
+  const guardado = await guardarComprobanteParaRuta(archivoPendiente, reply);
+  if (!guardado.ok) return;
+  const archivo = guardado.archivo;
+  // Sin archivo nuevo ni pedido explícito de quitarlo, el comprobante queda
+  // como estaba: editar el monto no puede borrar la foto sin avisar.
+  const comprobante = archivo
+    ? { id: archivo.id, nombre: archivo.nombre, tipo: archivo.tipo }
+    : quitarComprobante
+      ? null
+      : mov.comprobante
+        ? { id: mov.comprobante, nombre: mov.comprobante_nombre, tipo: mov.comprobante_tipo }
+        : null;
+
+  try {
+    db.prepare(
+      `UPDATE movs
+          SET amount = ?, date = ?, descripcion = ?, cat = ?, comprobante = ?, comprobante_nombre = ?, comprobante_tipo = ?
+        WHERE id = ? AND owner_id = ?`,
+    ).run(monto, fecha, descripcion, cat, comprobante?.id ?? null, comprobante?.nombre ?? null, comprobante?.tipo ?? null, mov.id, u.id);
+  } catch (error) {
+    if (archivo) await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
+    throw error;
+  }
+
+  if (mov.comprobante && mov.comprobante !== comprobante?.id) {
+    await borrarComprobante(mov.comprobante).catch((e) => req.log.warn({ e, id: mov.comprobante }, 'no se pudo borrar el comprobante reemplazado'));
+  }
+  req.log.info({ id: mov.id, monto, fecha, cat }, 'gasto editado');
+  return { mov: movToJson(db.prepare('SELECT * FROM movs WHERE id = ? AND owner_id = ?').get(mov.id, u.id) as MovRow) };
+});
+
+/** Borra un gasto. Igual que el vehículo, la fila se va con CASCADE pero el
+ *  archivo del comprobante no, así que se limpia a mano. */
+app.delete<{ Params: { id: string } }>('/api/movs/:id', async (req, reply) => {
+  const u = quien(req);
+  const id = Number(req.params.id);
+  const mov = Number.isInteger(id)
+    ? (db.prepare("SELECT * FROM movs WHERE id = ? AND owner_id = ? AND type = 'egreso'").get(id, u.id) as MovRow | undefined)
+    : undefined;
+  if (!mov) return reply.code(404).send({ error: 'Movimiento inexistente' });
+
+  db.prepare('DELETE FROM movs WHERE id = ? AND owner_id = ?').run(mov.id, u.id);
+  if (mov.comprobante) {
+    await borrarComprobante(mov.comprobante).catch((e) => req.log.warn({ e, id: mov.comprobante }, 'no se pudo borrar el comprobante del gasto'));
+  }
+  req.log.info({ id: mov.id, monto: mov.amount, cat: mov.cat }, 'gasto eliminado');
+  return { ok: true, monto: mov.amount };
 });
 
 /** Registra un mantenimiento y, si tuvo costo, su gasto asociado en una sola
@@ -2344,9 +2465,40 @@ const conoceChofer = db.prepare(`
   LIMIT 1
 `);
 
+/** Alta de un pago. Acepta JSON (la web) y multipart (admin-mobile, que puede
+ *  adjuntar el comprobante de la transferencia en el mismo pedido). */
 app.post<{ Body: NuevoPago }>('/api/pagos', async (req, reply) => {
   const u = quien(req);
-  const b = req.body ?? ({} as NuevoPago);
+
+  // Los campos llegan como texto cuando el cuerpo es multipart; el resto de la
+  // validación los normaliza igual que en el caso JSON.
+  const b: Record<string, unknown> = req.isMultipart() ? {} : ((req.body ?? {}) as unknown as Record<string, unknown>);
+  let archivoPendiente: ComprobantePendiente | null = null;
+  if (req.isMultipart()) {
+    try {
+      for await (const parte of req.parts()) {
+        if (parte.type === 'field') {
+          b[parte.fieldname] = String(parte.value);
+          continue;
+        }
+        if (parte.fieldname !== 'comprobante') {
+          await parte.toBuffer();
+          continue;
+        }
+        const ext = TIPOS_COMPROBANTE[parte.mimetype];
+        if (!ext) {
+          await parte.toBuffer();
+          return reply.code(415).send({ error: 'El comprobante tiene que ser una foto o un PDF' });
+        }
+        const buf = await parte.toBuffer();
+        if (buf.length) archivoPendiente = prepararComprobante(buf, parte.filename, parte.mimetype, ext);
+      }
+    } catch (e) {
+      const err = e as { code?: string };
+      if (err.code === 'FST_REQ_FILE_TOO_LARGE') return reply.code(413).send({ error: 'El comprobante no puede pasar de 8 MB' });
+      throw e;
+    }
+  }
 
   const driverInput = String(b.driver ?? '').trim();
   // admin-mobile puede enviar la identidad estable del chofer al elegir un
@@ -2374,30 +2526,125 @@ app.post<{ Body: NuevoPago }>('/api/pagos', async (req, reply) => {
 
   // El auto es referencia, no destino: la imputación va por chofer. Si viene uno
   // ajeno se rechaza igual, para no guardar punteros a flotas de otros.
+  const carIdInput = b.carId == null || b.carId === '' ? null : String(b.carId);
   let carId: string | null = null;
-  if (b.carId) {
-    if (!selCar.get(b.carId, u.id)) return reply.code(404).send({ error: 'Vehículo inexistente' });
-    carId = b.carId;
+  if (carIdInput) {
+    if (!selCar.get(carIdInput, u.id)) return reply.code(404).send({ error: 'Vehículo inexistente' });
+    carId = carIdInput;
   }
 
-  const driverId = driverByName?.id ?? (db.prepare('SELECT id FROM drivers WHERE owner_id = ? AND nombre = ?').get(u.id, driver) as { id: number } | undefined)?.id ?? null;
-  const info = db
-    .prepare('INSERT INTO pagos (owner_id, car_id, driver, driver_id, fecha, monto, tipo, medio, nota) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(u.id, carId, driver, driverId, fecha, monto, tipo, String(b.medio ?? '').trim().slice(0, 40) || null, String(b.nota ?? '').trim().slice(0, 200) || null);
+  const guardado = await guardarComprobanteParaRuta(archivoPendiente, reply);
+  if (!guardado.ok) return;
+  const archivo = guardado.archivo;
 
-  req.log.info({ driver, monto, tipo, fecha }, 'pago registrado');
+  const driverId = driverByName?.id ?? (db.prepare('SELECT id FROM drivers WHERE owner_id = ? AND nombre = ?').get(u.id, driver) as { id: number } | undefined)?.id ?? null;
+  let info;
+  try {
+    info = db
+      .prepare('INSERT INTO pagos (owner_id, car_id, driver, driver_id, fecha, monto, tipo, medio, nota, comprobante, comprobante_nombre, comprobante_tipo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(u.id, carId, driver, driverId, fecha, monto, tipo, String(b.medio ?? '').trim().slice(0, 40) || null, String(b.nota ?? '').trim().slice(0, 200) || null, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
+  } catch (error) {
+    if (archivo) await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
+    throw error;
+  }
+
+  req.log.info({ driver, monto, tipo, fecha, comprobante: !!archivo }, 'pago registrado');
   return reply.code(201).send(pagoToJson(db.prepare('SELECT * FROM pagos WHERE id = ?').get(info.lastInsertRowid) as PagoRow));
 });
 
-/** Borrar es la única corrección posible: un pago no se edita, porque cambiarle
- *  el monto reescribiría en silencio a qué cuotas quedó imputado. */
+/** Borrar un pago lo saca de la imputación: lo que cancelaba de cada cuota
+ *  vuelve a quedar pendiente. */
 app.delete<{ Params: { id: string } }>('/api/pagos/:id', async (req, reply) => {
   const u = quien(req);
   const fila = db.prepare('SELECT * FROM pagos WHERE id = ? AND owner_id = ?').get(Number(req.params.id), u.id) as PagoRow | undefined;
   if (!fila) return reply.code(404).send({ error: 'Pago inexistente' });
   db.prepare('DELETE FROM pagos WHERE id = ? AND owner_id = ?').run(fila.id, u.id);
+  if (fila.comprobante) {
+    await borrarComprobante(fila.comprobante).catch((e) => req.log.warn({ e, id: fila.comprobante }, 'no se pudo borrar el comprobante del pago'));
+  }
   req.log.info({ id: fila.id, driver: fila.driver, monto: fila.monto }, 'pago eliminado');
   return { ok: true, monto: fila.monto, driver: fila.driver };
+});
+
+/** Corrige un pago ya cargado. El dueño lo pidió explícitamente y la pantalla
+ *  avisa que la imputación FIFO se recalcula sola, pero chofer, auto y tipo
+ *  quedan fijos: moverlos reasignaría deuda entre choferes. */
+app.patch<{ Params: { id: string } }>('/api/pagos/:id', async (req, reply) => {
+  const u = quien(req);
+  const id = Number(req.params.id);
+  const pago = Number.isInteger(id)
+    ? (db.prepare('SELECT * FROM pagos WHERE id = ? AND owner_id = ?').get(id, u.id) as PagoRow | undefined)
+    : undefined;
+  if (!pago) return reply.code(404).send({ error: 'Pago inexistente' });
+
+  let monto = pago.monto;
+  let fecha = pago.fecha;
+  let medio = pago.medio ?? '';
+  let nota = pago.nota ?? '';
+  let quitarComprobante = false;
+  let archivoPendiente: ComprobantePendiente | null = null;
+
+  try {
+    for await (const parte of req.parts()) {
+      if (parte.type === 'field') {
+        if (parte.fieldname === 'monto') monto = Number(String(parte.value).replace(/\D/g, '')) || 0;
+        if (parte.fieldname === 'fecha') fecha = String(parte.value).trim();
+        if (parte.fieldname === 'medio') medio = String(parte.value).trim().slice(0, 40);
+        if (parte.fieldname === 'nota') nota = String(parte.value).trim().slice(0, 200);
+        if (parte.fieldname === 'quitarComprobante') quitarComprobante = String(parte.value) === '1';
+        continue;
+      }
+      if (parte.fieldname !== 'comprobante') {
+        await parte.toBuffer();
+        continue;
+      }
+      const ext = TIPOS_COMPROBANTE[parte.mimetype];
+      if (!ext) {
+        await parte.toBuffer();
+        return reply.code(415).send({ error: 'El comprobante tiene que ser una foto o un PDF' });
+      }
+      const buf = await parte.toBuffer();
+      if (!buf.length) continue;
+      archivoPendiente = prepararComprobante(buf, parte.filename, parte.mimetype, ext);
+    }
+  } catch (e) {
+    const err = e as { code?: string };
+    if (err.code === 'FST_REQ_FILE_TOO_LARGE') return reply.code(413).send({ error: 'El comprobante no puede pasar de 8 MB' });
+    throw e;
+  }
+
+  if (!Number.isInteger(monto) || monto <= 0 || monto > 1_000_000_000) return reply.code(400).send({ error: 'El monto tiene que ser un número mayor a cero' });
+  const hoy = hoyISO();
+  if (!FECHA.test(fecha)) return reply.code(400).send({ error: 'Fecha inválida' });
+  if (fecha > hoy) return reply.code(400).send({ error: 'No se puede registrar un pago con fecha futura' });
+
+  const guardado = await guardarComprobanteParaRuta(archivoPendiente, reply);
+  if (!guardado.ok) return;
+  const archivo = guardado.archivo;
+  const comprobante = archivo
+    ? { id: archivo.id, nombre: archivo.nombre, tipo: archivo.tipo }
+    : quitarComprobante
+      ? null
+      : pago.comprobante
+        ? { id: pago.comprobante, nombre: pago.comprobante_nombre, tipo: pago.comprobante_tipo }
+        : null;
+
+  try {
+    db.prepare(
+      `UPDATE pagos
+          SET fecha = ?, monto = ?, medio = ?, nota = ?, comprobante = ?, comprobante_nombre = ?, comprobante_tipo = ?
+        WHERE id = ? AND owner_id = ?`,
+    ).run(fecha, monto, medio || null, nota || null, comprobante?.id ?? null, comprobante?.nombre ?? null, comprobante?.tipo ?? null, pago.id, u.id);
+  } catch (error) {
+    if (archivo) await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
+    throw error;
+  }
+
+  if (pago.comprobante && pago.comprobante !== comprobante?.id) {
+    await borrarComprobante(pago.comprobante).catch((e) => req.log.warn({ e, id: pago.comprobante }, 'no se pudo borrar el comprobante reemplazado'));
+  }
+  req.log.info({ id: pago.id, driver: pago.driver, monto, fecha }, 'pago editado');
+  return { pago: pagoToJson(db.prepare('SELECT * FROM pagos WHERE id = ? AND owner_id = ?').get(pago.id, u.id) as PagoRow) };
 });
 
 /* ------------------------------ chofer ------------------------------- */
