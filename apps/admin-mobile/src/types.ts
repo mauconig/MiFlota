@@ -274,6 +274,8 @@ export interface MobileState {
   periodError: string;
   periodSheet: boolean;
   movementDetailId: string | null;
+  /** Auto cuyo listado de ingresos se está mirando (tabla de Ingresos). */
+  ingresosDetailCarId: string | null;
   quotaDetailId: number | null;
   reportDetailId: number | null;
   estadoSheet: boolean;

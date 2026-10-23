@@ -263,6 +263,7 @@ export function initialMobileState(): MobileState {
     periodError: '',
     periodSheet: false,
     movementDetailId: null,
+    ingresosDetailCarId: null,
     quotaDetailId: null,
     reportDetailId: null,
     estadoSheet: false,
@@ -390,6 +391,15 @@ export interface MovementDetailView {
   edit: MovementEditData;
   save: (datos: MovementEditInput) => Promise<void>;
   remove: () => Promise<void>;
+  close: () => void;
+}
+
+/** Listado de pagos de un auto, abierto desde la tabla del tab Ingresos (que
+ *  agrupa por vehículo). Cada fila abre el detalle del movimiento. */
+export interface IngresosDetailView {
+  title: string;
+  subtitle: string;
+  rows: { id: number; date: string; tipo: string; amount: string; medio: string; open: () => void }[];
   close: () => void;
 }
 
@@ -727,6 +737,7 @@ export interface MobileView {
 
   detalle: DetalleView | null;
   movementDetail: MovementDetailView | null;
+  ingresosDetail: IngresosDetailView | null;
   quotaDetail: QuotaDetailView | null;
   reportDetail: {
     plate: string;
@@ -1499,11 +1510,36 @@ export function useMobileView(
           amount: fmtShort(amountValue),
           amountValue,
           color: COLORS.pos,
-          open: () => push('detalle', { carId: car.id }),
+          open: () => update({ ingresosDetailCarId: car.id }),
         };
       })
       .sort((a, b) => b.amountValue - a.amountValue || a.plate.localeCompare(b.plate));
   const ingresosTotal = ingresosRows.reduce((sum, row) => sum + row.amountValue, 0);
+  // La tabla de Ingresos agrupa por auto, así que al tocar una fila se abre el
+  // listado de pagos de ese auto en el período; recién ahí se puede abrir el
+  // detalle de un movimiento puntual.
+  const ingresosDetail = (() => {
+    const carId = state.ingresosDetailCarId;
+    if (!carId) return null;
+    const detalleCar = carDe.get(carId);
+    const filas = pagos
+      .filter((p) => p.carId === carId && inRP(p) && (state.ingresosTypes === 'todos' || state.ingresosTypes.includes(p.tipo)))
+      .sort((a, b) => +b.fecha - +a.fecha)
+      .map((p) => ({
+        id: p.id,
+        date: dLblFull(p.fecha),
+        tipo: p.tipo === 'ajuste' ? 'Ajuste' : 'Pago',
+        amount: '+' + fmt(p.monto),
+        medio: p.medio || 'Sin especificar',
+        open: () => update({ movementDetailId: 'pago-' + p.id }),
+      }));
+    return {
+      title: detalleCar ? 'Ingresos · ' + detalleCar.plate : 'Ingresos',
+      subtitle: detalleCar ? detalleCar.model : '',
+      rows: filas,
+      close: () => update({ ingresosDetailCarId: null }),
+    };
+  })();
   const breakdownRows: DashboardDetailValue[] = (state.dashboardSectionId == null ? sectionDonut : categoryDonut).map((item) => {
     const section = state.dashboardSectionId == null ? persist.sections.find((candidate) => candidate.name === item.label) : undefined;
     return {
@@ -1949,7 +1985,7 @@ export function useMobileView(
         type: ajuste ? 'Ajuste' : 'Ingreso',
         typeBg: '#e7f2ec',
         typeFg: '#256b4d',
-        amount: '+' + fmtShort(pago.monto),
+        amount: '+' + fmt(pago.monto),
         amountColor: COLORS.pos,
         date: dLblFull(pago.fecha),
         vehicle: movementCar?.plate ?? 'Sin vehículo',
@@ -1999,7 +2035,7 @@ export function useMobileView(
       type: 'Gasto',
       typeBg: '#fdeeea',
       typeFg: '#a8412f',
-      amount: '−' + fmtShort(gasto.amount),
+      amount: fmt(-gasto.amount),
       amountColor: COLORS.neg,
       date: dLblFull(gasto.date),
       vehicle: movementCar?.plate ?? 'Vehículo eliminado',
@@ -2997,6 +3033,7 @@ export function useMobileView(
 
     detalle,
     movementDetail,
+    ingresosDetail,
     quotaDetail: car ? quotaDetail : null,
     reportDetail,
 

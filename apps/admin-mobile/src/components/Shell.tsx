@@ -29,6 +29,7 @@ import { Perfil } from '../screens/Perfil';
 import { Secciones } from '../screens/Secciones';
 import { ReportDetailModal } from './ReportDetailModal';
 import { MovementDetailSheet } from './MovementDetailSheet';
+import { IngresosDetailSheet } from './IngresosDetailSheet';
 
 export function Shell({ v, nombre, usuario, onLogout, onRefresh, refreshing, syncError }: { v: MobileView; nombre: string; usuario: string; onLogout: () => void; onRefresh: () => void; refreshing: boolean; syncError: string }) {
   const keyboardVisible = useKeyboardState((state) => state.isVisible);
@@ -111,6 +112,7 @@ export function Shell({ v, nombre, usuario, onLogout, onRefresh, refreshing, syn
         {showBottomNav && <BottomNav v={v} />}
       </View>
       <ReportDetailModal v={v} />
+      <IngresosDetailSheet detail={v.ingresosDetail} />
       <MovementDetailSheet movement={v.movementDetail} />
     </View>
   );

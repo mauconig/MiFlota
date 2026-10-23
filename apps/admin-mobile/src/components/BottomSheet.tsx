@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
-import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import { KeyboardAwareScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
-export function BottomSheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function BottomSheet({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
   // Un Modal no hereda el SafeAreaView de la pantalla de atrás — sin esto el
   // botón de abajo del todo queda pegado a (o tapado por) la barra de gestos.
   const insets = useSafeAreaInsets();
@@ -45,12 +45,20 @@ export function BottomSheet({ title, onClose, children }: { title: string; onClo
               bottomOffset={32}
               extraKeyboardSpace={24}
               keyboardDismissMode="on-drag"
-              contentContainerStyle={{ gap: 10, paddingBottom: 24 }}
+              contentContainerStyle={{ gap: 10, paddingBottom: footer ? 10 : 24 }}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
               {children}
             </KeyboardAwareScrollView>
+            {/* Fuera del scroll: las acciones de la hoja (Editar, Eliminar,
+                Guardar) tienen que verse sin scrollear. Sticky para que el
+                teclado, cuando hay inputs, no las tape. */}
+            {footer ? (
+              <KeyboardStickyView>
+                <View style={{ paddingTop: 4 }}>{footer}</View>
+              </KeyboardStickyView>
+            ) : null}
           </Pressable>
         </Pressable>
       </View>

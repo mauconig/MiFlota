@@ -94,7 +94,19 @@ export function MovementDetailSheet({ movement }: { movement: MovementDetailView
 
   if (mode === 'editar') {
     return (
-      <BottomSheet title="Editar movimiento" onClose={() => { if (!guardando) setMode('ver'); }}>
+      <BottomSheet
+        title="Editar movimiento"
+        onClose={() => { if (!guardando) setMode('ver'); }}
+        footer={(
+          <>
+            {!!error && <Text style={{ ...errorStyle, marginBottom: 8 }}>{error}</Text>}
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Boton label="Cancelar" onPress={() => setMode('ver')} disabled={guardando} />
+              <Boton label={guardando ? 'Guardando…' : 'Guardar cambios'} onPress={() => void guardar()} primary disabled={guardando} flex={1} />
+            </View>
+          </>
+        )}
+      >
         {!esGasto && (
           <View style={{ backgroundColor: '#fdf0dd', borderRadius: 14, padding: 12 }}>
             <Text style={{ color: '#80642f', fontSize: 12, lineHeight: 17 }}>
@@ -193,19 +205,32 @@ export function MovementDetailSheet({ movement }: { movement: MovementDetailView
             </View>
           )}
         </Campo>
-
-        {!!error && <Text style={errorStyle}>{error}</Text>}
-
-        <View style={{ flexDirection: 'row', gap: 8, paddingTop: 4 }}>
-          <Boton label="Cancelar" onPress={() => setMode('ver')} disabled={guardando} />
-          <Boton label={guardando ? 'Guardando…' : 'Guardar cambios'} onPress={() => void guardar()} primary disabled={guardando} flex={1} />
-        </View>
       </BottomSheet>
     );
   }
 
   return (
-    <BottomSheet title="Detalle del movimiento" onClose={movement.close}>
+    <BottomSheet
+      title="Detalle del movimiento"
+      onClose={movement.close}
+      footer={mode === 'confirmar' ? (
+        <View style={{ gap: 8 }}>
+          <Text style={{ color: '#a8412f', fontSize: 12, lineHeight: 17 }}>
+            Esta acción no se puede deshacer.
+            {esGasto && cat === 'Mantenimiento' ? ' El auto conserva la fecha y el kilometraje del service.' : ''}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Boton label="Cancelar" onPress={() => setMode('ver')} disabled={guardando} />
+            <Boton label={guardando ? 'Eliminando…' : 'Sí, eliminar'} onPress={() => void eliminar()} danger disabled={guardando} flex={1} />
+          </View>
+        </View>
+      ) : (
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Boton label="Editar" onPress={() => setMode('editar')} flex={1} />
+          <Boton label="Eliminar movimiento" onPress={() => setMode('confirmar')} danger flex={1} />
+        </View>
+      )}
+    >
       <View style={{ backgroundColor: movement.typeBg, borderRadius: 18, padding: 16 }}>
         <Text style={{ color: movement.typeFg, fontSize: 11, fontWeight: '800', letterSpacing: 0.8, textTransform: 'uppercase' }}>{movement.type}</Text>
         <Text style={{ color: movement.amountColor, fontSize: 28, fontWeight: '800', marginTop: 5 }}>{movement.amount}</Text>
@@ -220,33 +245,16 @@ export function MovementDetailSheet({ movement }: { movement: MovementDetailView
         <Info label="Vehículo" value={movement.vehicle} />
         <Info label="Chofer" value={movement.driver} />
       </View>
-      <Info label="Categoría" value={movement.category} />
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <Info label="Categoría" value={movement.category} />
+        <Info label="GPS tag" value={movement.gpsTag} />
+      </View>
       <Info label="Sección" value={movement.section} />
-      <Info label="GPS tag" value={movement.gpsTag} />
       {!!movement.note && <Info label="Detalle" value={movement.note} multiline />}
 
       {movement.comprobante && <ComprobantePreview source={movement.comprobante} />}
 
       {!!error && <Text style={errorStyle}>{error}</Text>}
-
-      {mode === 'confirmar' ? (
-        <View style={{ gap: 8, paddingTop: 4 }}>
-          <Text style={{ color: '#a8412f', fontSize: 12, lineHeight: 17 }}>
-            Esta acción no se puede deshacer.
-            {esGasto && cat === 'Mantenimiento' ? ' El auto conserva la fecha y el kilometraje del service.' : ''}
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Boton label="Cancelar" onPress={() => setMode('ver')} disabled={guardando} />
-            <Boton label={guardando ? 'Eliminando…' : 'Sí, eliminar'} onPress={() => void eliminar()} danger disabled={guardando} flex={1} />
-          </View>
-        </View>
-      ) : (
-        <View style={{ flexDirection: 'row', gap: 8, paddingTop: 4 }}>
-          <Boton label="Editar" onPress={() => setMode('editar')} flex={1} />
-          <Boton label="Eliminar movimiento" onPress={() => setMode('confirmar')} danger flex={1} />
-        </View>
-      )}
-
     </BottomSheet>
   );
 }
