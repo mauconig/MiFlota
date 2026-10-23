@@ -380,6 +380,12 @@ export interface ReportExportPayload {
   include: ReportInclude;
   carIds: ReportSelection;
   categories?: ReportCategorySelection;
+  /** Si es false, el PDF no imprime "Cobros vs quincena anterior". */
+  incluirComparativa?: boolean;
+  /** Totales cargados a mano; reemplazan los calculados. */
+  cobrosManuales?: { actual: number; anterior: number } | null;
+  /** Nota libre debajo de la comparación. */
+  comparativaNota?: string;
   format: 'pdf' | 'xlsx';
 }
 

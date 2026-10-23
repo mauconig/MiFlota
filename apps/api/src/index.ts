@@ -577,6 +577,10 @@ interface FleetReportExportBody {
   search?: string;
   /** Cobros cargados a mano para el bloque "quincena": reemplazan lo calculado. */
   cobrosManuales?: { actual?: number; anterior?: number } | null;
+  /** Si es `false`, no se imprime el bloque "Cobros vs quincena anterior". */
+  incluirComparativa?: boolean;
+  /** Nota opcional que se imprime debajo de la comparación. */
+  comparativaNota?: string;
   format?: 'pdf' | 'xlsx';
 }
 
@@ -601,7 +605,10 @@ interface FleetReportIncomeRow {
   seccion: string;
   modelo: string;
   gpsTag: string;
+  /** Chofer que figura en el pago. */
   chofer: string;
+  /** Chofer actual del auto al generar el reporte (fallback: el del pago). */
+  choferAuto: string;
   monto: number;
   nota: string;
 }
@@ -629,6 +636,10 @@ async function pdfFromFleetReport(data: {
   incomePrevTotal?: number;
   /** Si viene, el bloque "quincena" usa estos valores en lugar de lo calculado. */
   cobrosManuales?: { actual: number; anterior: number } | null;
+  /** `false` = no imprimir la comparación (el dueño la sacó del reporte). */
+  incluirComparativa?: boolean;
+  /** Nota libre debajo de la comparación. */
+  comparativaNota?: string;
   expenseTotal: number;
   resultTotal: number;
   sectionOrder: string[];
@@ -863,7 +874,10 @@ async function pdfFromFleetReport(data: {
       for (const section of orderedSections(data.incomeRows)) {
         const rows = data.incomeRows.filter((row) => sectionOf(row) === section);
         const vehicles = groupVehicles(rows, (row) => row.monto);
-        const incomeLabel = (vehicle: { label: string; rows: unknown[] }) => `${vehicle.label} · ${vehicle.rows.length} cobro${vehicle.rows.length === 1 ? '' : 's'}`;
+        const incomeLabel = (vehicle: { label: string; rows: FleetReportIncomeRow[] }) => {
+          const chofer = vehicle.rows[0]?.choferAuto || 'Sin chofer';
+          return `${vehicle.label} · ${vehicle.rows.length} cobro${vehicle.rows.length === 1 ? '' : 's'}\nChofer: ${chofer}`;
+        };
         const first = vehicles[0];
         // El título de la sección no puede quedar solo al pie: se lleva su
         // primera fila (y el subtotal, si la sección es de un solo auto).
@@ -950,9 +964,11 @@ async function pdfFromFleetReport(data: {
       : [reportMoney(tallerTotal), reportMoney(mantenimientoTotal), reportMoney(otrosTotal), reportMoney(-data.expenseTotal)], true);
 
     // Comparación de cobros contra el período anterior (la quincena previa).
-    // Si el usuario cargó los cobros a mano, esos reemplazan lo calculado.
+    // Si el usuario cargó los cobros a mano, esos reemplazan lo calculado. El
+    // dueño puede sacar el bloque del reporte (`incluirComparativa: false`).
+    const mostrarComparativa = data.incluirComparativa !== false;
     const manual = data.cobrosManuales;
-    if (data.incomeRows.length || manual) {
+    if (mostrarComparativa && (data.incomeRows.length || manual)) {
       doc.y += 18;
       blockBanner('Cobros vs quincena anterior');
       const actual = manual ? manual.actual : data.incomeTotal;
@@ -968,6 +984,11 @@ async function pdfFromFleetReport(data: {
       linea('Total cobros quincena', reportMoney(actual));
       linea('Quincena anterior', reportMoney(prev));
       linea('Diferencia', `${diff >= 0 ? '(+) ' : '(-) '}${reportMoney(Math.abs(diff))}`, diff >= 0 ? REPORT_COLORS.green : REPORT_COLORS.red);
+      const notaComparativa = String(data.comparativaNota ?? '').trim();
+      if (notaComparativa) {
+        ensureSpace(24);
+        doc.fillColor(REPORT_COLORS.muted).font('Helvetica').fontSize(9).text(notaComparativa, margin + 10, doc.y + 4, { width: width - 20 });
+      }
     }
 
     doc.y += 14;
@@ -1068,7 +1089,22 @@ function armarReporte(ownerId: number, body: FleetReportExportBody): ReporteArma
   const incomeRows: FleetReportIncomeRow[] = include === 'gastos' ? [] : (selPagos.all(ownerId) as PagoRow[])
     .filter((pago) => pago.tipo === 'pago' && pago.fecha >= range.from && pago.fecha <= range.to && carAllowed(pago.car_id))
     .filter((pago) => matchesSearch('Pago recibido', 'Pago', carById.get(pago.car_id ?? '')?.plate, carById.get(pago.car_id ?? '')?.model, pago.driver, pago.nota, pago.medio))
-    .map((pago) => ({ fecha: pago.fecha, vehiculo: carById.get(pago.car_id ?? '')?.plate ?? 'Sin vehículo', seccion: carSection(pago.car_id), modelo: carModel(pago.car_id), gpsTag: carGpsTag(pago.car_id), chofer: pago.driver || 'Sin chofer', monto: pago.monto, nota: pago.nota || '' }));
+    .map((pago) => ({
+      fecha: pago.fecha,
+      vehiculo: carById.get(pago.car_id ?? '')?.plate ?? 'Sin vehículo',
+      seccion: carSection(pago.car_id),
+      modelo: carModel(pago.car_id),
+      gpsTag: carGpsTag(pago.car_id),
+      chofer: pago.driver || 'Sin chofer',
+      // El dueño quiere ver de quién es el auto, no solo quién pagó: si el auto
+      // cambió de chofer, el rótulo muestra al actual (y cae al del pago si el
+      // auto quedó sin chofer).
+      choferAuto: (carById.get(pago.car_id ?? '')?.driver && carById.get(pago.car_id ?? '')?.driver !== 'Sin chofer')
+        ? String(carById.get(pago.car_id ?? '')?.driver)
+        : (pago.driver || 'Sin chofer'),
+      monto: pago.monto,
+      nota: pago.nota || '',
+    }));
 
   const expenseRows: FleetReportExpenseRow[] = include === 'ingresos' ? [] : (selMovs.all(ownerId) as MovRow[])
     .filter((mov) => mov.type === 'egreso' && mov.date >= range.from && mov.date <= range.to && carAllowed(mov.car_id) && categoryAllowed(mov.cat || 'Otros'))
@@ -1151,6 +1187,8 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
       incomeTotal,
       incomePrevTotal,
       cobrosManuales,
+      incluirComparativa: body.incluirComparativa !== false,
+      comparativaNota: String(body.comparativaNota ?? '').trim().slice(0, 300),
       expenseTotal,
       resultTotal,
       sectionOrder: reporte.sectionOrder,

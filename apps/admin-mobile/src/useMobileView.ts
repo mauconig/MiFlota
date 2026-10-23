@@ -291,6 +291,7 @@ export function initialMobileState(): MobileState {
     reportesInclude: 'ambos',
     reportesCarIds: 'todos',
     reportesCategories: 'todas',
+    reportesComparativa: { modo: 'auto', actual: '', anterior: '', nota: '' },
     reportesExportando: false,
     reportesError: '',
     reportesNotas: null,
@@ -876,6 +877,16 @@ export interface MobileView {
     categorySelection: ReportCategorySelection;
     categoryOptions: { label: string; selected: boolean; toggle: () => void }[];
     selectAllCategories: () => void;
+    comparativa: {
+      modo: import('./types').ReportComparativaModo;
+      setModo: (modo: import('./types').ReportComparativaModo) => void;
+      actual: string;
+      setActual: (v: string) => void;
+      anterior: string;
+      setAnterior: (v: string) => void;
+      nota: string;
+      setNota: (v: string) => void;
+    };
     selectedCarLabels: string[];
     selectedCategoryLabels: string[];
     previewRows: ReportPreviewRow[];
@@ -1033,7 +1044,8 @@ export function useMobileView(
         include: 'period',
         cars: 'include',
         categories: 'cars',
-        review: 'categories',
+        comparativa: 'categories',
+        review: (state.reportesInclude ?? 'ambos') === 'gastos' ? 'categories' : 'comparativa',
       };
       const previousStep = previousReportStep[state.reportesStep];
       if (previousStep) {
@@ -2658,29 +2670,38 @@ export function useMobileView(
     }
     if (state.reportesStep === 'categories') {
       if (state.reportesCategories !== 'todas' && state.reportesCategories.length === 0) return toast('Elegí al menos una categoría');
-      return update({ reportesStep: 'review', reportesError: '' });
+      // La comparativa solo tiene sentido si el reporte trae ingresos.
+      return update({ reportesStep: reportInclude === 'gastos' ? 'review' : 'comparativa', reportesError: '' });
     }
+    if (state.reportesStep === 'comparativa') return update({ reportesStep: 'review', reportesError: '' });
   };
   const reportPrevious = () => {
     const previousReportStep: Partial<Record<ReportStep, ReportStep>> = {
       include: 'period',
       cars: 'include',
       categories: 'cars',
-      review: 'categories',
+      comparativa: 'categories',
+      review: reportInclude === 'gastos' ? 'categories' : 'comparativa',
     };
     const previousStep = previousReportStep[state.reportesStep];
     if (previousStep) update({ reportesStep: previousStep, reportesError: '' });
   };
-  const reportReset = () => update({ reportesStep: 'period', reportesInclude: 'ambos', reportesCarIds: 'todos', reportesCategories: 'todas', reportesExportando: false, reportesError: '', periodError: '' });
+  const reportReset = () => update({ reportesStep: 'period', reportesInclude: 'ambos', reportesCarIds: 'todos', reportesCategories: 'todas', reportesComparativa: { modo: 'auto', actual: '', anterior: '', nota: '' }, reportesExportando: false, reportesError: '', periodError: '' });
   const reportBasePayload = (): Omit<ReportExportPayload, 'format'> => {
     // Las quincenas no son un tipo de período del servidor: viajan como rango
     // explícito, que es lo que ya sabe resolver.
     const exportPeriodType: ReportPeriodType = state.period === 'q1' || state.period === 'q2' || state.period === 'q1ant' || state.period === 'q2ant' ? 'custom' : state.period;
+    const comparativa = state.reportesComparativa;
     return {
       period: { type: exportPeriodType, from: isoLocal(r.start), to: isoLocal(r.end) },
       include: reportInclude,
       carIds: state.reportesCarIds,
       ...(reportIncludeExpenses ? { categories: state.reportesCategories } : {}),
+      ...(reportIncludeIncome ? {
+        incluirComparativa: comparativa.modo !== 'no',
+        ...(comparativa.modo === 'manual' ? { cobrosManuales: { actual: numFromInput(comparativa.actual), anterior: numFromInput(comparativa.anterior) } } : {}),
+        ...(comparativa.nota.trim() ? { comparativaNota: comparativa.nota.trim() } : {}),
+      } : {}),
     };
   };
 
@@ -2818,7 +2839,7 @@ export function useMobileView(
     ['baja', 'Baja', 'Fuera de la flota, no entra en los cálculos'],
   ];
 
-  const goReportes = () => push('reportes', { reportesStep: 'period', reportesInclude: 'ambos', reportesCarIds: 'todos', reportesCategories: 'todas', reportesExportando: false, reportesError: '', periodError: '' });
+  const goReportes = () => push('reportes', { reportesStep: 'period', reportesInclude: 'ambos', reportesCarIds: 'todos', reportesCategories: 'todas', reportesComparativa: { modo: 'auto', actual: '', anterior: '', nota: '' }, reportesExportando: false, reportesError: '', periodError: '' });
   const goIngresos = () => replaceTab('ingresos');
 
   const headerByScreen: Record<string, [string, string]> = {
@@ -3132,6 +3153,16 @@ export function useMobileView(
       categorySelection: state.reportesCategories,
       categoryOptions: reportCategoryOptions,
       selectAllCategories: reportSelectAllCategories,
+      comparativa: {
+        modo: state.reportesComparativa.modo,
+        setModo: (modo) => update((s) => ({ reportesComparativa: { ...s.reportesComparativa, modo }, reportesError: '' })),
+        actual: state.reportesComparativa.actual,
+        setActual: (v) => update((s) => ({ reportesComparativa: { ...s.reportesComparativa, actual: v.replace(/\D/g, '').slice(0, 12) } })),
+        anterior: state.reportesComparativa.anterior,
+        setAnterior: (v) => update((s) => ({ reportesComparativa: { ...s.reportesComparativa, anterior: v.replace(/\D/g, '').slice(0, 12) } })),
+        nota: state.reportesComparativa.nota,
+        setNota: (v) => update((s) => ({ reportesComparativa: { ...s.reportesComparativa, nota: v.slice(0, 200) } })),
+      },
       selectedCarLabels: reportSelectedCarLabels,
       selectedCategoryLabels: reportSelectedCategoryLabels,
       previewRows: reportPreviewRows,

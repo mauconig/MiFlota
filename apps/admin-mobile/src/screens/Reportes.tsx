@@ -1,17 +1,21 @@
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type { MobileView } from '../useMobileView';
+import type { ReportStep } from '../types';
 import { BrandIcon } from '../components/BrandIcon';
 import { DateRangeInputs } from '../components/DateRangeInputs';
 import { ChipRow } from '../components/ChipRow';
 import { BackButton } from '../components/BackButton';
 import { ReporteNotas } from '../components/ReporteNotas';
+import { miles } from '../format';
 
 const PAPER = '#fffdf8';
 const BORDER = '#e6ded0';
 const INK = '#16150f';
 const MUTED = '#6b665c';
 const SOFT = '#f4f0e8';
+const fieldLabel = { color: MUTED, fontSize: 10, fontWeight: '700' as const, letterSpacing: 0.6, textTransform: 'uppercase' as const };
+const fieldInput = { borderWidth: 1, borderColor: BORDER, borderRadius: 13, minHeight: 44, paddingHorizontal: 12, color: INK, backgroundColor: PAPER, fontSize: 15 } as const;
 
 function Check({ active }: { active: boolean }) {
   return (
@@ -55,9 +59,14 @@ export function Reportes({ v }: { v: MobileView }) {
   const isInclude = rep.step === 'include';
   const isCars = rep.step === 'cars';
   const isCategories = rep.step === 'categories';
+  const isComparativa = rep.step === 'comparativa';
   const isReview = rep.step === 'review';
-  const totalSteps = 5;
-  const currentStep = isPeriod ? 1 : isInclude ? 2 : isCars ? 3 : isCategories ? 4 : 5;
+  // El paso de comparación solo existe si el reporte trae ingresos.
+  const steps: ReportStep[] = rep.include === 'gastos'
+    ? ['period', 'include', 'cars', 'categories', 'review']
+    : ['period', 'include', 'cars', 'categories', 'comparativa', 'review'];
+  const totalSteps = steps.length;
+  const currentStep = Math.max(1, steps.indexOf(rep.step) + 1);
   const includeLabel = rep.include === 'gastos' ? 'Gastos' : rep.include === 'ingresos' ? 'Ingresos cobrados' : rep.include === 'ambos' ? 'Gastos e ingresos cobrados' : 'Sin elegir';
   const carLabel = rep.carSelection === 'todos' ? 'Todos los vehículos' : `${rep.carSelection.length} vehículo${rep.carSelection.length === 1 ? '' : 's'}`;
   const categoryLabel = rep.categorySelection === 'todas' ? 'Todas las categorías' : `${rep.categorySelection.length} categoría${rep.categorySelection.length === 1 ? '' : 's'}`;
@@ -66,7 +75,7 @@ export function Reportes({ v }: { v: MobileView }) {
     <View style={{ flex: 1, minHeight: 0, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12, gap: 14 }}>
       <View style={{ gap: 4 }}>
         <Text style={{ color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' }}>Paso {currentStep} de {totalSteps}</Text>
-        <Text style={{ color: INK, fontSize: 24, lineHeight: 29, fontWeight: '800', letterSpacing: -0.4 }}>{isPeriod ? '¿Qué período querés ver?' : isInclude ? '¿Qué querés incluir?' : isCars ? '¿Qué sección querés incluir?' : isCategories ? '¿Qué categorías querés incluir?' : 'Revisá tu reporte'}</Text>
+        <Text style={{ color: INK, fontSize: 24, lineHeight: 29, fontWeight: '800', letterSpacing: -0.4 }}>{isPeriod ? '¿Qué período querés ver?' : isInclude ? '¿Qué querés incluir?' : isCars ? '¿Qué sección querés incluir?' : isCategories ? '¿Qué categorías querés incluir?' : isComparativa ? '¿Querés comparar con la quincena anterior?' : 'Revisá tu reporte'}</Text>
       </View>
 
       {isPeriod && (
@@ -136,6 +145,73 @@ export function Reportes({ v }: { v: MobileView }) {
         </View>
       )}
 
+      {isComparativa && (
+        <View style={{ flex: 1, minHeight: 0 }}>
+          <KeyboardAwareScrollView
+            style={{ flex: 1, minHeight: 0 }}
+            mode="layout"
+            bottomOffset={32}
+            extraKeyboardSpace={24}
+            keyboardDismissMode="on-drag"
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ gap: 10, paddingBottom: 12 }}
+            showsVerticalScrollIndicator={false}
+          >
+            <OptionCard title="Automático" description="Se calcula con los cobros del período y del anterior" icon="↻" selected={rep.comparativa.modo === 'auto'} onPress={() => rep.comparativa.setModo('auto')} />
+            <OptionCard title="Manual" description="Cargás vos los dos totales" icon="✎" selected={rep.comparativa.modo === 'manual'} onPress={() => rep.comparativa.setModo('manual')} />
+            {rep.comparativa.modo === 'manual' && (
+              <View style={{ backgroundColor: PAPER, borderWidth: 1, borderColor: BORDER, borderRadius: 18, padding: 14, gap: 12 }}>
+                <View style={{ gap: 6 }}>
+                  <Text style={fieldLabel}>Total cobros quincena</Text>
+                  <TextInput
+                    value={miles(rep.comparativa.actual)}
+                    onChangeText={rep.comparativa.setActual}
+                    keyboardType="number-pad"
+                    placeholder="0"
+                    placeholderTextColor="#a39a8b"
+                    accessibilityLabel="Total cobros quincena"
+                    style={fieldInput}
+                  />
+                </View>
+                <View style={{ gap: 6 }}>
+                  <Text style={fieldLabel}>Quincena anterior</Text>
+                  <TextInput
+                    value={miles(rep.comparativa.anterior)}
+                    onChangeText={rep.comparativa.setAnterior}
+                    keyboardType="number-pad"
+                    placeholder="0"
+                    placeholderTextColor="#a39a8b"
+                    accessibilityLabel="Total de la quincena anterior"
+                    style={fieldInput}
+                  />
+                </View>
+              </View>
+            )}
+            <OptionCard title="No incluir" description="El PDF no va a mostrar el bloque de comparación" icon="✕" selected={rep.comparativa.modo === 'no'} onPress={() => rep.comparativa.setModo('no')} />
+            <View style={{ backgroundColor: PAPER, borderWidth: 1, borderColor: BORDER, borderRadius: 18, padding: 14, gap: 6 }}>
+              <Text style={fieldLabel}>Nota (opcional)</Text>
+              <TextInput
+                value={rep.comparativa.nota}
+                onChangeText={rep.comparativa.setNota}
+                placeholder="Ej.: incluye cobros hasta el 20"
+                placeholderTextColor="#a39a8b"
+                multiline
+                maxLength={200}
+                accessibilityLabel="Nota de la comparación"
+                style={{ ...fieldInput, minHeight: 56, textAlignVertical: 'top', paddingTop: 10 }}
+              />
+              <Text style={{ color: MUTED, fontSize: 10, textAlign: 'right' }}>{rep.comparativa.nota.length}/200</Text>
+            </View>
+          </KeyboardAwareScrollView>
+          <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <BackButton onPress={rep.previous} />
+              <View style={{ flex: 1 }}><ContinueButton onPress={rep.next} /></View>
+            </View>
+          </View>
+        </View>
+      )}
+
       {isReview && (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: 24 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled">
           <View style={{ backgroundColor: PAPER, borderWidth: 1, borderColor: BORDER, borderRadius: 18, padding: 16, gap: 12 }}>
@@ -148,6 +224,10 @@ export function Reportes({ v }: { v: MobileView }) {
             {rep.include !== 'ingresos' && <View style={{ gap: 5 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}><Text style={{ color: MUTED, fontSize: 13 }}>Categorías</Text><Text style={{ color: INK, fontSize: 13, fontWeight: '700' }}>{categoryLabel}</Text></View>
               <Text style={{ color: INK, fontSize: 12, lineHeight: 18 }}>{rep.selectedCategoryLabels.length ? rep.selectedCategoryLabels.join(' · ') : 'Ninguna elegida'}</Text>
+            </View>}
+            {rep.include !== 'gastos' && <View style={{ gap: 5 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}><Text style={{ color: MUTED, fontSize: 13 }}>Cobros vs quincena anterior</Text><Text style={{ color: INK, fontSize: 13, fontWeight: '700' }}>{rep.comparativa.modo === 'no' ? 'No se incluye' : rep.comparativa.modo === 'manual' ? 'Manual' : 'Automática'}</Text></View>
+              {!!rep.comparativa.nota.trim() && <Text style={{ color: INK, fontSize: 12, lineHeight: 18 }}>Nota: {rep.comparativa.nota.trim()}</Text>}
             </View>}
           </View>
 

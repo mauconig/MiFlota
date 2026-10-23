@@ -199,7 +199,17 @@ export type FleetFilter = 'todos' | 'activo' | 'taller' | 'alerta';
 export type RankBy = 'auto' | 'modelo';
 
 export type ReportInclude = 'gastos' | 'ingresos' | 'ambos';
-export type ReportStep = 'period' | 'include' | 'cars' | 'categories' | 'review';
+export type ReportStep = 'period' | 'include' | 'cars' | 'categories' | 'comparativa' | 'review';
+/** Cómo se arma "Cobros vs quincena anterior": automático, con totales
+ *  cargados a mano, o directamente sin el bloque. */
+export type ReportComparativaModo = 'auto' | 'manual' | 'no';
+export interface ReportComparativa {
+  modo: ReportComparativaModo;
+  /** Dígitos sin separadores; se mandan como número al servidor. */
+  actual: string;
+  anterior: string;
+  nota: string;
+}
 export type ReportSelection = 'todos' | string[];
 export type ReportCategorySelection = 'todas' | string[];
 
@@ -303,6 +313,7 @@ export interface MobileState {
   reportesInclude: ReportInclude | null;
   reportesCarIds: ReportSelection;
   reportesCategories: ReportCategorySelection;
+  reportesComparativa: ReportComparativa;
   reportesExportando: boolean;
   reportesError: string;
   /** Pregunta y recorrido de notas antes de generar el PDF. */
