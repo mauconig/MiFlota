@@ -53,6 +53,8 @@ function initialState(): UIState {
   repCobrosManual: false,
   repCobrosActual: '',
   repCobrosAnterior: '',
+  repIncluirComparativa: true,
+  repComparativaNota: '',
   alertKind: 'todas',
   pendKind: 'todas',
   chKind: 'todas',

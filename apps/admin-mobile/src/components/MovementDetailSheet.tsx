@@ -227,7 +227,7 @@ export function MovementDetailSheet({ movement }: { movement: MovementDetailView
       ) : (
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Boton label="Editar" onPress={() => setMode('editar')} flex={1} />
-          <Boton label="Eliminar movimiento" onPress={() => setMode('confirmar')} danger flex={1} />
+          <Boton label="Eliminar" onPress={() => setMode('confirmar')} danger flex={1} />
         </View>
       )}
     >

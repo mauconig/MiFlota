@@ -178,6 +178,10 @@ export interface ReportExportPayload {
   search?: string;
   /** Cobros del bloque "quincena" cargados a mano (reemplazan lo calculado). */
   cobrosManuales?: { actual: number; anterior: number } | null;
+  /** Si es false, el PDF omite el bloque de comparación. */
+  incluirComparativa?: boolean;
+  /** Nota libre debajo de la comparación. */
+  comparativaNota?: string;
   format: 'pdf' | 'xlsx';
 }
 

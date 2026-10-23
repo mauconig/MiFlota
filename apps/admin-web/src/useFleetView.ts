@@ -629,6 +629,11 @@ export interface View {
   setRepCobrosActual: (v: string) => void;
   repCobrosAnterior: string;
   setRepCobrosAnterior: (v: string) => void;
+  /** Si se imprime el bloque "Cobros vs quincena anterior". */
+  repIncluirComparativa: boolean;
+  setRepIncluirComparativa: (on: boolean) => void;
+  repComparativaNota: string;
+  setRepComparativaNota: (v: string) => void;
   /** Notas del reporte: la pregunta previa al PDF y el recorrido auto por auto. */
   notas: NotasEstado | null;
   notasSi: () => void;
@@ -2206,8 +2211,19 @@ export function useFleetView(
   // ---- notas del reporte: pregunta previa y recorrido auto por auto ----
   const reportBasePayload = (): Omit<ReportExportPayload, 'format'> => {
     const period = { type: st.period, ...(st.period === 'custom' ? { from: st.cFrom, to: st.cTo } : { to: isoLocal(TODAY) }) } as ReportExportPayload['period'];
-    const cobrosManuales = st.repCobrosManual ? { actual: numFromInput(st.repCobrosActual), anterior: numFromInput(st.repCobrosAnterior) } : null;
-    return { period, include: reportInclude, carIds: 'todos', categories: reportCategories, search: st.movQ.trim() || undefined, cobrosManuales };
+    const incluirComparativa = st.repIncluirComparativa;
+    const cobrosManuales = incluirComparativa && st.repCobrosManual ? { actual: numFromInput(st.repCobrosActual), anterior: numFromInput(st.repCobrosAnterior) } : null;
+    const nota = st.repComparativaNota.trim();
+    return {
+      period,
+      include: reportInclude,
+      carIds: 'todos',
+      categories: reportCategories,
+      search: st.movQ.trim() || undefined,
+      cobrosManuales,
+      incluirComparativa,
+      ...(incluirComparativa && nota ? { comparativaNota: nota } : {}),
+    };
   };
 
   const descargarReporte = async (formato: 'pdf' | 'xlsx') => {
@@ -2742,6 +2758,10 @@ export function useFleetView(
     setRepCobrosActual: (v: string) => update({ repCobrosActual: v }),
     repCobrosAnterior: st.repCobrosAnterior,
     setRepCobrosAnterior: (v: string) => update({ repCobrosAnterior: v }),
+    repIncluirComparativa: st.repIncluirComparativa,
+    setRepIncluirComparativa: (on: boolean) => update({ repIncluirComparativa: on }),
+    repComparativaNota: st.repComparativaNota,
+    setRepComparativaNota: (v: string) => update({ repComparativaNota: v }),
     notas,
     notasSi,
     notasNo,

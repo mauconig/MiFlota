@@ -187,6 +187,10 @@ export interface UIState {
   repCobrosManual: boolean;
   repCobrosActual: string;
   repCobrosAnterior: string;
+  /** Si se imprime el bloque "Cobros vs quincena anterior". */
+  repIncluirComparativa: boolean;
+  /** Nota libre debajo de la comparación. */
+  repComparativaNota: string;
   alertKind: string;
   pendKind: string;
   /** 'todas' | 'aldia' | 'debe'. */
