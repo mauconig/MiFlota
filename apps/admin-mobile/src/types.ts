@@ -81,6 +81,13 @@ export interface Pago {
   comprobante?: { id: string; nombre: string; tipo: string };
 }
 
+/** Un chofer de la flota. Puede existir sin auto: recién se le asigna uno al
+ *  registrar un ingreso o desde la ficha del vehículo. */
+export interface Driver {
+  id: number;
+  nombre: string;
+}
+
 /** Última posición conocida de un auto (una fila por auto en el servidor). */
 export interface CarLocation {
   carId: string;
@@ -179,6 +186,9 @@ export interface RegistrarForm {
   kilometraje: string;
   /** Paso actual del asistente guiado. */
   step: RegistrarStep;
+  /** Primer paso visible de este flujo: si el auto viene fijado se saltean
+   *  pasos y la barra de progreso tiene que contarlos desde acá. */
+  baseStep: RegistrarStep;
   /** El vehículo viene fijado cuando el flujo se abre desde su ficha. */
   lockCar: boolean;
   guardando: boolean;

@@ -5,12 +5,20 @@ import { BottomSheet } from './BottomSheet';
 interface Option {
   id: string;
   label: string;
+  /** Línea secundaria, en letra chica (p. ej. el chofer de un auto). */
+  sub?: string;
+}
+
+interface SheetAction {
+  label: string;
+  onPress: () => void;
 }
 
 /** Reemplazo de `<select>`: no existe en React Native. Abre una BottomSheet
  *  con las opciones en vez de un dropdown nativo, reusando el mismo patrón
- *  visual que EstadoSheet/ChoferSheet. */
-export function useSelectSheet(title: string, options: Option[], onChange: (id: string) => void) {
+ *  visual que EstadoSheet/ChoferSheet. `action` agrega un alta al pie (crear
+ *  chofer, crear auto) sin abrir otra hoja aparte. */
+export function useSelectSheet(title: string, options: Option[], onChange: (id: string) => void, action?: SheetAction) {
   const [open, setOpen] = useState(false);
   const sheet = open ? (
     <BottomSheet title={title} onClose={() => setOpen(false)}>
@@ -24,8 +32,20 @@ export function useSelectSheet(title: string, options: Option[], onChange: (id: 
           style={{ borderWidth: 1, borderColor: '#e6ded0', backgroundColor: '#fffdf8', borderRadius: 16, paddingVertical: 13, paddingHorizontal: 16 }}
         >
           <Text style={{ fontSize: 14, fontWeight: '600', color: '#1a1a18' }}>{o.label}</Text>
+          {!!o.sub && <Text style={{ fontSize: 11, color: '#6b665c', marginTop: 2 }}>{o.sub}</Text>}
         </Pressable>
       ))}
+      {action && (
+        <Pressable
+          onPress={() => {
+            setOpen(false);
+            action.onPress();
+          }}
+          style={{ minHeight: 46, borderRadius: 16, borderWidth: 1, borderStyle: 'dashed', borderColor: '#d8cdb8', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Text style={{ fontSize: 13, fontWeight: '700', color: '#8d5c10' }}>+ {action.label}</Text>
+        </Pressable>
+      )}
     </BottomSheet>
   ) : null;
   return { open: () => setOpen(true), sheet };

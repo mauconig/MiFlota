@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { API_BASE } from './config';
-import type { Car, CarLocation, LocationHistory, Mov, Pago, PickedFile, Reporte, ReportNotesPreview, ReportNoteTipo, ReportStatus } from './types';
+import type { Car, CarLocation, Driver, LocationHistory, Mov, Pago, PickedFile, Reporte, ReportNotesPreview, ReportNoteTipo, ReportStatus } from './types';
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`. Se parsean a mediodía para que
  *  ningún huso horario corra el día al construir el Date. */
@@ -255,14 +255,40 @@ export interface NuevoPagoPayload {
   fecha: string;
   monto: number;
   tipo: 'pago' | 'ajuste';
+  medio?: string;
   nota?: string;
+  comprobante?: PickedFile | null;
 }
 
 export interface NuevoEgresoPayload {
   razon: string;
   monto: number;
   cat: string;
+  /** ISO `YYYY-MM-DD`. Si falta, el servidor usa la fecha de hoy. */
+  fecha: string;
   comprobante: PickedFile | null;
+}
+
+/** Corrección de un gasto ya cargado. `comprobante` reemplaza al anterior;
+ *  `quitarComprobante` lo deja sin adjunto sin subir nada nuevo. */
+export interface EditarEgresoPayload {
+  descripcion: string;
+  monto: number;
+  cat: string;
+  fecha: string;
+  comprobante: PickedFile | null;
+  quitarComprobante: boolean;
+}
+
+/** Corrección de un pago. Chofer, auto y tipo no se tocan: moverlos cambiaría
+ *  a quién se le imputa la deuda. */
+export interface EditarPagoPayload {
+  monto: number;
+  fecha: string;
+  medio: string;
+  nota: string;
+  comprobante: PickedFile | null;
+  quitarComprobante: boolean;
 }
 
 export interface AssistantHistoryItem {
@@ -425,6 +451,7 @@ export interface AssignDriverPayload extends DriverCredentials {
 export interface FleetStore {
   sections: FleetSection[];
   cars: Car[];
+  drivers: Driver[];
   movs: Mov[];
   pagos: Pago[];
   reportes: Reporte[];
@@ -436,13 +463,20 @@ export interface FleetStore {
   patchCar: (id: string, patch: Partial<Car>) => void;
   previewDriverCredentials: (id: string, driver: string) => Promise<DriverCredentials>;
   assignDriver: (id: string, payload: AssignDriverPayload) => Promise<Car>;
+  /** Asigna un chofer ya existente sin tocar credenciales ni pedir cuota nueva. */
+  assignDriverToCar: (id: string, payload: { driver: string; cuota: number }) => Promise<Car>;
+  addDriver: (nombre: string) => Promise<Driver>;
   addCar: (nuevo: NuevoCarPayload) => Promise<Car>;
   addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
   addEgreso: (carId: string, datos: NuevoEgresoPayload) => Promise<Mov>;
+  updateMov: (id: number, datos: EditarEgresoPayload) => Promise<Mov>;
+  deleteMov: (id: number) => Promise<void>;
+  updatePago: (id: number, datos: EditarPagoPayload) => Promise<Pago>;
+  deletePago: (id: number) => Promise<void>;
   mandarATaller: (id: string, datos: { razon: string; monto: number; comprobante: PickedFile | null; reportId?: number | null }) => Promise<void>;
   updateReporte: (id: number, estado: Extract<ReportStatus, 'en_taller' | 'resuelta'>) => Promise<Reporte>;
   exportReport: (payload: ReportExportPayload) => Promise<ReportExportResponse>;
-  addSection: (name: string) => Promise<void>;
+  addSection: (name: string) => Promise<FleetSection>;
   renameSection: (id: number, name: string) => Promise<void>;
   deleteSection: (id: number) => Promise<void>;
   reorderSections: (ids: number[]) => Promise<void>;
@@ -455,12 +489,14 @@ export interface FleetSection { id: number; name: string; position: number }
  * servidor decide algo (imputación de un pago, id del gasto) que no se puede
  * adivinar del lado del cliente.
  *
- * A propósito no incluye `deleteCar`/`deletePago`: ninguna pantalla de
- * admin-mobile los usa.
+ * A propósito no incluye `deleteCar`: ninguna pantalla de admin-mobile lo usa.
+ * Los movimientos y pagos sí se corrigen desde el detalle, así que ahí no hay
+ * optimismo: el servidor recalcula la imputación y devuelve la fila guardada.
  */
 export function useFleetStore(onError: (msg: string) => void, onSinSesion: () => void, enabled = true): FleetStore {
   const [sections, setSections] = useState<FleetSection[]>([]);
   const [cars, setCars] = useState<Car[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
   const [movs, setMovs] = useState<Mov[]>([]);
   const [pagos, setPagos] = useState<Pago[]>([]);
   const [reportes, setReportes] = useState<Reporte[]>([]);
@@ -479,7 +515,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
       setRefrescando(true);
       try {
         const [s, l] = await Promise.all([
-          req<{ sections: FleetSection[]; cars: CarDto[]; movs: MovDto[]; pagos: PagoDto[]; reportes?: Reporte[] }>('/api/state'),
+          req<{ sections: FleetSection[]; cars: CarDto[]; drivers?: Driver[]; movs: MovDto[]; pagos: PagoDto[]; reportes?: Reporte[] }>('/api/state'),
           req<CarLocation[]>('/api/locations'),
         ]);
         // Una respuesta de una sesión anterior no puede repoblar el store
@@ -487,6 +523,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
         if (generation !== refreshGeneration.current) return;
         setSections(s.sections ?? []);
         setCars(s.cars.map(toCar));
+        setDrivers(s.drivers ?? []);
         setMovs(s.movs.map(toMov));
         setPagos(s.pagos.map(toPago));
         setReportes(s.reportes ?? []);
@@ -585,11 +622,39 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     return creado;
   }, []);
 
+  /** Alta de un chofer suelto (sin auto ni credenciales). El servidor es
+   *  idempotente por nombre, así que reintentar no duplica. */
+  const addDriver = useCallback(async (nombre: string) => {
+    const { driver } = await req<{ driver: Driver }>('/api/drivers', { method: 'POST', body: JSON.stringify({ nombre }) });
+    setDrivers((ds) => (ds.some((d) => d.id === driver.id) ? ds : [...ds, driver].sort((a, b) => a.nombre.localeCompare(b.nombre))));
+    return driver;
+  }, []);
+
+  /** Cambia el chofer de un auto sin pedir credenciales: el servidor deja al
+   *  chofer anterior sin auto y libera el auto que tuviera el nuevo. */
+  const assignDriverToCar = useCallback(async (id: string, payload: { driver: string; cuota: number }) => {
+    const car = toCar(await req<CarDto>(`/api/cars/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }));
+    setCars((cs) => cs.map((c) => (c.id === id ? car : c)));
+    return car;
+  }, []);
+
   // Un pago no se aplica en optimista: cuánto cancela de cada cuota lo decide
   // la imputación sobre el conjunto, así que hasta que el servidor no lo
-  // confirma no hay forma de saber qué mostrar.
+  // confirma no hay forma de saber qué mostrar. Viaja multipart porque puede
+  // llevar el comprobante adjunto.
   const addPago = useCallback(async (nuevo: NuevoPagoPayload) => {
-    const creado = toPago(await req<PagoDto>('/api/pagos', { method: 'POST', body: JSON.stringify(nuevo) }));
+    const fd = new FormData();
+    fd.append('driver', String(nuevo.driver));
+    if (nuevo.carId) fd.append('carId', nuevo.carId);
+    fd.append('fecha', nuevo.fecha);
+    fd.append('monto', String(nuevo.monto));
+    fd.append('tipo', nuevo.tipo);
+    if (nuevo.medio) fd.append('medio', nuevo.medio);
+    if (nuevo.nota) fd.append('nota', nuevo.nota);
+    if (nuevo.comprobante) {
+      fd.append('comprobante', { uri: nuevo.comprobante.uri, name: nuevo.comprobante.name, type: nuevo.comprobante.mimeType } as unknown as Blob);
+    }
+    const creado = toPago(await req<PagoDto>('/api/pagos', { method: 'POST', body: fd }));
     setPagos((ps) => [creado, ...ps]);
     return creado;
   }, []);
@@ -599,6 +664,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     fd.append('razon', datos.razon);
     fd.append('monto', String(datos.monto));
     fd.append('cat', datos.cat);
+    fd.append('fecha', datos.fecha);
     // React Native no tiene `File`: un archivo elegido con expo-document-picker
     // se adjunta como este objeto {uri,name,type}, que el fetch de RN entiende
     // igual que un File real al armar el multipart.
@@ -609,6 +675,48 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     const mov = toMov(r.mov);
     setMovs((ms) => [mov, ...ms]);
     return mov;
+  }, []);
+
+  const updateMov = useCallback(async (id: number, datos: EditarEgresoPayload) => {
+    const fd = new FormData();
+    fd.append('descripcion', datos.descripcion);
+    fd.append('monto', String(datos.monto));
+    fd.append('cat', datos.cat);
+    fd.append('fecha', datos.fecha);
+    if (datos.quitarComprobante) fd.append('quitarComprobante', '1');
+    if (datos.comprobante) {
+      fd.append('comprobante', { uri: datos.comprobante.uri, name: datos.comprobante.name, type: datos.comprobante.mimeType } as unknown as Blob);
+    }
+    const r = await req<{ mov: MovDto }>(`/api/movs/${id}`, { method: 'PATCH', body: fd });
+    const mov = toMov(r.mov);
+    setMovs((ms) => ms.map((m) => (m.id === id ? mov : m)));
+    return mov;
+  }, []);
+
+  const deleteMov = useCallback(async (id: number) => {
+    await req(`/api/movs/${id}`, { method: 'DELETE' });
+    setMovs((ms) => ms.filter((m) => m.id !== id));
+  }, []);
+
+  const updatePago = useCallback(async (id: number, datos: EditarPagoPayload) => {
+    const fd = new FormData();
+    fd.append('monto', String(datos.monto));
+    fd.append('fecha', datos.fecha);
+    fd.append('medio', datos.medio);
+    fd.append('nota', datos.nota);
+    if (datos.quitarComprobante) fd.append('quitarComprobante', '1');
+    if (datos.comprobante) {
+      fd.append('comprobante', { uri: datos.comprobante.uri, name: datos.comprobante.name, type: datos.comprobante.mimeType } as unknown as Blob);
+    }
+    const r = await req<{ pago: PagoDto }>(`/api/pagos/${id}`, { method: 'PATCH', body: fd });
+    const pago = toPago(r.pago);
+    setPagos((ps) => ps.map((p) => (p.id === id ? pago : p)));
+    return pago;
+  }, []);
+
+  const deletePago = useCallback(async (id: number) => {
+    await req(`/api/pagos/${id}`, { method: 'DELETE' });
+    setPagos((ps) => ps.filter((p) => p.id !== id));
   }, []);
 
   // Mandar a taller cambia el estado y crea el gasto en la misma operación, así
@@ -628,7 +736,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     if (r.reporte) setReportes((rs) => rs.map((reporte) => (reporte.id === r.reporte!.id ? r.reporte! : reporte)));
   }, []);
 
-  const addSection = useCallback(async (name: string) => { const s = await req<FleetSection>('/api/sections', { method: 'POST', body: JSON.stringify({ name }) }); setSections((v) => [...v, s]); }, []);
+  const addSection = useCallback(async (name: string) => { const s = await req<FleetSection>('/api/sections', { method: 'POST', body: JSON.stringify({ name }) }); setSections((v) => [...v, s]); return s; }, []);
   const renameSection = useCallback(async (id: number, name: string) => { const s = await req<FleetSection>(`/api/sections/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }); setSections((v) => v.map((x) => x.id === id ? s : x)); }, []);
   const deleteSection = useCallback(async (id: number) => { await req(`/api/sections/${id}`, { method: 'DELETE' }); setSections((v) => v.filter((x) => x.id !== id)); setCars((v) => v.map((c) => c.sectionId === id ? { ...c, sectionId: null } : c)); }, []);
   const reorderSections = useCallback(async (ids: number[]) => { const s = await req<FleetSection[]>('/api/sections/order', { method: 'PUT', body: JSON.stringify({ ids }) }); setSections(s); }, []);
@@ -642,6 +750,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
   return {
     sections,
     cars,
+    drivers,
     movs,
     pagos,
     reportes,
@@ -653,10 +762,16 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     patchCar,
     previewDriverCredentials,
     assignDriver,
+    assignDriverToCar,
+    addDriver,
     addCar,
     addSection, renameSection, deleteSection, reorderSections,
     addPago,
     addEgreso,
+    updateMov,
+    deleteMov,
+    updatePago,
+    deletePago,
     mandarATaller,
     updateReporte,
     exportReport: exportFleetReport,

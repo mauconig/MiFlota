@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { BackHandler, Keyboard, Linking } from 'react-native';
-import type { AdminNotificationRoute, Car, Mov, Pago, Reporte, MobileState, Screen, DashboardDetailKind, RegistrarTab, FleetFilter, PickedFile, CarLocation, ReportCategorySelection, ReportInclude, ReportNotasEstado, ReportNoteTipo, ReportSelection, ReportStep, IncomeTypeSelection } from './types';
+import type { AdminNotificationRoute, Car, Driver, Mov, Pago, Reporte, MobileState, Screen, DashboardDetailKind, RegistrarTab, FleetFilter, PickedFile, CarLocation, ReportCategorySelection, ReportInclude, ReportNotasEstado, ReportNoteTipo, ReportSelection, ReportStep, IncomeTypeSelection } from './types';
 import { imputar, type Aplicacion } from './cobranza';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, daysBetween, durLbl, dLbl, dLblFull, fmt, fmtShort, initials, statusColor, numFromInput, miles, isoLocal } from './format';
@@ -37,6 +37,11 @@ const claveChofer = (m: Mov, c?: Car): string => {
   return id != null ? String(id) : m.driver || c?.driver || 'Sin chofer';
 };
 const claveDeCar = (c: Car): string => (c.driverId != null ? String(c.driverId) : c.driver);
+
+/** Etiqueta de los selectores de auto: chapa, marca y modelo, y GPS tag. El
+ *  tag identifica el rastreador y suele ser lo que el dueño reconoce de un
+ *  vistazo, así que va siempre, aunque el auto no tenga equipo ("Sin GPS"). */
+const etiquetaAuto = (c: Car): string => `${c.plate} · ${c.model} · ${c.gpsTag.trim() || 'Sin GPS'}`;
 
 function stats(
   movs: Mov[],
@@ -181,6 +186,11 @@ const TAG: Record<Car['estado'], [string, string, string]> = {
 };
 
 export function blankRegistrarForm(tab: RegistrarTab, carId: string, driver: string, lockCar = false, serviceMode = false): import('./types').RegistrarForm {
+  // El cobro arranca por el auto y sigue por el chofer. Si viene de la ficha de
+  // un auto, el paso del auto ya está resuelto: se salta al chofer (si falta)
+  // o directo al monto.
+  const cobroInicial = driver ? 2 : 1;
+  const baseStep = lockCar ? (tab === 'cobro' ? cobroInicial : 1) : 0;
   return {
     tab,
     serviceMode,
@@ -193,7 +203,8 @@ export function blankRegistrarForm(tab: RegistrarTab, carId: string, driver: str
     cat: '',
     comprobante: null,
     kilometraje: '',
-    step: lockCar ? 1 : 0,
+    step: baseStep,
+    baseStep,
     lockCar,
     guardando: false,
     success: null,
@@ -332,6 +343,32 @@ interface MovRowView {
   onPress?: () => void;
 }
 
+/** Valores del formulario de edición de un movimiento, tal como los manda la
+ *  hoja de detalle. `comprobante` reemplaza al adjunto actual. */
+export interface MovementEditInput {
+  monto: number;
+  fecha: string;
+  descripcion: string;
+  cat: string;
+  medio: string;
+  nota: string;
+  comprobante: PickedFile | null;
+  quitarComprobante: boolean;
+}
+
+export interface MovementEditData {
+  kind: 'egreso' | 'pago';
+  /** Dígitos sin separadores: el monto es un entero de pesos. */
+  monto: string;
+  /** ISO `YYYY-MM-DD`, que es lo que espera el servidor. */
+  fecha: string;
+  descripcion: string;
+  cat: string;
+  medio: string;
+  nota: string;
+  tieneComprobante: boolean;
+}
+
 export interface MovementDetailView {
   id: string;
   title: string;
@@ -350,6 +387,9 @@ export interface MovementDetailView {
   note: string;
   comprobanteName: string;
   comprobante: { uri: string; name: string; type: string; headers?: Record<string, string> } | null;
+  edit: MovementEditData;
+  save: (datos: MovementEditInput) => Promise<void>;
+  remove: () => Promise<void>;
   close: () => void;
 }
 
@@ -501,7 +541,8 @@ interface ChoferView {
   cars: string;
   carId: string;
   cuota: string;
-  open: () => void;
+  /** Ausente cuando el chofer todavía no tiene auto: no hay ficha que abrir. */
+  open?: () => void;
 }
 
 interface DashboardDetailRow {
@@ -658,7 +699,7 @@ export interface MobileView {
     rows: IngresoRowView[];
   };
 
-  flota: { filters: Chip[]; sectionFilters: Chip[]; cars: CarCardView[]; sections: import('./api').FleetSection[]; addSection: (name: string) => Promise<void>; renameSection: (id: number, name: string) => Promise<void>; deleteSection: (id: number) => Promise<void> };
+  flota: { filters: Chip[]; sectionFilters: Chip[]; cars: CarCardView[]; sections: import('./api').FleetSection[]; addSection: (name: string) => Promise<import('./api').FleetSection>; renameSection: (id: number, name: string) => Promise<void>; deleteSection: (id: number) => Promise<void> };
 
   gastos: {
     step: 'period' | 'vehicle' | 'category' | 'results';
@@ -680,7 +721,7 @@ export interface MobileView {
   };
 
   mas: { alertCount: number; driverCount: number; navFlota: () => void; navAlertas: () => void; navChoferes: () => void; navReportes: () => void; navSecciones: () => void; goPerfil: () => void };
-  secciones: { items: SectionCardView[]; add: (name: string) => Promise<void>; rename: (id: number, name: string) => Promise<void>; remove: (id: number) => Promise<void> };
+  secciones: { items: SectionCardView[]; add: (name: string) => Promise<import('./api').FleetSection>; rename: (id: number, name: string) => Promise<void>; remove: (id: number) => Promise<void> };
   alertas: { items: AlertView[] };
   choferes: { items: ChoferView[] };
 
@@ -774,10 +815,22 @@ export interface MobileView {
       setCarId: (v: string) => void;
       selCars: { id: string; label: string }[];
       lockCar: boolean;
+      /** Datos del auto elegido, para el paso del chofer. */
+      autoLabel: string;
+      /** Nombre del chofer que hoy tiene el auto ('' si no tiene). */
+      choferDelAuto: string;
       driver: string;
+      driverNombre: string;
       setDriver: (v: string) => void;
-      opciones: { id: string; label: string }[];
+      opciones: { id: string; label: string; sub?: string }[];
       tipoOpts: Chip[];
+      /** Avisos de reemplazo antes de confirmar. */
+      advertencia: string;
+      sections: { id: number; name: string }[];
+      crearChofer: (nombre: string) => Promise<Driver>;
+      crearAuto: (datos: { sectionId: number | null; plate: string; model: string; year: number; gpsTag: string }) => Promise<Car>;
+      comprobante: PickedFile | null;
+      setComprobante: (f: PickedFile | null) => void;
       destino: string;
     } | null;
     gasto: {
@@ -903,13 +956,14 @@ export interface MobileView {
 
 export function useMobileView(
   cars: Car[],
+  drivers: Driver[],
   movs: Mov[],
   pagos: Pago[],
   reportes: Reporte[],
   locations: CarLocation[],
   state: MobileState,
   update: (patch: Partial<MobileState> | ((s: MobileState) => Partial<MobileState>)) => void,
-  persist: Pick<FleetStore, 'sections' | 'patchCar' | 'previewDriverCredentials' | 'assignDriver' | 'addCar' | 'addPago' | 'addEgreso' | 'mandarATaller' | 'updateReporte' | 'exportReport' | 'addSection' | 'renameSection' | 'deleteSection'>,
+  persist: Pick<FleetStore, 'sections' | 'patchCar' | 'previewDriverCredentials' | 'assignDriver' | 'assignDriverToCar' | 'addDriver' | 'addCar' | 'addPago' | 'addEgreso' | 'updateMov' | 'deleteMov' | 'updatePago' | 'deletePago' | 'mandarATaller' | 'updateReporte' | 'exportReport' | 'addSection' | 'renameSection' | 'deleteSection'>,
   cambiarPassword: (actual: string, nueva: string) => Promise<void>,
 ): MobileView {
   const toast = (msg: string) => update({ toast: msg });
@@ -1204,17 +1258,6 @@ export function useMobileView(
     const d = choferDeCuota(m);
     if (d === 'Sin chofer') return;
     deudaPorChofer.set(d, (deudaPorChofer.get(d) ?? 0) + falta);
-  });
-  // Choferes por identidad estable, para el formulario de pago y la pantalla de
-  // choferes: un mismo `driverId` puede aparecer en varios autos si se reasignó.
-  const choferKeys = new Map<string, Car>();
-  cars.forEach((c) => {
-    if (c.driver === 'Sin chofer') return;
-    const k = claveDeCar(c);
-    if (!choferKeys.has(k)) choferKeys.set(k, c);
-  });
-  deudaPorChofer.forEach((_, k) => {
-    if (!choferKeys.has(String(k))) choferKeys.set(String(k), { ...({} as Car), driver: String(k) });
   });
 
   const car = state.carId ? cars.find((c) => c.id === state.carId) : undefined;
@@ -1871,8 +1914,134 @@ export function useMobileView(
     cuota: g.cars[0].cuota ? fmt(g.cars[0].cuota) + ' por día' : 'Sin cuota cargada',
     open: () => push('detalle', { carId: g.cars[0].id }),
   }));
+  // Un chofer dado de alta desde el flujo de cobro todavía no tiene auto: sin
+  // esto desaparecería de la pantalla de choferes hasta que se le asigne uno.
+  drivers.forEach((d) => {
+    const key = String(d.id);
+    if (driverGroups.has(key)) return;
+    choferViews.push({
+      key,
+      name: d.nombre,
+      initials: initials(d.nombre),
+      cars: 'Sin auto',
+      carId: '',
+      cuota: '',
+    });
+  });
 
   // ---- detalle -------------------------------------------------------
+  // El detalle de un movimiento se abre desde la pantalla del auto y desde la
+  // tabla global de Gastos, así que se arma en un solo lugar: las dos entradas
+  // tienen que ofrecer las mismas opciones de editar y eliminar.
+  const comprobanteView = (archivo: { id: string; nombre: string; tipo: string } | undefined) =>
+    archivo ? { uri: API_BASE + '/api/comprobantes/' + encodeURIComponent(archivo.id), name: archivo.nombre, type: archivo.tipo, headers: getAuthHeaders() } : null;
+
+  const buildMovementDetail = (opciones: { pago?: Pago; gasto?: Mov; car?: Car }): MovementDetailView | null => {
+    const { pago, gasto } = opciones;
+    const movementCar = opciones.car ?? (pago?.carId ? carDe.get(pago.carId) : undefined) ?? (gasto?.carId ? carDe.get(gasto.carId) : undefined);
+    const section = movementCar ? persist.sections.find((candidate) => candidate.id === movementCar.sectionId)?.name ?? 'Sin sección' : 'Sin sección';
+
+    if (pago) {
+      const ajuste = pago.tipo === 'ajuste';
+      return {
+        id: 'pago-' + pago.id,
+        title: ajuste ? 'Ajuste registrado' : 'Pago recibido',
+        type: ajuste ? 'Ajuste' : 'Ingreso',
+        typeBg: '#e7f2ec',
+        typeFg: '#256b4d',
+        amount: '+' + fmtShort(pago.monto),
+        amountColor: COLORS.pos,
+        date: dLblFull(pago.fecha),
+        vehicle: movementCar?.plate ?? 'Sin vehículo',
+        driver: pago.driver || movementCar?.driver || 'Sin chofer',
+        section,
+        gpsTag: movementCar?.gpsTag.trim() || 'Sin GPS',
+        category: ajuste ? 'Ajuste' : 'Pago',
+        medio: pago.medio || 'Sin especificar',
+        note: pago.nota || '',
+        comprobanteName: pago.comprobante?.nombre || '',
+        comprobante: comprobanteView(pago.comprobante),
+        edit: {
+          kind: 'pago',
+          monto: String(pago.monto),
+          fecha: isoLocal(pago.fecha),
+          descripcion: '',
+          cat: '',
+          medio: pago.medio ?? '',
+          nota: pago.nota ?? '',
+          tieneComprobante: !!pago.comprobante,
+        },
+        save: async (datos) => {
+          await persist.updatePago(pago.id, {
+            monto: datos.monto,
+            fecha: datos.fecha,
+            medio: datos.medio,
+            nota: datos.nota,
+            comprobante: datos.comprobante,
+            quitarComprobante: datos.quitarComprobante,
+          });
+          update({ movementDetailId: null });
+          toast((ajuste ? 'Ajuste actualizado' : 'Pago actualizado') + ' · ' + pago.driver + ' · ' + fmt(datos.monto));
+        },
+        remove: async () => {
+          await persist.deletePago(pago.id);
+          update({ movementDetailId: null });
+          toast((ajuste ? 'Ajuste eliminado' : 'Pago eliminado') + ' · ' + pago.driver + ' · ' + fmt(pago.monto));
+        },
+        close: () => update({ movementDetailId: null }),
+      };
+    }
+
+    if (!gasto) return null;
+    return {
+      id: 'gasto-' + gasto.id,
+      title: gasto.desc,
+      type: 'Gasto',
+      typeBg: '#fdeeea',
+      typeFg: '#a8412f',
+      amount: '−' + fmtShort(gasto.amount),
+      amountColor: COLORS.neg,
+      date: dLblFull(gasto.date),
+      vehicle: movementCar?.plate ?? 'Vehículo eliminado',
+      driver: gasto.driver || movementCar?.driver || 'Sin chofer',
+      section,
+      gpsTag: movementCar?.gpsTag.trim() || 'Sin GPS',
+      category: gasto.cat || 'Otros',
+      medio: 'Sin especificar',
+      note: gasto.desc,
+      comprobanteName: gasto.comprobante?.nombre || '',
+      comprobante: comprobanteView(gasto.comprobante),
+      edit: {
+        kind: 'egreso',
+        monto: String(gasto.amount),
+        fecha: isoLocal(gasto.date),
+        descripcion: gasto.desc,
+        cat: gasto.cat || 'Otros',
+        medio: '',
+        nota: '',
+        tieneComprobante: !!gasto.comprobante,
+      },
+      save: async (datos) => {
+        await persist.updateMov(gasto.id, {
+          descripcion: datos.descripcion,
+          monto: datos.monto,
+          cat: datos.cat,
+          fecha: datos.fecha,
+          comprobante: datos.comprobante,
+          quitarComprobante: datos.quitarComprobante,
+        });
+        update({ movementDetailId: null });
+        toast('Gasto actualizado · ' + (movementCar?.plate ?? 'Sin auto') + ' · ' + fmt(datos.monto));
+      },
+      remove: async () => {
+        await persist.deleteMov(gasto.id);
+        update({ movementDetailId: null });
+        toast('Gasto eliminado · ' + (movementCar?.plate ?? 'Sin auto') + ' · ' + fmt(gasto.amount));
+      },
+      close: () => update({ movementDetailId: null }),
+    };
+  };
+
   let detalle: DetalleView | null = null;
   let movementDetail: MovementDetailView | null = null;
   let quotaDetail: QuotaDetailView | null = null;
@@ -1946,50 +2115,8 @@ export function useMobileView(
       const selectedGasto = state.movementDetailId?.startsWith('gasto-')
         ? carMovs.find((m) => 'gasto-' + m.id === state.movementDetailId)
         : undefined;
-      if (selectedPago) {
-        const ajuste = selectedPago.tipo === 'ajuste';
-        return {
-          id: 'pago-' + selectedPago.id,
-          title: ajuste ? 'Ajuste registrado' : 'Pago recibido',
-          type: ajuste ? 'Ajuste' : 'Ingreso',
-          typeBg: '#e7f2ec',
-          typeFg: '#256b4d',
-          amount: '+' + fmtShort(selectedPago.monto),
-          amountColor: COLORS.pos,
-          date: dLblFull(selectedPago.fecha),
-          vehicle: car.plate,
-          driver: selectedPago.driver || car.driver,
-          section: persist.sections.find((candidate) => candidate.id === car.sectionId)?.name ?? 'Sin sección',
-          gpsTag: car.gpsTag.trim() || 'Sin GPS',
-          category: ajuste ? 'Ajuste' : 'Pago',
-          medio: selectedPago.medio || 'Sin especificar',
-          note: selectedPago.nota || '',
-          comprobanteName: selectedPago.comprobante?.nombre || '',
-          comprobante: selectedPago.comprobante ? { uri: API_BASE + '/api/comprobantes/' + encodeURIComponent(selectedPago.comprobante.id), name: selectedPago.comprobante.nombre, type: selectedPago.comprobante.tipo, headers: getAuthHeaders() } : null,
-          close: () => update({ movementDetailId: null }),
-        };
-      }
-      if (!selectedGasto) return null;
-      return {
-        id: 'gasto-' + selectedGasto.id,
-        title: selectedGasto.desc,
-        type: 'Gasto',
-        typeBg: '#fdeeea',
-        typeFg: '#a8412f',
-        amount: '−' + fmtShort(selectedGasto.amount),
-        amountColor: COLORS.neg,
-        date: dLblFull(selectedGasto.date),
-        vehicle: car.plate,
-        driver: selectedGasto.driver || car.driver || 'Sin chofer',
-        section: persist.sections.find((candidate) => candidate.id === car.sectionId)?.name ?? 'Sin sección',
-        gpsTag: car.gpsTag.trim() || 'Sin GPS',
-        category: selectedGasto.cat || 'Otros',
-        medio: 'Sin especificar',
-        note: selectedGasto.desc,
-        comprobanteName: selectedGasto.comprobante?.nombre || '',
-        comprobante: selectedGasto.comprobante ? { uri: API_BASE + '/api/comprobantes/' + encodeURIComponent(selectedGasto.comprobante.id), name: selectedGasto.comprobante.nombre, type: selectedGasto.comprobante.tipo, headers: getAuthHeaders() } : null,
-        close: () => update({ movementDetailId: null }),
-      };
+      if (!selectedPago && !selectedGasto) return null;
+      return buildMovementDetail({ pago: selectedPago, gasto: selectedGasto, car });
     })();
     quotaDetail = (() => {
       const cuotaId = state.quotaDetailId;
@@ -2100,52 +2227,7 @@ export function useMobileView(
     const selectedGasto = state.movementDetailId.startsWith('gasto-')
       ? movs.find((m) => 'gasto-' + m.id === state.movementDetailId && m.type === 'egreso')
       : undefined;
-    if (selectedPago) {
-      const movementCar = selectedPago.carId ? carDe.get(selectedPago.carId) : undefined;
-      const ajuste = selectedPago.tipo === 'ajuste';
-      movementDetail = {
-        id: 'pago-' + selectedPago.id,
-        title: ajuste ? 'Ajuste registrado' : 'Pago recibido',
-        type: ajuste ? 'Ajuste' : 'Ingreso',
-        typeBg: '#e7f2ec',
-        typeFg: '#256b4d',
-        amount: '+' + fmtShort(selectedPago.monto),
-        amountColor: COLORS.pos,
-        date: dLblFull(selectedPago.fecha),
-        vehicle: movementCar?.plate ?? 'Sin vehículo',
-        driver: selectedPago.driver || movementCar?.driver || 'Sin chofer',
-        section: persist.sections.find((candidate) => candidate.id === movementCar?.sectionId)?.name ?? 'Sin sección',
-        gpsTag: movementCar?.gpsTag.trim() || 'Sin GPS',
-        category: ajuste ? 'Ajuste' : 'Pago',
-        medio: selectedPago.medio || 'Sin especificar',
-        note: selectedPago.nota || '',
-        comprobanteName: selectedPago.comprobante?.nombre || '',
-        comprobante: selectedPago.comprobante ? { uri: API_BASE + '/api/comprobantes/' + encodeURIComponent(selectedPago.comprobante.id), name: selectedPago.comprobante.nombre, type: selectedPago.comprobante.tipo, headers: getAuthHeaders() } : null,
-        close: () => update({ movementDetailId: null }),
-      };
-    } else if (selectedGasto) {
-      const movementCar = carDe.get(selectedGasto.carId);
-      movementDetail = {
-        id: 'gasto-' + selectedGasto.id,
-        title: selectedGasto.desc,
-        type: 'Gasto',
-        typeBg: '#fdeeea',
-        typeFg: '#a8412f',
-        amount: '−' + fmtShort(selectedGasto.amount),
-        amountColor: COLORS.neg,
-        date: dLblFull(selectedGasto.date),
-        vehicle: movementCar?.plate ?? 'Vehículo eliminado',
-        driver: selectedGasto.driver || movementCar?.driver || 'Sin chofer',
-        section: persist.sections.find((candidate) => candidate.id === movementCar?.sectionId)?.name ?? 'Sin sección',
-        gpsTag: movementCar?.gpsTag.trim() || 'Sin GPS',
-        category: selectedGasto.cat || 'Otros',
-        medio: 'Sin especificar',
-        note: selectedGasto.desc,
-        comprobanteName: selectedGasto.comprobante?.nombre || '',
-        comprobante: selectedGasto.comprobante ? { uri: API_BASE + '/api/comprobantes/' + encodeURIComponent(selectedGasto.comprobante.id), name: selectedGasto.comprobante.nombre, type: selectedGasto.comprobante.tipo, headers: getAuthHeaders() } : null,
-        close: () => update({ movementDetailId: null }),
-      };
-    }
+    if (selectedPago || selectedGasto) movementDetail = buildMovementDetail({ pago: selectedPago, gasto: selectedGasto });
   }
 
   // ---- registrar -------------------------------------------------------
@@ -2153,9 +2235,12 @@ export function useMobileView(
   function goRegistrar(tab: RegistrarTab, carId?: string, serviceMode = false) {
     const contextCar = carId ?? car?.id;
     const resolvedCar = contextCar ?? '';
-    const driver = carDe.get(resolvedCar)?.driver ?? '';
+    const contextCarData = carDe.get(resolvedCar);
+    // El chofer se guarda por su clave estable (driverId) para que coincida con
+    // las opciones del paso de chofer; cae al nombre en datos viejos.
+    const driver = contextCarData && contextCarData.driver !== 'Sin chofer' ? claveDeCar(contextCarData) : '';
     const lockCar = Boolean(contextCar);
-    push('registrar', { registrar: { ...blankRegistrarForm(tab, resolvedCar, driver === 'Sin chofer' ? '' : driver, lockCar, serviceMode), ...(serviceMode ? { cat: 'Mantenimiento' } : {}) } });
+    push('registrar', { registrar: { ...blankRegistrarForm(tab, resolvedCar, driver, lockCar, serviceMode), ...(serviceMode ? { cat: 'Mantenimiento' } : {}) } });
   }
   const goRegistrarCobro = (carId?: string) => goRegistrar('cobro', carId);
   const goRegistrarGasto = (carId?: string) => goRegistrar('gasto', carId);
@@ -2173,22 +2258,65 @@ export function useMobileView(
 
     let cobro: NonNullable<MobileView['registrar']>['cobro'] = null;
     if (f.tab === 'cobro') {
-      const opciones = [...choferKeys.entries()].sort(
-        (a, b) => (deudaPorChofer.get(b[0]) ?? 0) - (deudaPorChofer.get(a[0]) ?? 0) || a[1].driver.localeCompare(b[1].driver),
+      // Todos los choferes de la flota, tengan auto o no. Los que solo existen
+      // como texto en datos viejos se agregan por nombre para no perderlos.
+      const nombrePorClave = new Map<string, string>();
+      drivers.forEach((d) => nombrePorClave.set(String(d.id), d.nombre));
+      cars.forEach((c) => {
+        if (c.driver === 'Sin chofer') return;
+        const k = claveDeCar(c);
+        if (!nombrePorClave.has(k)) nombrePorClave.set(k, c.driver);
+      });
+      deudaPorChofer.forEach((_, k) => {
+        if (!nombrePorClave.has(String(k))) nombrePorClave.set(String(k), String(k));
+      });
+      const opciones = [...nombrePorClave.entries()].sort(
+        (a, b) => (deudaPorChofer.get(b[0]) ?? 0) - (deudaPorChofer.get(a[0]) ?? 0) || a[1].localeCompare(b[1]),
       );
       const debe = deudaPorChofer.get(f.driver) ?? 0;
+      const autoSel = f.carId ? carDe.get(f.carId) : undefined;
+      const choferDelAuto = autoSel && autoSel.driver !== 'Sin chofer' ? autoSel.driver : '';
+      // Si el chofer elegido ya tiene otro auto, ese auto queda libre y hay que
+      // avisarlo antes de guardar. Lo mismo con el chofer que se reemplaza.
+      const autoActualDelChofer = cars.find((c) => c.estado !== 'baja' && c.id !== autoSel?.id && claveDeCar(c) === f.driver);
+      const avisos: string[] = [];
+      if (autoSel && f.driver && choferDelAuto && claveDeCar(autoSel) !== f.driver) {
+        avisos.push(choferDelAuto + ' quedará sin auto.');
+      }
+      if (autoActualDelChofer) {
+        avisos.push('Ese chofer ya tiene el auto ' + autoActualDelChofer.plate + '; ese auto quedará sin chofer.');
+      }
       cobro = {
         carId: f.carId,
         setCarId: (v) => {
           const selected = carDe.get(v);
-          setF({ carId: v, driver: selected ? claveDeCar(selected) : '' });
+          setF({ carId: v, driver: selected && selected.driver !== 'Sin chofer' ? claveDeCar(selected) : '' });
         },
-        selCars: active.map((c) => ({ id: c.id, label: c.model + ' · ' + (c.gpsTag || 'Sin GPS') + ' · ' + c.plate })),
+        selCars: active.map((c) => ({ id: c.id, label: etiquetaAuto(c) })),
         lockCar: f.lockCar,
+        autoLabel: autoSel ? etiquetaAuto(autoSel) : '',
+        choferDelAuto,
         driver: f.driver,
+        driverNombre: nombrePorClave.get(f.driver) ?? '',
         setDriver: (v) => setF({ driver: v }),
-        opciones: opciones.map(([k, c]) => ({ id: k, label: c.driver + (deudaPorChofer.get(k) ? ' — debe ' + fmtShort(deudaPorChofer.get(k)!) : ' — al día') })),
+        opciones: opciones.map(([k, nombre]) => ({ id: k, label: nombre + (deudaPorChofer.get(k) ? ' — debe ' + fmtShort(deudaPorChofer.get(k)!) : ' — al día') })),
         tipoOpts: (['pago', 'ajuste'] as const).map((k) => ({ label: k === 'pago' ? 'Pago' : 'Ajuste', ...chipStyle(f.tipo === k), pick: () => setF({ tipo: k }) })),
+        advertencia: avisos.join(' '),
+        sections: persist.sections.map((s) => ({ id: s.id, name: s.name })),
+        crearChofer: async (nombre) => {
+          const driver = await persist.addDriver(nombre);
+          setF({ driver: String(driver.id) });
+          return driver;
+        },
+        crearAuto: async (datos) => {
+          const seccion = datos.sectionId != null ? persist.sections.find((s) => s.id === datos.sectionId) : persist.sections[0];
+          const sectionId = seccion ? seccion.id : (await persist.addSection('General')).id;
+          const car = await persist.addCar({ sectionId, plate: datos.plate, model: datos.model, year: datos.year, gpsTag: datos.gpsTag });
+          setF({ carId: car.id, driver: '' });
+          return car;
+        },
+        comprobante: f.comprobante,
+        setComprobante: (file) => setF({ comprobante: file }),
         destino: !f.driver
           ? 'Elegí un chofer para ver a qué se imputa'
           : !amountNum
@@ -2207,7 +2335,7 @@ export function useMobileView(
         catChips: REG_CATS.map((name) => ({ label: name, ...chipStyle(f.cat === name, 'amber'), pick: () => setF({ cat: name }) })),
         carId: f.carId,
         setCarId: (v) => setF({ carId: v }),
-        selCars: active.map((c) => ({ id: c.id, label: c.model + ' · ' + (c.gpsTag || 'Sin GPS') + ' · ' + c.plate })),
+        selCars: active.map((c) => ({ id: c.id, label: etiquetaAuto(c) })),
         lockCar: f.lockCar,
         comprobante: f.comprobante,
         setComprobante: (file) => setF({ comprobante: file }),
@@ -2219,7 +2347,7 @@ export function useMobileView(
       service = {
         carId: f.carId,
         setCarId: (v) => setF({ carId: v }),
-        selCars: active.map((c) => ({ id: c.id, label: c.model + ' · ' + (c.gpsTag || 'Sin GPS') + ' · ' + c.plate })),
+        selCars: active.map((c) => ({ id: c.id, label: etiquetaAuto(c) })),
         lockCar: f.lockCar,
         kilometraje: f.kilometraje,
         setKilometraje: (v) => setF({ kilometraje: v.replace(/\D/g, '').slice(0, 10) }),
@@ -2232,63 +2360,6 @@ export function useMobileView(
     const finish = () => back();
     const again = () => update({ registrar: blankRegistrarForm(f.tab, f.carId, f.driver, f.lockCar, f.serviceMode) });
 
-    const legacyNext = () => {
-      if (f.guardando || f.success) return;
-      if (f.tab === 'cobro') {
-        if (f.step === 0 && !f.driver) return toast('Elegí de qué chofer es el pago');
-        if (f.step === 1 && !amountNum) return toast('Ingresá cuánto pagó');
-        if (f.step === 3 && f.fecha > isoLocal(TODAY)) return toast('La fecha no puede ser futura');
-        if (f.step < 5) setF({ step: f.step + 1 });
-        return;
-      }
-    };
-
-    const legacySubmit = () => {
-      if (f.guardando) return;
-      if (!amountNum) return toast(f.tab === 'cobro' ? 'Ingresá cuánto pagó' : 'Ingresá cuánto gastaste');
-      if (f.fecha > isoLocal(TODAY)) return toast('La fecha no puede ser futura');
-      if (f.tab === 'cobro') {
-        if (!f.driver) return toast('Elegí de qué chofer es el pago');
-        setF({ guardando: true });
-        const carSel = cars.find((c) => claveDeCar(c) === f.driver);
-        const nombre = carSel?.driver ?? f.driver;
-        persist
-          .addPago({ driver: f.driver, carId: carSel?.id ?? null, fecha: f.fecha, monto: amountNum, tipo: f.tipo, nota: f.nota.trim() || undefined })
-          .then(() => {
-            const amount = fmt(amountNum);
-            update((s) => ({
-              registrar: s.registrar && {
-                ...s.registrar,
-                guardando: false,
-                success: { tab: 'cobro', title: f.tipo === 'ajuste' ? 'Ajuste registrado' : 'Pago registrado', detail: nombre, amount },
-              },
-            }));
-          })
-          .catch((e: Error) => {
-            setF({ guardando: false });
-            toast('No se pudo registrar: ' + e.message);
-          });
-      } else {
-        if (!f.carId) return toast('Elegí a qué auto corresponde');
-        if (!f.nota.trim()) return toast('Contá de qué es el gasto');
-        setF({ guardando: true });
-        const plate = carDe.get(f.carId)?.plate ?? '';
-        persist
-          .addEgreso(f.carId, { razon: f.nota.trim(), monto: amountNum, cat: f.cat, comprobante: f.comprobante })
-          .then(() => {
-            toast('Gasto registrado · ' + plate + ' · ' + fmt(amountNum));
-            back();
-          })
-          .catch((e: Error) => {
-            setF({ guardando: false });
-            toast('No se pudo registrar: ' + e.message);
-          });
-      }
-    };
-
-    void legacyNext;
-    void legacySubmit;
-
     const next = () => {
       if (f.guardando || f.success) return;
       if (f.serviceMode) {
@@ -2299,8 +2370,9 @@ export function useMobileView(
       }
       if (f.tab === 'cobro') {
         if (f.step === 0 && !f.carId) return toast('Elegí a qué auto corresponde');
-        if (f.step === 1 && !amountNum) return toast('Ingresá cuánto ingresó');
-        if (f.step < 2) setF({ step: f.step + 1 });
+        if (f.step === 1 && !f.driver) return toast('Elegí de qué chofer es el pago');
+        if (f.step === 2 && !amountNum) return toast('Ingresá cuánto ingresó');
+        if (f.step < 3) setF({ step: f.step + 1 });
         return;
       }
       if (f.step === 0 && !f.carId) return toast('Elegí a qué auto corresponde');
@@ -2323,7 +2395,7 @@ export function useMobileView(
         const plate = carDe.get(f.carId)?.plate ?? '';
         setF({ guardando: true });
         const saveExpense = amountNum > 0
-          ? persist.addEgreso(f.carId, { razon: f.nota.trim(), monto: amountNum, cat: 'Mantenimiento', comprobante: f.comprobante })
+          ? persist.addEgreso(f.carId, { razon: f.nota.trim(), monto: amountNum, cat: 'Mantenimiento', fecha: f.fecha, comprobante: f.comprobante })
           : Promise.resolve();
         saveExpense
           .then(() => {
@@ -2339,27 +2411,49 @@ export function useMobileView(
       if (!amountNum) return toast(f.tab === 'cobro' ? 'Ingresá cuánto ingresó' : 'Ingresá cuánto gastaste');
       if (f.fecha > isoLocal(TODAY)) return toast('La fecha no puede ser futura');
       if (!f.carId) return toast('Elegí a qué auto corresponde');
-      setF({ guardando: true });
       if (f.tab === 'cobro') {
-        const carSel = cars.find((c) => c.id === f.carId);
-        const driverKey = carSel ? claveDeCar(carSel) : '';
-        if (!carSel || !driverKey || driverKey === 'Sin chofer') {
+        const carSel = carDe.get(f.carId);
+        if (!carSel) {
           setF({ guardando: false });
-          return toast('El auto tiene que tener un chofer');
+          return toast('Elegí a qué auto corresponde');
         }
-        persist
-          .addPago({ driver: driverKey, carId: carSel.id, fecha: f.fecha, monto: amountNum, tipo: 'pago', nota: f.nota.trim() || undefined })
-          .then(() => update((s) => ({ registrar: s.registrar && { ...s.registrar, guardando: false, success: { tab: 'cobro', title: 'Ingreso registrado', detail: carSel.plate, amount: fmt(amountNum) } } })))
+        if (!f.driver) {
+          setF({ guardando: false });
+          return toast('Elegí de qué chofer es el pago');
+        }
+        // El nombre es lo que resuelve el servidor contra `drivers`; la clave
+        // puede ser el id (nuevo) o el nombre (datos viejos).
+        const nombreChofer = drivers.find((d) => String(d.id) === f.driver)?.nombre
+          ?? cars.find((c) => claveDeCar(c) === f.driver)?.driver
+          ?? f.driver;
+        setF({ guardando: true });
+        // Primero el vínculo auto→chofer: el pago necesita un chofer que sea
+        // dueño del auto para que la imputación y los reportes cierren.
+        const asignacion = claveDeCar(carSel) === f.driver
+          ? Promise.resolve(carSel)
+          : persist.assignDriverToCar(carSel.id, { driver: nombreChofer, cuota: carSel.cuota });
+        asignacion
+          .then(() => persist.addPago({
+            driver: f.driver,
+            carId: carSel.id,
+            fecha: f.fecha,
+            monto: amountNum,
+            tipo: 'pago',
+            nota: f.nota.trim() || undefined,
+            comprobante: f.comprobante,
+          }))
+          .then(() => update((s) => ({ registrar: s.registrar && { ...s.registrar, guardando: false, success: { tab: 'cobro', title: 'Ingreso registrado', detail: carSel.plate + ' · ' + nombreChofer, amount: fmt(amountNum) } } })))
           .catch((e: Error) => {
             setF({ guardando: false });
             toast('No se pudo registrar: ' + e.message);
           });
         return;
       }
+      setF({ guardando: true });
       const plate = carDe.get(f.carId)?.plate ?? '';
       const descripcion = f.nota.trim() || f.cat;
       persist
-        .addEgreso(f.carId, { razon: descripcion, monto: amountNum, cat: f.cat, comprobante: f.comprobante })
+        .addEgreso(f.carId, { razon: descripcion, monto: amountNum, cat: f.cat, fecha: f.fecha, comprobante: f.comprobante })
         .then(() => update((s) => ({ registrar: s.registrar && { ...s.registrar, guardando: false, success: { tab: 'gasto', title: 'Egreso registrado', detail: plate + ' · ' + descripcion, amount: fmt(amountNum) } } })))
         .catch((e: Error) => {
           setF({ guardando: false });
@@ -2377,8 +2471,9 @@ export function useMobileView(
     ];
     const simpleCobroTitles = [
       ['¿De qué auto es el ingreso?', 'Elegí el auto al que corresponde el pago.'],
+      ['¿De qué chofer es el pago?', 'Si el auto ya tiene chofer, viene elegido. Podés cambiarlo o crear uno nuevo.'],
       ['¿Cuánto ingresó?', 'Ingresá el monto recibido.'],
-      ['Revisá el ingreso', 'Confirmá los datos antes de guardarlo.'],
+      ['Revisá el ingreso', 'Confirmá el chofer, la fecha y el comprobante antes de guardar.'],
     ];
     void cobroTitles;
     const gastoTitles = [
@@ -2396,10 +2491,10 @@ export function useMobileView(
       ['¿Cuál era el kilometraje?', 'Podés dejarlo vacío si no lo sabés.'],
       ['Revisá el mantenimiento', 'Confirmá los datos antes de guardarlo.'],
     ];
-    const firstStep = f.lockCar ? 1 : 0;
+    const firstStep = f.baseStep;
     const viewStep = f.serviceMode ? Math.min(f.step, 5) : f.tab === 'gasto' ? Math.min(f.step, 3) : f.step;
     const progressStep = viewStep - firstStep;
-    const totalSteps = f.serviceMode ? 6 - firstStep : f.tab === 'cobro' ? 3 - firstStep : 4 - firstStep;
+    const totalSteps = f.serviceMode ? 6 - firstStep : f.tab === 'cobro' ? 4 - firstStep : 4 - firstStep;
     const gastoStepMeta = [gastoTitles[0], gastoTitles[1], gastoTitles[3], gastoTitles[4]][viewStep];
     const stepMeta = f.serviceMode ? serviceTitles[viewStep] : f.tab === 'cobro' ? simpleCobroTitles[f.step] : gastoStepMeta;
     registrarView = {
@@ -2412,7 +2507,11 @@ export function useMobileView(
       stepHint: stepMeta[1],
       backStep: () => back(),
       next,
-      nextLabel: f.serviceMode ? (f.step >= 5 ? 'Registrar mantenimiento' : 'Continuar') : (f.tab === 'cobro' && f.step === 2) || (f.tab === 'gasto' && f.step >= 3) ? (f.tab === 'cobro' ? 'Registrar ingreso' : 'Registrar egreso') : 'Continuar',
+      nextLabel: f.serviceMode
+        ? (f.step >= 5 ? 'Registrar mantenimiento' : 'Continuar')
+        : f.tab === 'cobro'
+          ? (f.step >= 3 ? 'Registrar ingreso' : 'Continuar')
+          : (f.step >= 3 ? 'Registrar egreso' : 'Continuar'),
       nextDisabled: false,
       success: f.success,
       finish,

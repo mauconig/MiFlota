@@ -74,7 +74,7 @@ function AuthedApp({
   pendingNotification: AdminNotificationRoute | null;
   onNotificationHandled: () => void;
 }) {
-  const v = useMobileView(store.cars, store.movs, store.pagos, store.reportes, store.locations, state, update, store, cambiarPassword);
+  const v = useMobileView(store.cars, store.drivers, store.movs, store.pagos, store.reportes, store.locations, state, update, store, cambiarPassword);
   useEffect(() => {
     if (!pendingNotification || store.cargando) return;
     const route = pendingNotification;
