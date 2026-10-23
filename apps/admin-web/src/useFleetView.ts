@@ -238,9 +238,35 @@ export interface MovementDetailView {
   comprobante: { url: string; name: string; type: string } | null;
   appliedQuotas: { id: number; dateLbl: string; description: string; vehicle: string; amount: string }[];
   saldoAFavor: string;
-  canDelete: boolean;
+  edit: MovementEditData;
+  save: (datos: MovementEditInput) => Promise<void>;
+  remove: () => Promise<void>;
   close: () => void;
-  delete: () => Promise<void>;
+}
+
+/** Valores crudos del movimiento para precargar el formulario de edición. */
+export interface MovementEditData {
+  kind: 'egreso' | 'pago';
+  /** Dígitos sin separadores. */
+  monto: string;
+  /** ISO `YYYY-MM-DD`, el formato que espera el servidor. */
+  fecha: string;
+  descripcion: string;
+  cat: string;
+  medio: string;
+  nota: string;
+  tieneComprobante: boolean;
+}
+
+export interface MovementEditInput {
+  monto: number;
+  fecha: string;
+  descripcion: string;
+  cat: string;
+  medio: string;
+  nota: string;
+  comprobante: File | null;
+  quitarComprobante: boolean;
 }
 
 export interface QuotaDetailView {
@@ -942,6 +968,9 @@ export function useFleetView(
     registrarService: (id: string, datos: { fecha: string; descripcion: string; kilometraje?: number; costo?: number; comprobante?: File | null }) => Promise<{ car: Car; mov?: Mov }>;
     exportReport: (payload: ReportExportPayload) => Promise<{ file: { name: string; url: string; mimeType: string }; counts: { ingresos: number; gastos: number; total: number } }>;
     addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
+    updateMov: (id: number, datos: { descripcion: string; monto: number; cat: string; fecha: string; comprobante: File | null; quitarComprobante: boolean }) => Promise<Mov>;
+    deleteMov: (id: number) => Promise<void>;
+    updatePago: (id: number, datos: { monto: number; fecha: string; medio: string; nota: string; comprobante: File | null; quitarComprobante: boolean }) => Promise<Pago>;
     deletePago: (id: number) => Promise<void>;
     sections: import('./api').FleetSection[];
     addSection: (name: string) => Promise<void>;
@@ -1608,6 +1637,8 @@ export function useFleetView(
       });
     const driverKey = p ? (p.driverId != null ? String(p.driverId) : p.driver) : '';
     const favor = p ? saldoAFavor.get(driverKey) ?? 0 : 0;
+    const esGasto = selected.type === 'egreso';
+    const movId = esGasto ? Number(selected.id.slice('egreso-'.length)) : null;
     return {
       id: selected.id,
       type: selected.type === 'egreso' ? 'Gasto' : ajuste ? 'Ajuste' : 'Pago',
@@ -1625,14 +1656,49 @@ export function useFleetView(
       comprobante: selected.comprobante ? { url: selected.comprobante, name: selected.comprobanteName || 'Comprobante', type: selected.comprobanteType } : null,
       appliedQuotas,
       saldoAFavor: favor ? fmt(favor, st.hide) : '',
-      canDelete: !!p,
-      close: () => update({ movementDetailId: null }),
-      delete: async () => {
-        if (!p) return;
-        await persist.deletePago(p.id);
-        update({ movementDetailId: null });
-        toast((ajuste ? 'Ajuste eliminado · ' : 'Movimiento eliminado · ') + (p.driver || 'Sin chofer') + ' · ' + fmt(p.monto));
+      edit: {
+        kind: esGasto ? 'egreso' : 'pago',
+        monto: String(selected.amount),
+        fecha: isoLocal(selected.date),
+        descripcion: esGasto ? selected.desc : '',
+        cat: esGasto ? selected.category : '',
+        medio: p?.medio ?? '',
+        nota: p?.nota ?? '',
+        tieneComprobante: !!selected.comprobante,
       },
+      save: async (datos) => {
+        if (esGasto && movId != null) {
+          await persist.updateMov(movId, {
+            descripcion: datos.descripcion,
+            monto: datos.monto,
+            cat: datos.cat,
+            fecha: datos.fecha,
+            comprobante: datos.comprobante,
+            quitarComprobante: datos.quitarComprobante,
+          });
+        } else if (p) {
+          await persist.updatePago(p.id, {
+            monto: datos.monto,
+            fecha: datos.fecha,
+            medio: datos.medio,
+            nota: datos.nota,
+            comprobante: datos.comprobante,
+            quitarComprobante: datos.quitarComprobante,
+          });
+        }
+        update({ movementDetailId: null });
+        toast((esGasto ? 'Gasto actualizado · ' : ajuste ? 'Ajuste actualizado · ' : 'Pago actualizado · ') + (selected.driver || 'Sin chofer') + ' · ' + fmt(datos.monto, st.hide));
+      },
+      remove: async () => {
+        if (esGasto && movId != null) {
+          await persist.deleteMov(movId);
+        } else if (p) {
+          await persist.deletePago(p.id);
+        }
+        update({ movementDetailId: null });
+        toast('Movimiento eliminado · ' + (selected.driver || 'Sin chofer') + ' · ' + fmt(selected.amount, st.hide));
+      },
+      close: () => update({ movementDetailId: null }),
     };
   })();
 

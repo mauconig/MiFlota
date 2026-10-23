@@ -140,6 +140,28 @@ export interface NuevoPagoPayload {
   nota?: string;
 }
 
+/** Corrección de un gasto ya cargado. `comprobante` reemplaza al anterior y
+ *  `quitarComprobante` lo deja sin adjunto. */
+export interface EditarMovPayload {
+  descripcion: string;
+  monto: number;
+  cat: string;
+  fecha: string;
+  comprobante: File | null;
+  quitarComprobante: boolean;
+}
+
+/** Corrección de un pago. Chofer, auto y tipo no se tocan: cambiarlos movería
+ *  la deuda de un chofer a otro. */
+export interface EditarPagoPayload {
+  monto: number;
+  fecha: string;
+  medio: string;
+  nota: string;
+  comprobante: File | null;
+  quitarComprobante: boolean;
+}
+
 export interface RegistrarServicePayload {
   fecha: string;
   descripcion: string;
@@ -250,6 +272,9 @@ export interface FleetStore {
   exportReport: (payload: ReportExportPayload) => Promise<ReportExportResponse>;
   cargarGastos: (items: ExpenseItemInput[]) => Promise<{ created: number; total: number }>;
   addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
+  updateMov: (id: number, datos: EditarMovPayload) => Promise<Mov>;
+  deleteMov: (id: number) => Promise<void>;
+  updatePago: (id: number, datos: EditarPagoPayload) => Promise<Pago>;
   deletePago: (id: number) => Promise<void>;
   addSection: (name: string) => Promise<void>;
   renameSection: (id: number, name: string) => Promise<void>;
@@ -500,6 +525,39 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     setPagos((ps) => ps.filter((p) => p.id !== id));
   }, []);
 
+  const updateMov = useCallback(async (id: number, datos: EditarMovPayload) => {
+    const fd = new FormData();
+    fd.append('descripcion', datos.descripcion);
+    fd.append('monto', String(datos.monto));
+    fd.append('cat', datos.cat);
+    fd.append('fecha', datos.fecha);
+    if (datos.quitarComprobante) fd.append('quitarComprobante', '1');
+    if (datos.comprobante) fd.append('comprobante', datos.comprobante);
+    const r = await req<{ mov: MovDto }>(`/api/movs/${id}`, { method: 'PATCH', body: fd });
+    const mov = toMov(r.mov);
+    setMovs((ms) => ms.map((m) => (m.id === id ? mov : m)));
+    return mov;
+  }, []);
+
+  const deleteMov = useCallback(async (id: number) => {
+    await req(`/api/movs/${id}`, { method: 'DELETE' });
+    setMovs((ms) => ms.filter((m) => m.id !== id));
+  }, []);
+
+  const updatePago = useCallback(async (id: number, datos: EditarPagoPayload) => {
+    const fd = new FormData();
+    fd.append('monto', String(datos.monto));
+    fd.append('fecha', datos.fecha);
+    fd.append('medio', datos.medio);
+    fd.append('nota', datos.nota);
+    if (datos.quitarComprobante) fd.append('quitarComprobante', '1');
+    if (datos.comprobante) fd.append('comprobante', datos.comprobante);
+    const r = await req<{ pago: PagoDto }>(`/api/pagos/${id}`, { method: 'PATCH', body: fd });
+    const pago = toPago(r.pago);
+    setPagos((ps) => ps.map((p) => (p.id === id ? pago : p)));
+    return pago;
+  }, []);
+
   return {
     sections,
     cars,
@@ -524,6 +582,9 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     exportReport,
     cargarGastos,
     addPago,
+    updateMov,
+    deleteMov,
+    updatePago,
     deletePago,
   };
 }
