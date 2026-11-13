@@ -93,6 +93,30 @@ test('editar y borrar movimientos, aislamiento por dueño y fecha del egreso', {
   assert.ok(existsSync(archivoDe(mov)), 'el comprobante se guarda en disco');
   assert.equal((await crearEgreso(tokenA, { razon: 'Futuro', monto: 1000, cat: 'Otros', fecha: manana })).status, 400);
 
+  // Egreso "sin auto": gasto general del dueño, se guarda sin vehículo.
+  const fdSinAuto = new FormData();
+  for (const [k, v] of Object.entries({ razon: 'Contador', monto: 80000, cat: 'Otros', fecha: ayer })) fdSinAuto.append(k, String(v));
+  const sinAuto = (await (await esperar(await fetch(base + '/api/egresos', { method: 'POST', headers: auth(tokenA), body: fdSinAuto }), 201)).json()).mov;
+  assert.equal(sinAuto.carId ?? null, null);
+  assert.equal(sinAuto.amount, 80000);
+  assert.equal((await fetch(base + '/api/egresos', { method: 'POST', body: new FormData() })).status, 401);
+
+  // La nota libre del gasto se guarda completa (no se corta a 300) y se puede
+  // editar o borrar. El único tope es MAX_GASTO_NOTA.
+  const notaLarga = 'Detalle de la reparación. '.repeat(58).trim(); // ~1600 caracteres
+  assert.ok(notaLarga.length > 300);
+  const conNota = await esperar(await crearEgreso(tokenA, { razon: 'Aceite', monto: 50000, cat: 'Mantenimiento', fecha: ayer, nota: notaLarga }), 201);
+  const movConNota = (await conNota.json()).mov;
+  assert.equal(movConNota.nota, notaLarga);
+
+  const notaEditada = await esperar(await editarGasto(tokenA, movConNota.id, { nota: 'Se usó 5W-30 sintético' }), 200);
+  assert.equal((await notaEditada.json()).mov.nota, 'Se usó 5W-30 sintético');
+  const sinNota = await esperar(await editarGasto(tokenA, movConNota.id, { nota: '' }), 200);
+  assert.equal((await sinNota.json()).mov.nota, '');
+
+  const conNotaExcedida = await esperar(await crearEgreso(tokenA, { razon: 'Filtros', monto: 1000, cat: 'Mantenimiento', fecha: ayer, nota: 'x'.repeat(2100) }), 201);
+  assert.equal((await conNotaExcedida.json()).mov.nota.length, 2000);
+
   // Editar el gasto: monto, descripción, categoría, fecha y comprobante.
   const editado = await esperar(await editarGasto(tokenA, mov.id, { descripcion: 'Cubiertas nuevas', monto: 150000, cat: 'Mantenimiento', fecha: ayer }, pdf('reemplazo')), 200);
   const movEditado = (await editado.json()).mov;

@@ -14,9 +14,12 @@ const BRAND_PATHS: Record<string, string[]> = {
     'M9 12h6',
   ],
   Kia: ['M5.4 8v8', 'M5.4 12L8.9 8', 'M5.4 12L8.9 16', 'M11.4 8L10.6 16', 'M13.8 16L16.6 8L18.6 16', 'M14.9 13.6h3'],
+  Honda: ['M3.6 5.2h16.8l-1.6 13.6H5.2z', 'M8.7 8.2l.6 7.6', 'M15.3 8.2l-.6 7.6', 'M9 12h6'],
+  Nissan: ['M4.4 10.2a8 8 0 0 1 15.2 0', 'M19.6 13.8a8 8 0 0 1 -15.2 0', 'M2 10.2h20v3.6H2z'],
 };
 
-function brandKey(value: string) {
+/** Marca conocida para un nombre ("Toyota Taxis" → Toyota), o null. */
+export function brandKey(value: string) {
   const key = String(value).trim().split(/\s+/)[0].toLowerCase();
   return Object.keys(BRAND_PATHS).find((brand) => brand.toLowerCase() === key) ?? null;
 }

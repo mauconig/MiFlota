@@ -6,7 +6,6 @@ import { BrandIcon } from '../components/BrandIcon';
 import { DateRangeInputs } from '../components/DateRangeInputs';
 import { ChipRow } from '../components/ChipRow';
 import { BackButton } from '../components/BackButton';
-import { ReporteNotas } from '../components/ReporteNotas';
 import { miles } from '../format';
 
 const PAPER = '#fffdf8';
@@ -258,8 +257,6 @@ export function Reportes({ v }: { v: MobileView }) {
           <Pressable onPress={rep.reset} style={{ minHeight: 48, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: MUTED, fontSize: 13, fontWeight: '600' }}>Empezar de nuevo</Text></Pressable>
         </ScrollView>
       )}
-
-      <ReporteNotas v={v} />
     </View>
   );
 }

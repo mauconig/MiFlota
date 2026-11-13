@@ -1,70 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import type { Car, CarLocation, Mov, Pago, Reporte, UIState, NewCarForm, NewDriverForm, EditCarForm, DriverCredentialsEdit } from './types';
 import type { DriverCredentials, NuevoCarPayload, NuevoPagoPayload, ReportExportPayload } from './api';
-import { previewReportNotes, saveReportNotes } from './api';
 import type { Aplicacion } from './cobranza';
 import { imputar } from './cobranza';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, dLbl, dLblFull, daysBetween, durLbl, fmt, fmtShort, initials, isoLocal, miles, statusColor, numFromInput } from './format';
-
-/** Un bloque de gastos de un auto dentro del recorrido de notas. `notaGuardada`
- *  es la que ya estaba en el servidor: sirve para "Saltar" sin guardar cambios. */
-export interface NotasBloque {
-  tipo: 'talleres' | 'mantenimiento' | 'otros';
-  titulo: string;
-  total: number;
-  filas: { detalle: string; total: number; fecha: string }[];
-  nota: string;
-  notaGuardada: string;
-}
-
-export interface NotasAuto {
-  carId: string;
-  label: string;
-  seccion: string;
-  total: number;
-  bloques: NotasBloque[];
-}
-
-/** Borrador de las notas del reporte en progreso, guardado en el navegador para
- *  no perderlo si se cierra el panel por accidente. Se limpia al guardar. */
-type NotasDraft = Record<string, Record<string, string>>;
-const notasDraftKey = (from: string, to: string) => `miflota-notas-borrador:${from}:${to}`;
-function leerNotasDraft(from: string, to: string): NotasDraft {
-  try {
-    const raw = localStorage.getItem(notasDraftKey(from, to));
-    return raw ? (JSON.parse(raw) as NotasDraft) : {};
-  } catch { return {}; }
-}
-function guardarNotasDraft(from: string, to: string, autos: NotasAuto[]) {
-  try {
-    const draft: NotasDraft = {};
-    for (const auto of autos) {
-      for (const bloque of auto.bloques) {
-        if (bloque.nota.trim()) (draft[auto.carId] ??= {})[bloque.tipo] = bloque.nota;
-      }
-    }
-    if (Object.keys(draft).length) localStorage.setItem(notasDraftKey(from, to), JSON.stringify(draft));
-    else localStorage.removeItem(notasDraftKey(from, to));
-  } catch { /* localStorage puede estar bloqueado: no es crítico */ }
-}
-function borrarNotasDraft(from: string, to: string) {
-  try { localStorage.removeItem(notasDraftKey(from, to)); } catch { /* idem */ }
-}
-
-/** Estado del modal de notas: primero la pregunta y después el recorrido. */
-export type NotasEstado =
-  | { fase: 'pregunta'; payload: Omit<ReportExportPayload, 'format'> }
-  | {
-      fase: 'recorrido';
-      payload: Omit<ReportExportPayload, 'format'>;
-      from: string;
-      to: string;
-      autos: NotasAuto[];
-      paso: number;
-      guardando: boolean;
-      error: string;
-    };
 
 const UMBRAL_VERDE = 2500000;
 
@@ -634,17 +574,6 @@ export interface View {
   setRepIncluirComparativa: (on: boolean) => void;
   repComparativaNota: string;
   setRepComparativaNota: (v: string) => void;
-  /** Notas del reporte: la pregunta previa al PDF y el recorrido auto por auto. */
-  notas: NotasEstado | null;
-  notasSi: () => void;
-  notasNo: () => void;
-  notasCerrar: () => void;
-  notasIr: (paso: number) => void;
-  notasAnterior: () => void;
-  notasSiguiente: () => void;
-  notasSaltar: () => void;
-  notasSetNota: (carId: string, tipo: NotasBloque['tipo'], texto: string) => void;
-  notasGuardarYExportar: () => void;
   movementMonths: MovementMonth[];
   movementRows: LedgerRow[];
   movementTotalRows: number;
@@ -973,7 +902,7 @@ export function useFleetView(
     registrarService: (id: string, datos: { fecha: string; descripcion: string; kilometraje?: number; costo?: number; comprobante?: File | null }) => Promise<{ car: Car; mov?: Mov }>;
     exportReport: (payload: ReportExportPayload) => Promise<{ file: { name: string; url: string; mimeType: string }; counts: { ingresos: number; gastos: number; total: number } }>;
     addPago: (nuevo: NuevoPagoPayload) => Promise<Pago>;
-    updateMov: (id: number, datos: { descripcion: string; monto: number; cat: string; fecha: string; comprobante: File | null; quitarComprobante: boolean }) => Promise<Mov>;
+    updateMov: (id: number, datos: { descripcion: string; monto: number; cat: string; fecha: string; nota: string; comprobante: File | null; quitarComprobante: boolean }) => Promise<Mov>;
     deleteMov: (id: number) => Promise<void>;
     updatePago: (id: number, datos: { monto: number; fecha: string; medio: string; nota: string; comprobante: File | null; quitarComprobante: boolean }) => Promise<Pago>;
     deletePago: (id: number) => Promise<void>;
@@ -985,17 +914,6 @@ export function useFleetView(
   },
 ): View {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  // Notas del reporte: la pregunta "¿Deseás agregar notas?" y el recorrido auto
-  // por auto. Vive acá porque es un paso previo a exportar el PDF, no un estado
-  // de la pantalla.
-  const [notas, setNotas] = useState<NotasEstado | null>(null);
-
-  // Persiste el borrador de las notas en el navegador ante cada cambio, así no
-  // se pierde si el panel se cierra por accidente.
-  useEffect(() => {
-    if (notas && notas.fase === 'recorrido') guardarNotasDraft(notas.from, notas.to, notas.autos);
-  }, [notas]);
 
   const toast = (m: string) => {
     clearTimeout(toastTimer.current);
@@ -1547,7 +1465,7 @@ export function useFleetView(
           driver: c?.driver || 'Sin chofer',
           desc: m.desc,
           category: m.cat || 'Otros',
-          note: '',
+          note: m.nota || '',
           medio: '',
           amount: m.amount,
           comprobante: m.comprobante ? '/api/comprobantes/' + m.comprobante.id : '',
@@ -1668,7 +1586,7 @@ export function useFleetView(
         descripcion: esGasto ? selected.desc : '',
         cat: esGasto ? selected.category : '',
         medio: p?.medio ?? '',
-        nota: p?.nota ?? '',
+        nota: esGasto ? selected.note : p?.nota ?? '',
         tieneComprobante: !!selected.comprobante,
       },
       save: async (datos) => {
@@ -1678,6 +1596,7 @@ export function useFleetView(
             monto: datos.monto,
             cat: datos.cat,
             fecha: datos.fecha,
+            nota: datos.nota,
             comprobante: datos.comprobante,
             quitarComprobante: datos.quitarComprobante,
           });
@@ -2235,92 +2154,12 @@ export function useFleetView(
     toast((formato === 'pdf' ? 'PDF' : 'Excel') + ' descargado · ' + result.counts.total + ' movimientos');
   };
 
-  const exportarSinNotas = async () => {
+  const exportarReportePdf = async () => {
+    if (!reportMovements.length) return toast('No hay movimientos para exportar con estos filtros');
     try {
       await descargarReporte('pdf');
     } catch (e) {
       toast('No se pudo exportar: ' + (e as Error).message);
-    }
-  };
-
-  /** El botón PDF primero pregunta si quiere agregar notas. */
-  const abrirNotas = () => {
-    if (!reportMovements.length) return toast('No hay movimientos para exportar con estos filtros');
-    setNotas({ fase: 'pregunta', payload: reportBasePayload() });
-  };
-
-  const notasSi = async () => {
-    if (!notas || notas.fase !== 'pregunta') return;
-    const payload = notas.payload;
-    try {
-      const previa = await previewReportNotes(payload);
-      if (!previa.autos.length) {
-        setNotas(null);
-        toast('Este período no tiene gastos para anotar');
-        await exportarSinNotas();
-        return;
-      }
-      // Recupera el borrador local (si quedó uno de una salida accidental).
-      const draft = leerNotasDraft(previa.from, previa.to);
-      const restaurado = Object.keys(draft).length > 0;
-      setNotas({
-        fase: 'recorrido',
-        payload,
-        from: previa.from,
-        to: previa.to,
-        autos: previa.autos.map((auto) => ({
-          ...auto,
-          bloques: auto.bloques.map((bloque) => ({
-            ...bloque,
-            notaGuardada: bloque.nota,
-            nota: draft[auto.carId]?.[bloque.tipo] ?? bloque.nota,
-          })),
-        })),
-        paso: 0,
-        guardando: false,
-        error: '',
-      });
-      if (restaurado) toast('Recuperé las notas que habías empezado');
-    } catch (e) {
-      setNotas(null);
-      toast('No se pudo preparar el reporte: ' + (e as Error).message);
-    }
-  };
-
-  const notasNo = async () => {
-    setNotas(null);
-    await exportarSinNotas();
-  };
-
-  const notasIr = (paso: number) => setNotas((n) => (n && n.fase === 'recorrido' ? { ...n, paso: Math.max(0, Math.min(paso, n.autos.length - 1)) } : n));
-  const notasAnterior = () => setNotas((n) => (n && n.fase === 'recorrido' ? { ...n, paso: Math.max(0, n.paso - 1) } : n));
-  const notasSiguiente = () => setNotas((n) => (n && n.fase === 'recorrido' ? { ...n, paso: Math.min(n.autos.length - 1, n.paso + 1) } : n));
-
-  /** Saltar = no guardar cambios de este auto: se vuelve a lo que ya tenía. */
-  const notasSaltar = () => setNotas((n) => {
-    if (!n || n.fase !== 'recorrido') return n;
-    const autos = n.autos.map((auto, i) => (i === n.paso ? { ...auto, bloques: auto.bloques.map((bloque) => ({ ...bloque, nota: bloque.notaGuardada })) } : auto));
-    return { ...n, autos, paso: Math.min(autos.length - 1, n.paso + 1), error: '' };
-  });
-
-  const notasSetNota = (carId: string, tipo: NotasBloque['tipo'], texto: string) => setNotas((n) => {
-    if (!n || n.fase !== 'recorrido') return n;
-    const autos = n.autos.map((auto) => (auto.carId === carId ? { ...auto, bloques: auto.bloques.map((bloque) => (bloque.tipo === tipo ? { ...bloque, nota: texto.slice(0, 300) } : bloque)) } : auto));
-    return { ...n, autos, error: '' };
-  });
-
-  const notasGuardarYExportar = async () => {
-    if (!notas || notas.fase !== 'recorrido' || notas.guardando) return;
-    const estado = notas;
-    const notes = estado.autos.flatMap((auto) => auto.bloques.map((bloque) => ({ carId: auto.carId, tipo: bloque.tipo, nota: bloque.nota.trim() })));
-    setNotas({ ...estado, guardando: true, error: '' });
-    try {
-      await saveReportNotes({ from: estado.from, to: estado.to, notes });
-      await descargarReporte('pdf');
-      borrarNotasDraft(estado.from, estado.to);
-      setNotas(null);
-    } catch (e) {
-      setNotas({ ...estado, guardando: false, error: (e as Error).message || 'No se pudieron guardar las notas' });
     }
   };
 
@@ -2748,9 +2587,8 @@ export function useFleetView(
       } catch (e) { toast('No se pudo exportar: ' + (e as Error).message); }
       return;
     },
-    // El botón PDF pregunta primero si quiere agregar notas a cada auto.
     exportarPdf: () => {
-      abrirNotas();
+      void exportarReportePdf();
     },
     repCobrosManual: st.repCobrosManual,
     setRepCobrosManual: (on: boolean) => update({ repCobrosManual: on }),
@@ -2762,16 +2600,6 @@ export function useFleetView(
     setRepIncluirComparativa: (on: boolean) => update({ repIncluirComparativa: on }),
     repComparativaNota: st.repComparativaNota,
     setRepComparativaNota: (v: string) => update({ repComparativaNota: v }),
-    notas,
-    notasSi,
-    notasNo,
-    notasCerrar: () => setNotas(null),
-    notasIr,
-    notasAnterior,
-    notasSiguiente,
-    notasSaltar,
-    notasSetNota,
-    notasGuardarYExportar,
 
     gastosSub: gastosMovements.length + (gastosMovements.length === 1 ? ' gasto' : ' gastos') + ' · ' + fmt(gastosTotalAmount, st.hide) + (st.gastosQ.trim() || st.gastosCat !== 'todas' ? ' con los filtros aplicados' : ''),
     gastosQ: st.gastosQ,

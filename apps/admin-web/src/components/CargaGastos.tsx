@@ -7,7 +7,7 @@ import { CloseIcon } from '../icons';
 import type { ExpenseItemInput } from './AssistantChat';
 import { btnPrimary, btnPrimaryHover, btnSecondary, btnSecondaryHover, fieldInput, fieldLabel, fieldLabelText, modalCloseBtn, modalCloseBtnHover, modalFooter, modalOverlay, modalPanel, modalTitle } from '../styles';
 
-interface Fila { key: string; description: string; amount: string }
+interface Fila { key: string; description: string; amount: string; note: string }
 type Paso = 1 | 2 | 3;
 
 const hoy = () => {
@@ -49,7 +49,7 @@ export function CargaGastos({ cars, onSave }: { cars: Car[]; onSave: (items: Exp
     setCarId('');
     setCategory(CATS[1]);
     setDate(hoy());
-    setRows([{ key: 'r0', description: '', amount: '' }]);
+    setRows([{ key: 'r0', description: '', amount: '', note: '' }]);
     setError('');
     setSaved(null);
     setOpen(true);
@@ -58,12 +58,12 @@ export function CargaGastos({ cars, onSave }: { cars: Car[]; onSave: (items: Exp
   const elegirAuto = (c: Car) => { setCarId(c.id); setError(''); setPaso(2); };
   const editar = (key: string, patch: Partial<Fila>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const quitar = (key: string) => setRows((rs) => rs.filter((r) => r.key !== key));
-  const agregar = () => setRows((rs) => [...rs, { key: `r${Date.now()}${rs.length}`, description: '', amount: '' }]);
+  const agregar = () => setRows((rs) => [...rs, { key: `r${Date.now()}${rs.length}`, description: '', amount: '', note: '' }]);
   const total = rows.reduce((sum, row) => sum + (Number(row.amount.replace(/\D/g, '')) || 0), 0);
 
   const guardar = async () => {
     const items: ExpenseItemInput[] = rows
-      .map((row) => ({ carId, description: row.description.trim(), amount: Number(row.amount.replace(/\D/g, '')) || 0, category, date }))
+      .map((row) => ({ carId, description: row.description.trim(), amount: Number(row.amount.replace(/\D/g, '')) || 0, category, date, nota: row.note.trim() || undefined }))
       .filter((item) => item.description && item.amount > 0);
     if (!items.length) { setError('Agregá al menos una línea con descripción y monto.'); return; }
     setSaving(true);
@@ -147,6 +147,13 @@ export function CargaGastos({ cars, onSave }: { cars: Car[]; onSave: (items: Exp
                     <MoneyInput value={row.amount} onChange={(v) => editar(row.key, { amount: v })} placeholder="0" ariaLabel="Monto del gasto" style={{ flex: 1, minWidth: 0, width: '100%', border: 'none', background: 'none', outline: 'none', fontSize: 14, color: '#1a1a18', fontVariantNumeric: 'tabular-nums', textAlign: 'right' }} />
                   </span>
                   <Btn onClick={() => quitar(row.key)} ariaLabel="Borrar línea" style={{ border: 'none', background: 'none', color: '#a8412f', fontSize: 20, lineHeight: 1, cursor: 'pointer', padding: 0 }}>×</Btn>
+                  <input
+                    value={row.note}
+                    onChange={(e) => editar(row.key, { note: e.target.value })}
+                    placeholder="Nota (opcional)"
+                    aria-label="Nota del gasto"
+                    style={{ ...fieldInput, gridColumn: '1 / -1', fontSize: 12, minHeight: 34 }}
+                  />
                 </div>)}
                 <button type="button" onClick={agregar} style={{ alignSelf: 'flex-start', border: '1px dashed #cfc3ac', background: '#faf7ef', borderRadius: 8, padding: '7px 11px', fontSize: 12, color: '#6b5837', cursor: 'pointer' }}>+ Agregar línea</button>
               </div>

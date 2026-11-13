@@ -52,7 +52,7 @@ export function ServiceWizard({ r }: { r: RegistrarView }) {
   } else if (r.step === 1) {
     content = (
       <View style={{ ...card, gap: 8 }}>
-        <TextInput value={r.nota} onChangeText={r.setNota} placeholder="Ej.: cambio de aceite y filtros" placeholderTextColor="#a39a8b" multiline maxLength={200} autoFocus style={{ minHeight: 100, color: '#16150f', fontSize: 17, textAlignVertical: 'top' }} />
+        <TextInput value={r.detalle} onChangeText={r.setDetalle} placeholder="Ej.: cambio de aceite y filtros" placeholderTextColor="#a39a8b" multiline maxLength={120} autoFocus style={{ minHeight: 100, color: '#16150f', fontSize: 17, textAlignVertical: 'top' }} />
       </View>
     );
   } else if (r.step === 2) {
@@ -78,7 +78,11 @@ export function ServiceWizard({ r }: { r: RegistrarView }) {
     content = (
       <View style={{ ...card, gap: 13 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}><Text style={{ color: '#6b665c', fontSize: 13 }}>Auto</Text><Text style={{ flex: 1, textAlign: 'right', color: '#16150f', fontSize: 14, fontWeight: '700' }}>{current?.label ?? '—'}</Text></View>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}><Text style={{ color: '#6b665c', fontSize: 13 }}>Trabajo</Text><Text style={{ flex: 1, textAlign: 'right', color: '#16150f', fontSize: 14, fontWeight: '700' }} numberOfLines={2}>{r.nota}</Text></View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}><Text style={{ color: '#6b665c', fontSize: 13 }}>Trabajo</Text><Text style={{ flex: 1, textAlign: 'right', color: '#16150f', fontSize: 14, fontWeight: '700' }} numberOfLines={2}>{r.detalle}</Text></View>
+        <View style={{ gap: 7 }}>
+          <Text style={{ color: '#6b665c', fontSize: 13, fontWeight: '700' }}>Nota (opcional)</Text>
+          <TextInput value={r.nota} onChangeText={r.setNota} placeholder="Una aclaración que se imprime debajo del gasto" placeholderTextColor="#a39a8b" multiline style={{ minHeight: 64, borderWidth: 1, borderColor: '#ece4d6', borderRadius: 13, paddingHorizontal: 12, paddingVertical: 10, color: '#16150f', fontSize: 15, textAlignVertical: 'top' }} />
+        </View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}><Text style={{ color: '#6b665c', fontSize: 13 }}>Costo</Text><Text style={{ color: '#4d587e', fontSize: 18, fontWeight: '800' }}>{service.tieneCosto ? r.amountDisplay : 'Sin costo'}</Text></View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}><Text style={{ color: '#6b665c', fontSize: 13 }}>Fecha</Text><Text style={{ color: '#16150f', fontSize: 14, fontWeight: '600' }}>{dLblFull(new Date(r.fecha + 'T12:00:00'))}</Text></View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}><Text style={{ color: '#6b665c', fontSize: 13 }}>Kilometraje</Text><Text style={{ color: '#16150f', fontSize: 14, fontWeight: '600' }}>{service.kilometraje ? `${service.kilometraje} km` : 'Sin informar'}</Text></View>

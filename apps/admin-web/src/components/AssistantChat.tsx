@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { MoneyInput } from './MoneyInput';
 import './AssistantChat.css';
 
-export interface ExpenseItemInput { carId: string; description: string; amount: number; category: string; date?: string }
-export interface ExpenseDraftItem { id: string; description: string; amount: number; displayAmount: string }
+export interface ExpenseItemInput { carId: string; description: string; amount: number; category: string; date?: string; nota?: string }
+export interface ExpenseDraftItem { id: string; description: string; amount: number; nota: string; displayAmount: string }
 export interface ExpenseDraft {
   id: string;
   kind: 'gastos';
@@ -35,10 +35,10 @@ interface Props {
   onConfirmExpenses: (items: ExpenseItemInput[]) => Promise<{ created: number; total: number }>;
 }
 
-interface DraftRow { key: string; description: string; amount: string }
+interface DraftRow { key: string; description: string; amount: string; note: string }
 
 function ExpenseDraftCard({ draft, onConfirm, onOpenCar }: { draft: ExpenseDraft; onConfirm: Props['onConfirmExpenses']; onOpenCar: (id: string) => void }) {
-  const [rows, setRows] = useState<DraftRow[]>(() => draft.items.map((item) => ({ key: item.id, description: item.description, amount: new Intl.NumberFormat('es-PY').format(item.amount) })));
+  const [rows, setRows] = useState<DraftRow[]>(() => draft.items.map((item) => ({ key: item.id, description: item.description, amount: new Intl.NumberFormat('es-PY').format(item.amount), note: item.nota || '' })));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<{ created: number; total: number } | null>(null);
   const [discarded, setDiscarded] = useState(false);
@@ -46,10 +46,10 @@ function ExpenseDraftCard({ draft, onConfirm, onOpenCar }: { draft: ExpenseDraft
   const total = rows.reduce((sum, row) => sum + (Number(row.amount.replace(/\D/g, '')) || 0), 0);
   const editar = (key: string, patch: Partial<DraftRow>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const quitar = (key: string) => setRows((rs) => rs.filter((r) => r.key !== key));
-  const agregar = () => setRows((rs) => [...rs, { key: `n${Date.now()}${rs.length}`, description: '', amount: '' }]);
+  const agregar = () => setRows((rs) => [...rs, { key: `n${Date.now()}${rs.length}`, description: '', amount: '', note: '' }]);
   const confirmar = async () => {
     const items: ExpenseItemInput[] = rows
-      .map((row) => ({ carId: draft.vehicle.carId, description: row.description.trim(), amount: Number(row.amount.replace(/\D/g, '')) || 0, category: draft.category, date: draft.date }))
+      .map((row) => ({ carId: draft.vehicle.carId, description: row.description.trim(), amount: Number(row.amount.replace(/\D/g, '')) || 0, category: draft.category, date: draft.date, nota: row.note.trim() || undefined }))
       .filter((item) => item.description && item.amount > 0);
     if (!items.length) { setError('Agregá al menos una línea con descripción y monto.'); return; }
     setSaving(true);
@@ -74,6 +74,7 @@ function ExpenseDraftCard({ draft, onConfirm, onOpenCar }: { draft: ExpenseDraft
         <input value={row.description} onChange={(e) => editar(row.key, { description: e.target.value })} placeholder="Qué se gastó" aria-label="Descripción del gasto" maxLength={120} />
         <span className="ai-draft-money"><span>₲</span><MoneyInput value={row.amount} onChange={(v) => editar(row.key, { amount: v })} placeholder="0" ariaLabel="Monto del gasto" /></span>
         <button type="button" className="ai-draft-remove" onClick={() => quitar(row.key)} aria-label="Borrar línea">×</button>
+        <input className="ai-draft-note" value={row.note} onChange={(e) => editar(row.key, { note: e.target.value })} placeholder="Nota (opcional)" aria-label="Nota del gasto" />
       </div>)}
     </div>
     <button type="button" className="ai-draft-add" onClick={agregar}>+ Agregar línea</button>

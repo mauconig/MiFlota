@@ -1,11 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { BackHandler, Keyboard, Linking } from 'react-native';
-import type { AdminNotificationRoute, Car, Driver, Mov, Pago, Reporte, MobileState, Screen, DashboardDetailKind, RegistrarTab, FleetFilter, PickedFile, CarLocation, ReportCategorySelection, ReportInclude, ReportNotasEstado, ReportNoteTipo, ReportSelection, ReportStep, IncomeTypeSelection } from './types';
+import type { AdminNotificationRoute, Car, Driver, Mov, Pago, Reporte, MobileState, Screen, DashboardDetailKind, RegistrarTab, FleetFilter, PickedFile, CarLocation, ReportCategorySelection, ReportInclude, ReportSelection, ReportStep, IncomeTypeSelection } from './types';
 import { imputar, type Aplicacion } from './cobranza';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, daysBetween, durLbl, dLbl, dLblFull, fmt, fmtShort, initials, statusColor, numFromInput, miles, isoLocal } from './format';
-import { getAuthHeaders, previewReportNotes, saveReportNotes, type FleetStore, type NuevoCarPayload, type ReportExportPayload, type ReportPeriodType } from './api';
+import { getAuthHeaders, type FleetStore, type NuevoCarPayload, type ReportExportPayload, type ReportPeriodType } from './api';
 import { API_BASE } from './config';
+import { brandKey } from './components/BrandIcon';
 import { dateTextFromIso, maskDateInput, validateDateRange } from './dateRange';
 
 const UMBRAL_VERDE = 2500000;
@@ -189,14 +190,17 @@ export function blankRegistrarForm(tab: RegistrarTab, carId: string, driver: str
   // El cobro arranca por el auto y sigue por el chofer. Si viene de la ficha de
   // un auto, el paso del auto ya está resuelto: se salta al chofer (si falta)
   // o directo al monto.
+  // Sin auto en contexto, ingreso y egreso arrancan eligiendo la sección (paso
+  // -1), que incluye la opción "Sin auto". El mantenimiento sí exige auto.
   const cobroInicial = driver ? 2 : 1;
-  const baseStep = lockCar ? (tab === 'cobro' ? cobroInicial : 1) : 0;
+  const baseStep = lockCar ? (tab === 'cobro' ? cobroInicial : 1) : serviceMode ? 0 : -1;
   return {
     tab,
     serviceMode,
     carId,
     digits: '',
     fecha: isoLocal(TODAY),
+    detalle: '',
     nota: '',
     driver,
     tipo: 'pago',
@@ -206,6 +210,7 @@ export function blankRegistrarForm(tab: RegistrarTab, carId: string, driver: str
     step: baseStep,
     baseStep,
     lockCar,
+    seccion: '',
     guardando: false,
     success: null,
   };
@@ -294,7 +299,6 @@ export function initialMobileState(): MobileState {
     reportesComparativa: { modo: 'auto', actual: '', anterior: '', nota: '' },
     reportesExportando: false,
     reportesError: '',
-    reportesNotas: null,
     toast: '',
     fleetFilter: 'todos',
     fleetSectionId: null,
@@ -816,12 +820,20 @@ export interface MobileView {
     fecha: string;
     setFecha: (iso: string) => void;
     hoy: string;
+    /** Detalle/título del gasto o mantenimiento. */
+    detalle: string;
+    setDetalle: (v: string) => void;
+    detallePh: string;
     nota: string;
     setNota: (v: string) => void;
     notaPh: string;
     cta: { label: string; bg: string; fg: string };
     submit: () => void;
     guardando: boolean;
+    /** Paso inicial: secciones de la flota más "Sin auto". */
+    secciones: { id: string; label: string; sub: string; selected: boolean; pick: () => void; color: string; brand?: string; initials: string }[];
+    /** El movimiento no va vinculado a ningún auto. */
+    sinAuto: boolean;
     cobro: {
       carId: string;
       setCarId: (v: string) => void;
@@ -839,6 +851,8 @@ export interface MobileView {
       /** Avisos de reemplazo antes de confirmar. */
       advertencia: string;
       sections: { id: number; name: string }[];
+      /** Sección elegida en el primer paso, para el alta rápida de auto. */
+      defaultSectionId: number | null;
       crearChofer: (nombre: string) => Promise<Driver>;
       crearAuto: (datos: { sectionId: number | null; plate: string; model: string; year: number; gpsTag: string }) => Promise<Car>;
       comprobante: PickedFile | null;
@@ -899,17 +913,6 @@ export interface MobileView {
     exporting: boolean;
     error: string;
     exportFile: (format: 'pdf' | 'xlsx') => void;
-    /** Notas del reporte: la pregunta previa al PDF y el recorrido auto por auto. */
-    notas: ReportNotasEstado | null;
-    notasSi: () => void;
-    notasNo: () => void;
-    notasCerrar: () => void;
-    notasIr: (paso: number) => void;
-    notasAnterior: () => void;
-    notasSiguiente: () => void;
-    notasSaltar: () => void;
-    notasSetNota: (carId: string, tipo: ReportNoteTipo, texto: string) => void;
-    notasGuardarYExportar: () => void;
   };
 
   ranking: { rows: RankRow[]; byAuto: boolean; setAuto: () => void; setModelo: () => void; hint: string };
@@ -1032,9 +1035,11 @@ export function useMobileView(
   const back = () => {
     Keyboard.dismiss();
     if (state.screen === 'registrar' && state.registrar && !state.registrar.success) {
-      const firstStep = state.registrar.tab === 'gasto' && state.registrar.lockCar ? 1 : 0;
+      const firstStep = state.registrar.baseStep;
       if (state.registrar.step > firstStep) {
+        // Sin auto no hay paso de auto: del siguiente se vuelve a la sección.
         let previousStep = state.registrar.step - 1;
+        if (previousStep === 0 && state.registrar.seccion === 'none') previousStep = -1;
         update((s) => ({ registrar: s.registrar && { ...s.registrar, step: previousStep } }));
         return;
       }
@@ -2056,7 +2061,7 @@ export function useMobileView(
       gpsTag: movementCar?.gpsTag.trim() || 'Sin GPS',
       category: gasto.cat || 'Otros',
       medio: 'Sin especificar',
-      note: gasto.desc,
+      note: gasto.nota || '',
       comprobanteName: gasto.comprobante?.nombre || '',
       comprobante: comprobanteView(gasto.comprobante),
       edit: {
@@ -2066,7 +2071,7 @@ export function useMobileView(
         descripcion: gasto.desc,
         cat: gasto.cat || 'Otros',
         medio: '',
-        nota: '',
+        nota: gasto.nota ?? '',
         tieneComprobante: !!gasto.comprobante,
       },
       save: async (datos) => {
@@ -2075,6 +2080,7 @@ export function useMobileView(
           monto: datos.monto,
           cat: datos.cat,
           fecha: datos.fecha,
+          nota: datos.nota,
           comprobante: datos.comprobante,
           quitarComprobante: datos.quitarComprobante,
         });
@@ -2142,7 +2148,7 @@ export function useMobileView(
         row: {
           id: 'gasto-' + m.id,
           desc: m.desc,
-          sub: dLbl(m.date) + ' · ' + (m.cat ?? '') + (m.comprobante ? ' · comprobante' : ''),
+          sub: dLbl(m.date) + ' · ' + (m.cat ?? '') + (m.nota ? ' · ' + m.nota : '') + (m.comprobante ? ' · comprobante' : ''),
           icon: '↑',
           iconBg: '#fdeeea',
           color: COLORS.neg,
@@ -2304,6 +2310,39 @@ export function useMobileView(
       });
     const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '000', '0', 'del'].map((k) => ({ label: k === 'del' ? '⌫' : k, press: () => press(k) }));
 
+    // Primer paso: la sección acota los autos del paso siguiente; "Sin auto"
+    // lo saltea y deja el movimiento sin vehículo.
+    const sinAuto = f.seccion === 'none';
+    const seccionDeAuto = (c: Car) => (c.sectionId != null && persist.sections.some((s) => s.id === c.sectionId) ? 's:' + c.sectionId : 'unassigned');
+    const autosDeSeccion = f.lockCar || !f.seccion ? active : active.filter((c) => seccionDeAuto(c) === f.seccion);
+    const selCars = autosDeSeccion.map((c) => ({ id: c.id, label: etiquetaAuto(c) }));
+    const pickSeccion = (key: string) => {
+      const prev = f.carId ? carDe.get(f.carId) : undefined;
+      const keepCar = key !== 'none' && !!prev && seccionDeAuto(prev) === key;
+      // Tocar la sección ya avanza: con varias secciones el botón Continuar
+      // queda debajo de la lista.
+      setF({ seccion: key, step: key === 'none' ? 1 : 0, ...(keepCar ? {} : { carId: '', ...(f.tab === 'cobro' && key !== 'none' ? { driver: '' } : {}) }) });
+    };
+    const contarAutos = (key: string) => active.filter((c) => seccionDeAuto(c) === key).length;
+    const seccionOpts: NonNullable<MobileView['registrar']>['secciones'] = [
+      ...[...persist.sections].sort((a, b) => a.name.localeCompare(b.name)).map((s) => ({ key: 's:' + s.id, label: s.name, color: sectionColorById.get(s.id) ?? SECTION_COLORS[0] })),
+      ...(contarAutos('unassigned') ? [{ key: 'unassigned', label: 'Sin sección', color: unassignedSectionColor }] : []),
+    ].map((o) => {
+      const n = contarAutos(o.key);
+      // Mismo color que la sección tiene en los gráficos; logo si es una marca.
+      const initials = o.label.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
+      return { id: o.key, label: o.label, sub: n === 1 ? '1 auto' : n + ' autos', selected: f.seccion === o.key, pick: () => pickSeccion(o.key), color: o.color, brand: brandKey(o.label) ?? undefined, initials };
+    });
+    seccionOpts.push({
+      id: 'none',
+      label: 'Sin auto',
+      sub: f.tab === 'cobro' ? 'Ingreso que no va vinculado a ningún auto' : 'Gasto general, no vinculado a ningún auto',
+      selected: sinAuto,
+      pick: () => pickSeccion('none'),
+      color: '#6b665c',
+      initials: '',
+    });
+
     let cobro: NonNullable<MobileView['registrar']>['cobro'] = null;
     if (f.tab === 'cobro') {
       // Todos los choferes de la flota, tengan auto o no. Los que solo existen
@@ -2340,9 +2379,9 @@ export function useMobileView(
           const selected = carDe.get(v);
           setF({ carId: v, driver: selected && selected.driver !== 'Sin chofer' ? claveDeCar(selected) : '' });
         },
-        selCars: active.map((c) => ({ id: c.id, label: etiquetaAuto(c) })),
+        selCars,
         lockCar: f.lockCar,
-        autoLabel: autoSel ? etiquetaAuto(autoSel) : '',
+        autoLabel: autoSel ? etiquetaAuto(autoSel) : sinAuto ? 'Sin auto' : '',
         choferDelAuto,
         driver: f.driver,
         driverNombre: nombrePorClave.get(f.driver) ?? '',
@@ -2351,6 +2390,7 @@ export function useMobileView(
         tipoOpts: (['pago', 'ajuste'] as const).map((k) => ({ label: k === 'pago' ? 'Pago' : 'Ajuste', ...chipStyle(f.tipo === k), pick: () => setF({ tipo: k }) })),
         advertencia: avisos.join(' '),
         sections: persist.sections.map((s) => ({ id: s.id, name: s.name })),
+        defaultSectionId: f.seccion.startsWith('s:') ? Number(f.seccion.slice(2)) : persist.sections[0]?.id ?? null,
         crearChofer: async (nombre) => {
           const driver = await persist.addDriver(nombre);
           setF({ driver: String(driver.id) });
@@ -2360,7 +2400,9 @@ export function useMobileView(
           const seccion = datos.sectionId != null ? persist.sections.find((s) => s.id === datos.sectionId) : persist.sections[0];
           const sectionId = seccion ? seccion.id : (await persist.addSection('General')).id;
           const car = await persist.addCar({ sectionId, plate: datos.plate, model: datos.model, year: datos.year, gpsTag: datos.gpsTag });
-          setF({ carId: car.id, driver: '' });
+          // El auto nuevo puede quedar en otra sección: se sigue su sección
+          // para que aparezca en la lista del paso.
+          setF({ carId: car.id, driver: '', ...(f.lockCar ? {} : { seccion: 's:' + sectionId }) });
           return car;
         },
         comprobante: f.comprobante,
@@ -2383,7 +2425,7 @@ export function useMobileView(
         catChips: REG_CATS.map((name) => ({ label: name, ...chipStyle(f.cat === name, 'amber'), pick: () => setF({ cat: name }) })),
         carId: f.carId,
         setCarId: (v) => setF({ carId: v }),
-        selCars: active.map((c) => ({ id: c.id, label: etiquetaAuto(c) })),
+        selCars,
         lockCar: f.lockCar,
         comprobante: f.comprobante,
         setComprobante: (file) => setF({ comprobante: file }),
@@ -2412,9 +2454,13 @@ export function useMobileView(
       if (f.guardando || f.success) return;
       if (f.serviceMode) {
         if (f.step === 0 && !f.carId) return toast('Elegí a qué auto corresponde');
-        if (f.step === 1 && !f.nota.trim()) return toast('Contá qué mantenimiento se hizo');
+        if (f.step === 1 && !f.detalle.trim()) return toast('Contá qué mantenimiento se hizo');
         if (f.step < 5) setF({ step: f.step + 1 });
         return;
+      }
+      if (f.step === -1) {
+        if (!f.seccion) return toast('Elegí una sección o "Sin auto"');
+        return setF({ step: sinAuto ? 1 : 0 });
       }
       if (f.tab === 'cobro') {
         if (f.step === 0 && !f.carId) return toast('Elegí a qué auto corresponde');
@@ -2437,18 +2483,19 @@ export function useMobileView(
       if (f.guardando) return;
       if (f.serviceMode) {
         if (!f.carId) return toast('Elegí a qué auto corresponde');
-        if (!f.nota.trim()) return toast('Contá qué mantenimiento se hizo');
+        if (!f.detalle.trim()) return toast('Contá qué mantenimiento se hizo');
         if (f.fecha > isoLocal(TODAY)) return toast('La fecha no puede ser futura');
         const mileage = numFromInput(f.kilometraje);
         const plate = carDe.get(f.carId)?.plate ?? '';
+        const detalle = f.detalle.trim();
         setF({ guardando: true });
         const saveExpense = amountNum > 0
-          ? persist.addEgreso(f.carId, { razon: f.nota.trim(), monto: amountNum, cat: 'Mantenimiento', fecha: f.fecha, comprobante: f.comprobante })
+          ? persist.addEgreso(f.carId, { razon: detalle, nota: f.nota.trim() || undefined, monto: amountNum, cat: 'Mantenimiento', fecha: f.fecha, comprobante: f.comprobante })
           : Promise.resolve();
         saveExpense
           .then(() => {
             persist.patchCar(f.carId, { lastServiceDate: new Date(f.fecha + 'T12:00:00'), ...(mileage ? { kilometraje: mileage } : {}) });
-            update((s) => ({ registrar: s.registrar && { ...s.registrar, guardando: false, success: { tab: 'gasto', title: 'Mantenimiento registrado', detail: plate + ' · ' + f.nota.trim(), amount: amountNum ? fmt(amountNum) : 'Sin costo' } } }));
+            update((s) => ({ registrar: s.registrar && { ...s.registrar, guardando: false, success: { tab: 'gasto', title: 'Mantenimiento registrado', detail: plate + ' · ' + detalle, amount: amountNum ? fmt(amountNum) : 'Sin costo' } } }));
           })
           .catch((e: Error) => {
             setF({ guardando: false });
@@ -2458,10 +2505,10 @@ export function useMobileView(
       }
       if (!amountNum) return toast(f.tab === 'cobro' ? 'Ingresá cuánto ingresó' : 'Ingresá cuánto gastaste');
       if (f.fecha > isoLocal(TODAY)) return toast('La fecha no puede ser futura');
-      if (!f.carId) return toast('Elegí a qué auto corresponde');
+      if (!f.carId && !sinAuto) return toast('Elegí a qué auto corresponde');
       if (f.tab === 'cobro') {
-        const carSel = carDe.get(f.carId);
-        if (!carSel) {
+        const carSel = sinAuto ? undefined : carDe.get(f.carId);
+        if (!carSel && !sinAuto) {
           setF({ guardando: false });
           return toast('Elegí a qué auto corresponde');
         }
@@ -2477,20 +2524,21 @@ export function useMobileView(
         setF({ guardando: true });
         // Primero el vínculo auto→chofer: el pago necesita un chofer que sea
         // dueño del auto para que la imputación y los reportes cierren.
-        const asignacion = claveDeCar(carSel) === f.driver
+        // Sin auto no hay vínculo que tocar: el pago queda solo a nombre del chofer.
+        const asignacion = !carSel || claveDeCar(carSel) === f.driver
           ? Promise.resolve(carSel)
           : persist.assignDriverToCar(carSel.id, { driver: nombreChofer, cuota: carSel.cuota });
         asignacion
           .then(() => persist.addPago({
             driver: f.driver,
-            carId: carSel.id,
+            carId: carSel ? carSel.id : null,
             fecha: f.fecha,
             monto: amountNum,
             tipo: 'pago',
             nota: f.nota.trim() || undefined,
             comprobante: f.comprobante,
           }))
-          .then(() => update((s) => ({ registrar: s.registrar && { ...s.registrar, guardando: false, success: { tab: 'cobro', title: 'Ingreso registrado', detail: carSel.plate + ' · ' + nombreChofer, amount: fmt(amountNum) } } })))
+          .then(() => update((s) => ({ registrar: s.registrar && { ...s.registrar, guardando: false, success: { tab: 'cobro', title: 'Ingreso registrado', detail: (carSel ? carSel.plate : 'Sin auto') + ' · ' + nombreChofer, amount: fmt(amountNum) } } })))
           .catch((e: Error) => {
             setF({ guardando: false });
             toast('No se pudo registrar: ' + e.message);
@@ -2498,10 +2546,10 @@ export function useMobileView(
         return;
       }
       setF({ guardando: true });
-      const plate = carDe.get(f.carId)?.plate ?? '';
-      const descripcion = f.nota.trim() || f.cat;
+      const plate = sinAuto ? 'Sin auto' : carDe.get(f.carId)?.plate ?? '';
+      const descripcion = f.detalle.trim() || f.cat;
       persist
-        .addEgreso(f.carId, { razon: descripcion, monto: amountNum, cat: f.cat, fecha: f.fecha, comprobante: f.comprobante })
+        .addEgreso(sinAuto ? '' : f.carId, { razon: descripcion, nota: f.nota.trim() || undefined, monto: amountNum, cat: f.cat, fecha: f.fecha, comprobante: f.comprobante })
         .then(() => update((s) => ({ registrar: s.registrar && { ...s.registrar, guardando: false, success: { tab: 'gasto', title: 'Egreso registrado', detail: plate + ' · ' + descripcion, amount: fmt(amountNum) } } })))
         .catch((e: Error) => {
           setF({ guardando: false });
@@ -2529,7 +2577,7 @@ export function useMobileView(
       ['¿Qué tipo de egreso es?', 'Elegí una categoría para ordenar tus gastos.'],
       ['¿Qué repuesto compraste?', 'Escribí una descripción corta.'],
       ['¿Cuánto gastaste?', 'Ingresá el total del gasto.'],
-      ['Revisá el egreso', 'Confirmá los datos antes de guardarlo.'],
+      ['Revisá el egreso', 'Confirmá el detalle y, si querés, agregá una nota.'],
     ];
     const serviceTitles = [
       ['¿De qué auto es el mantenimiento?', 'Elegí el vehículo al que corresponde.'],
@@ -2541,10 +2589,19 @@ export function useMobileView(
     ];
     const firstStep = f.baseStep;
     const viewStep = f.serviceMode ? Math.min(f.step, 5) : f.tab === 'gasto' ? Math.min(f.step, 3) : f.step;
-    const progressStep = viewStep - firstStep;
-    const totalSteps = f.serviceMode ? 6 - firstStep : f.tab === 'cobro' ? 4 - firstStep : 4 - firstStep;
-    const gastoStepMeta = [gastoTitles[0], gastoTitles[1], gastoTitles[3], gastoTitles[4]][viewStep];
-    const stepMeta = f.serviceMode ? serviceTitles[viewStep] : f.tab === 'cobro' ? simpleCobroTitles[f.step] : gastoStepMeta;
+    // Sin auto se saltea el paso del auto: la barra no lo cuenta.
+    const progressStep = viewStep - firstStep - (sinAuto && viewStep > 0 ? 1 : 0);
+    const totalSteps = (f.serviceMode ? 6 - firstStep : 4 - firstStep) - (sinAuto ? 1 : 0);
+    const seccionTitle = f.tab === 'cobro'
+      ? ['¿De qué sección es el ingreso?', 'Elegí la sección del auto, o "Sin auto" si no va vinculado a ninguno.']
+      : ['¿De qué sección es el egreso?', 'Elegí la sección del auto, o "Sin auto" si es un gasto general.'];
+    const gastoStepMeta = viewStep === -1 ? seccionTitle : [gastoTitles[0], gastoTitles[1], gastoTitles[3], gastoTitles[4]][viewStep];
+    const cobroStepMeta = viewStep === -1
+      ? seccionTitle
+      : sinAuto && f.step === 1
+        ? ['¿De qué chofer es el pago?', 'El ingreso queda a nombre del chofer, sin auto vinculado.']
+        : simpleCobroTitles[f.step];
+    const stepMeta = f.serviceMode ? serviceTitles[viewStep] : f.tab === 'cobro' ? cobroStepMeta : gastoStepMeta;
     registrarView = {
       tab: f.tab,
       setTab: (t) => setF({ tab: t }),
@@ -2571,12 +2628,17 @@ export function useMobileView(
       fecha: f.fecha,
       setFecha: (iso) => setF({ fecha: iso }),
       hoy: isoLocal(TODAY),
+      detalle: f.detalle,
+      setDetalle: (v) => setF({ detalle: v }),
+      detallePh: f.serviceMode ? 'Qué mantenimiento se hizo' : 'De qué es el gasto',
       nota: f.nota,
       setNota: (v) => setF({ nota: v }),
-      notaPh: f.tab === 'cobro' ? 'Opcional' : 'De qué es el gasto',
+      notaPh: f.tab === 'cobro' ? 'Opcional' : 'Nota (opcional)',
       cta: { label: f.tab === 'cobro' ? 'Registrar ingreso' : 'Registrar egreso', bg: amountNum ? COLORS.ink : '#e2dbcc', fg: amountNum ? COLORS.paper : '#6b665c' },
       submit,
       guardando: f.guardando,
+      secciones: seccionOpts,
+      sinAuto,
       cobro,
       gasto,
       service,
@@ -2711,8 +2773,6 @@ export function useMobileView(
       update({ reportesError: 'No hay datos para los filtros elegidos.' });
       return;
     }
-    // El PDF primero pregunta si quiere agregar notas por auto; el Excel sale directo.
-    if (format === 'pdf') return update({ reportesNotas: { fase: 'pregunta' }, reportesError: '' });
     reportExportar(payload, format);
   };
 
@@ -2726,68 +2786,6 @@ export function useMobileView(
       .catch((error: Error) => update({ reportesExportando: false, reportesError: error.message || 'No se pudo generar el reporte' }));
   };
 
-  const reportNotasSi = () => {
-    previewReportNotes(reportBasePayload())
-      .then((previa) => {
-        if (!previa.autos.length) {
-          toast('Este período no tiene gastos para anotar');
-          update({ reportesNotas: null });
-          reportExportar(reportBasePayload(), 'pdf');
-          return;
-        }
-        update({
-          reportesNotas: {
-            fase: 'recorrido',
-            from: previa.from,
-            to: previa.to,
-            autos: previa.autos.map((auto) => ({ ...auto, bloques: auto.bloques.map((bloque) => ({ ...bloque, notaGuardada: bloque.nota })) })),
-            paso: 0,
-            guardando: false,
-            error: '',
-          },
-        });
-      })
-      .catch((error: Error) => {
-        update({ reportesNotas: null });
-        toast('No se pudo preparar el reporte: ' + (error.message || 'error desconocido'));
-      });
-  };
-
-  const reportNotasNo = () => {
-    update({ reportesNotas: null });
-    reportExportar(reportBasePayload(), 'pdf');
-  };
-
-  const reportNotasPatch = (patch: (estado: Extract<ReportNotasEstado, { fase: 'recorrido' }>) => Partial<Extract<ReportNotasEstado, { fase: 'recorrido' }>>) =>
-    update((s) => (s.reportesNotas?.fase === 'recorrido' ? { reportesNotas: { ...s.reportesNotas, ...patch(s.reportesNotas) } } : {}));
-
-  const reportNotasIr = (paso: number) => reportNotasPatch((n) => ({ paso: Math.max(0, Math.min(paso, n.autos.length - 1)), error: '' }));
-  const reportNotasAnterior = () => reportNotasPatch((n) => ({ paso: Math.max(0, n.paso - 1), error: '' }));
-  const reportNotasSiguiente = () => reportNotasPatch((n) => ({ paso: Math.min(n.autos.length - 1, n.paso + 1), error: '' }));
-
-  /** Saltar = no guardar cambios de este auto: se vuelve a lo que ya tenía. */
-  const reportNotasSaltar = () => reportNotasPatch((n) => {
-    const autos = n.autos.map((auto, i) => (i === n.paso ? { ...auto, bloques: auto.bloques.map((bloque) => ({ ...bloque, nota: bloque.notaGuardada })) } : auto));
-    return { autos, paso: Math.min(autos.length - 1, n.paso + 1), error: '' };
-  });
-
-  const reportNotasSetNota = (carId: string, tipo: ReportNoteTipo, texto: string) => reportNotasPatch((n) => ({
-    autos: n.autos.map((auto) => (auto.carId === carId ? { ...auto, bloques: auto.bloques.map((bloque) => (bloque.tipo === tipo ? { ...bloque, nota: texto.slice(0, 300) } : bloque)) } : auto)),
-    error: '',
-  }));
-
-  const reportNotasGuardarYExportar = () => {
-    const estado = state.reportesNotas;
-    if (!estado || estado.fase !== 'recorrido' || estado.guardando) return;
-    const notes = estado.autos.flatMap((auto) => auto.bloques.map((bloque) => ({ carId: auto.carId, tipo: bloque.tipo, nota: bloque.nota.trim() })));
-    update({ reportesNotas: { ...estado, guardando: true, error: '' } });
-    saveReportNotes({ from: estado.from, to: estado.to, notes })
-      .then(() => {
-        update({ reportesNotas: null });
-        reportExportar(reportBasePayload(), 'pdf');
-      })
-      .catch((error: Error) => update({ reportesNotas: { ...estado, guardando: false, error: error.message || 'No se pudieron guardar las notas' } }));
-  };
   // La versión web genera el .xlsx con la librería `xlsx` y lo baja como Blob;
   // ninguna de las dos cosas existe en React Native. Se exporta desde
   // admin-web hasta que esto tenga una ruta propia (compartir un archivo con
@@ -3175,16 +3173,7 @@ export function useMobileView(
       exporting: state.reportesExportando,
       error: state.reportesError,
       exportFile: reportExport,
-      notas: state.reportesNotas,
-      notasSi: reportNotasSi,
-      notasNo: reportNotasNo,
-      notasCerrar: () => update({ reportesNotas: null }),
-      notasIr: reportNotasIr,
-      notasAnterior: reportNotasAnterior,
-      notasSiguiente: reportNotasSiguiente,
-      notasSaltar: reportNotasSaltar,
-      notasSetNota: reportNotasSetNota,
-      notasGuardarYExportar: reportNotasGuardarYExportar,
+
     },
 
     ranking: {

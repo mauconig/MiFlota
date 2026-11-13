@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import type { MobileView } from '../../useMobileView';
 import { BottomSheet } from '../../components/BottomSheet';
@@ -9,6 +9,7 @@ import { RegistrarWizard } from '../../components/RegistrarWizard';
 import { useDateField } from '../../components/DateField';
 import { useSelectSheet } from '../../components/SelectSheet';
 import { dLblFull } from '../../format';
+import { SeccionStep } from './SeccionStep';
 
 type RegistrarView = NonNullable<MobileView['registrar']>;
 type CobroView = NonNullable<RegistrarView['cobro']>;
@@ -61,7 +62,9 @@ export function CobroWizard({ r }: { r: RegistrarView }) {
   const esUltimo = r.step >= 3;
 
   let content: React.ReactNode;
-  if (r.step === 0) {
+  if (r.step === -1) {
+    content = <SeccionStep opciones={r.secciones} />;
+  } else if (r.step === 0) {
     content = (
       <>
         <Pressable onPress={carSelect.open} style={{ ...card, minHeight: 66, justifyContent: 'center', gap: 4 }} accessibilityRole="button" accessibilityLabel="Elegir auto">
@@ -184,6 +187,7 @@ export function CobroWizard({ r }: { r: RegistrarView }) {
         onClose={() => setNuevoAuto(false)}
         crear={cobro.crearAuto}
         sections={cobro.sections}
+        defaultSectionId={cobro.defaultSectionId}
       />
     </>
   );
@@ -243,8 +247,10 @@ function NuevoChoferSheet({ visible, onClose, crear }: { visible: boolean; onClo
 }
 
 /** Alta rápida de auto dentro del cobro: lo mínimo para poder cobrarle. */
-function NuevoAutoSheet({ visible, onClose, crear, sections }: { visible: boolean; onClose: () => void; crear: CobroView['crearAuto']; sections: CobroView['sections'] }) {
-  const [sectionId, setSectionId] = useState<number | null>(sections[0]?.id ?? null);
+function NuevoAutoSheet({ visible, onClose, crear, sections, defaultSectionId }: { visible: boolean; onClose: () => void; crear: CobroView['crearAuto']; sections: CobroView['sections']; defaultSectionId: number | null }) {
+  const [sectionId, setSectionId] = useState<number | null>(defaultSectionId ?? sections[0]?.id ?? null);
+  // La sección elegida en el primer paso puede cambiar con la hoja montada.
+  useEffect(() => { if (!visible) setSectionId(defaultSectionId ?? sections[0]?.id ?? null); }, [visible, defaultSectionId]);
   const [plate, setPlate] = useState('');
   const [model, setModel] = useState('');
   const [year, setYear] = useState('2018');

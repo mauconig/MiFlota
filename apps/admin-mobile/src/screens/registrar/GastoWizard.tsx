@@ -8,6 +8,7 @@ import { RegistrarWizard } from '../../components/RegistrarWizard';
 import { useDateField } from '../../components/DateField';
 import { useSelectSheet } from '../../components/SelectSheet';
 import { dLblFull } from '../../format';
+import { SeccionStep } from './SeccionStep';
 
 type RegistrarView = NonNullable<MobileView['registrar']>;
 
@@ -37,8 +38,6 @@ export function GastoWizard({ r }: { r: RegistrarView }) {
   const current = gasto?.selCars.find((c) => c.id === gasto.carId);
   const select = useSelectSheet('Elegí un auto', gasto?.selCars ?? [], gasto?.setCarId ?? (() => {}));
   const fecha = useDateField(r.fecha, r.setFecha, r.hoy);
-  void current;
-  void select;
   if (!gasto) return null;
 
   if (r.success) {
@@ -60,10 +59,10 @@ export function GastoWizard({ r }: { r: RegistrarView }) {
   }
 
   {
-  const current = gasto.selCars.find((c) => c.id === gasto.carId);
-  const select = useSelectSheet('Elegí un auto', gasto.selCars, gasto.setCarId);
   let content: React.ReactNode;
-  if (r.step === 0) {
+  if (r.step === -1) {
+    content = <SeccionStep opciones={r.secciones} />;
+  } else if (r.step === 0) {
     content = (
       <>
         <Pressable onPress={select.open} style={{ ...card, minHeight: 62, justifyContent: 'center' }}>
@@ -86,15 +85,19 @@ export function GastoWizard({ r }: { r: RegistrarView }) {
       <View style={{ ...card, gap: 14 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
           <Text style={{ color: '#6b665c', fontSize: 13 }}>Auto</Text>
-          <Text style={{ flex: 1, textAlign: 'right', color: '#16150f', fontSize: 14, fontWeight: '700' }}>{current?.label ?? '—'}</Text>
+          <Text style={{ flex: 1, textAlign: 'right', color: '#16150f', fontSize: 14, fontWeight: '700' }}>{r.sinAuto ? 'Sin auto' : current?.label ?? '—'}</Text>
         </View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
           <Text style={{ color: '#6b665c', fontSize: 13 }}>Tipo</Text>
           <Text style={{ color: '#16150f', fontSize: 14, fontWeight: '700' }}>{gasto.catChips.find((c) => c.bg === '#e8a13a' || c.bg === '#16150f')?.label ?? 'Egreso'}</Text>
         </View>
         <View style={{ gap: 7 }}>
+          <Text style={{ color: '#6b665c', fontSize: 13, fontWeight: '700' }}>Detalle del gasto</Text>
+          <TextInput value={r.detalle} onChangeText={r.setDetalle} placeholder={r.detallePh} placeholderTextColor="#a39a8b" maxLength={120} style={{ minHeight: 46, borderWidth: 1, borderColor: '#ece4d6', borderRadius: 13, paddingHorizontal: 12, paddingVertical: 10, color: '#16150f', fontSize: 15 }} />
+        </View>
+        <View style={{ gap: 7 }}>
           <Text style={{ color: '#6b665c', fontSize: 13, fontWeight: '700' }}>Nota (opcional)</Text>
-          <TextInput value={r.nota} onChangeText={r.setNota} placeholder={r.notaPh} placeholderTextColor="#a39a8b" multiline maxLength={200} style={{ minHeight: 52, borderWidth: 1, borderColor: '#ece4d6', borderRadius: 13, paddingHorizontal: 12, paddingVertical: 10, color: '#16150f', fontSize: 15, textAlignVertical: 'top' }} />
+          <TextInput value={r.nota} onChangeText={r.setNota} placeholder="Una aclaración que se imprime debajo del gasto" placeholderTextColor="#a39a8b" multiline style={{ minHeight: 72, borderWidth: 1, borderColor: '#ece4d6', borderRadius: 13, paddingHorizontal: 12, paddingVertical: 10, color: '#16150f', fontSize: 15, textAlignVertical: 'top' }} />
         </View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
           <Text style={{ color: '#6b665c', fontSize: 13 }}>Total</Text>

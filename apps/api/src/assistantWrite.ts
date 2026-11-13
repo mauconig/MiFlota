@@ -1,13 +1,15 @@
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import type { CarRow } from './db.js';
-import { CATS_EGRESO, MAX_EGRESO_LINEAS, MAX_EGRESO_MONTO, normalizarCategoria } from './expenseCategories.js';
+import { CATS_EGRESO, MAX_EGRESO_LINEAS, MAX_EGRESO_MONTO, MAX_GASTO_NOTA, normalizarCategoria } from './expenseCategories.js';
 import { localDateISO } from './time.js';
 
 export interface AssistantExpenseDraftItem {
   id: string;
   description: string;
   amount: number;
+  /** Nota libre opcional; el reporte la imprime debajo del gasto. */
+  nota: string;
   displayAmount: string;
 }
 
@@ -28,6 +30,7 @@ export interface AssistantExpenseInput {
   carId?: string;
   description?: string;
   amount?: number;
+  nota?: string;
   category?: string;
   date?: string;
 }
@@ -50,14 +53,18 @@ function findCar(db: Database.Database, ownerId: number, value: string): CarRow 
   throw Error(cars.length ? `No encontré ningún vehículo que coincida con "${value}". Los vehículos son: ${plates}.` : 'La flota todavía no tiene vehículos cargados.');
 }
 
-function cleanItem(raw: unknown): { description: string; amount: number } {
+function cleanItem(raw: unknown): { description: string; amount: number; nota: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw Error('Cada línea del gasto necesita una descripción y un monto.');
-  const item = raw as { description?: unknown; amount?: unknown };
+  const item = raw as { description?: unknown; amount?: unknown; nota?: unknown; note?: unknown };
   const description = typeof item.description === 'string' ? item.description.trim().slice(0, 120) : '';
   if (!description) throw Error('Cada línea del gasto necesita una descripción.');
   const amount = typeof item.amount === 'number' ? item.amount : Number(String(item.amount ?? '').replace(/\D/g, ''));
   if (!Number.isInteger(amount) || amount <= 0 || amount > MAX_EGRESO_MONTO) throw Error(`El monto de "${description}" no es válido.`);
-  return { description, amount };
+  // `nota` es el nombre del campo en la API; `note` queda como alias para
+  // clientes viejos que lo mandaban en inglés.
+  const rawNota = typeof item.nota === 'string' ? item.nota : typeof item.note === 'string' ? item.note : '';
+  const nota = rawNota.trim().slice(0, MAX_GASTO_NOTA);
+  return { description, amount, nota };
 }
 
 /** Arma el borrador de una carga de gastos. Valida el vehículo, la categoría y
@@ -78,8 +85,8 @@ export function proposeExpenseDraft(db: Database.Database, ownerId: number, valu
   if (!Array.isArray(args.items) || !args.items.length) throw Error('La carga no tiene ninguna línea de gasto.');
   if (args.items.length > MAX_EGRESO_LINEAS) throw Error(`La carga no puede tener más de ${MAX_EGRESO_LINEAS} líneas.`);
   const items = args.items.map((raw) => {
-    const { description, amount } = cleanItem(raw);
-    return { id: randomUUID(), description, amount, displayAmount: money(amount) };
+    const { description, amount, nota } = cleanItem(raw);
+    return { id: randomUUID(), description, amount, nota, displayAmount: money(amount) };
   });
   const total = items.reduce((sum, item) => sum + item.amount, 0);
   return { id: randomUUID(), kind: 'gastos', vehicle: { carId: car.id, plate: car.plate, model: car.model }, category, date, items, total, displayTotal: money(total) };
@@ -94,8 +101,8 @@ export function applyExpenseDraft(db: Database.Database, ownerId: number, value:
   if (items.length > MAX_EGRESO_LINEAS) throw Error(`La carga no puede tener más de ${MAX_EGRESO_LINEAS} líneas.`);
   const selectCar = db.prepare('SELECT * FROM cars WHERE id = ? AND owner_id = ?');
   const insert = db.prepare(
-    `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
-     VALUES (?, ?, 'egreso', ?, ?, ?, ?, NULL, NULL, NULL, NULL)`,
+    `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, nota, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
+     VALUES (?, ?, 'egreso', ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)`,
   );
   const prepared = (items as AssistantExpenseInput[]).map((raw) => {
     const rawCarId = typeof raw.carId === 'string' ? raw.carId.trim() : '';
@@ -105,7 +112,7 @@ export function applyExpenseDraft(db: Database.Database, ownerId: number, value:
       car = (selectCar.get(rawCarId, ownerId) as CarRow | undefined) ?? null;
       if (!car) throw Error('Uno de los vehículos de la carga no existe o no es tuyo.');
     }
-    const { description, amount } = cleanItem(raw);
+    const { description, amount, nota } = cleanItem(raw);
     const category = normalizarCategoria(typeof raw.category === 'string' ? raw.category : '');
     if (!CATS_EGRESO.has(category)) throw Error(`Elegí una categoría válida (${[...CATS_EGRESO].join(', ')}).`);
     let date = today;
@@ -114,9 +121,9 @@ export function applyExpenseDraft(db: Database.Database, ownerId: number, value:
       if (raw.date > today) throw Error('La fecha del gasto no puede ser futura.');
       date = raw.date;
     }
-    return { car, description, amount, category, date };
+    return { car, description, amount, nota, category, date };
   });
-  const run = db.transaction(() => prepared.map((item) => insert.run(ownerId, item.car?.id ?? null, item.amount, item.date, item.description, item.category)));
+  const run = db.transaction(() => prepared.map((item) => insert.run(ownerId, item.car?.id ?? null, item.amount, item.date, item.description, item.nota || null, item.category)));
   const inserted = run();
   const total = prepared.reduce((sum, item) => sum + item.amount, 0);
   return {
@@ -128,6 +135,7 @@ export function applyExpenseDraft(db: Database.Database, ownerId: number, value:
       plate: item.car?.plate ?? 'Repuesto para stock',
       description: item.description,
       amount: item.amount,
+      nota: item.nota,
       displayAmount: money(item.amount),
       category: item.category,
       date: item.date,

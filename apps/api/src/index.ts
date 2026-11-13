@@ -1,4 +1,4 @@
-import Fastify, { type FastifyReply } from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyCookie from '@fastify/cookie';
 import fastifyMultipart from '@fastify/multipart';
@@ -44,7 +44,7 @@ import { imputar } from './cobranza.js';
 import { answerAssistant, type AssistantFile, type AssistantHistoryItem, type AssistantReportRequest } from './assistant.js';
 import { queryFleetData } from './assistantQuery.js';
 import { applyExpenseDraft, proposeExpenseDraft } from './assistantWrite.js';
-import { CATS_EGRESO, MAX_EGRESO_MONTO, normalizarCategoria } from './expenseCategories.js';
+import { CATS_EGRESO, MAX_EGRESO_MONTO, MAX_GASTO_NOTA, normalizarCategoria } from './expenseCategories.js';
 import { sendOwnerPush } from './push.js';
 import { startDailyAlertDigest } from './ownerNotifications.js';
 import { localDateISO } from './time.js';
@@ -279,15 +279,6 @@ const selSections = db.prepare('SELECT id,name,position FROM sections WHERE owne
 const selMovs = db.prepare('SELECT * FROM movs WHERE owner_id = ? ORDER BY date DESC, id DESC');
 const selPagos = db.prepare('SELECT * FROM pagos WHERE owner_id = ? ORDER BY fecha DESC, id DESC');
 const selReportes = db.prepare('SELECT * FROM reportes_falla WHERE owner_id = ? ORDER BY fecha DESC, id DESC');
-// Notas del reporte: se leen por rango del período y se escriben de a una.
-interface ReportNotaRow { owner_id: number; car_id: string; tipo: string; desde: string; hasta: string; nota: string; actualizado: string }
-const selReportNotas = db.prepare('SELECT * FROM report_notas WHERE owner_id = ? AND desde = ? AND hasta = ?');
-const upsertReportNota = db.prepare(`
-  INSERT INTO report_notas (owner_id, car_id, tipo, desde, hasta, nota, actualizado)
-  VALUES (@owner_id, @car_id, @tipo, @desde, @hasta, @nota, @actualizado)
-  ON CONFLICT(owner_id, car_id, tipo, desde, hasta) DO UPDATE SET nota = excluded.nota, actualizado = excluded.actualizado
-`);
-const borrarReportNota = db.prepare('DELETE FROM report_notas WHERE owner_id = ? AND car_id = ? AND tipo = ? AND desde = ? AND hasta = ?');
 const selCar = db.prepare(`
   SELECT c.*, d.driver_username, d.driver_pass_hash
     FROM cars c
@@ -423,54 +414,6 @@ function letraDeSeccion(index: number): string {
   return out;
 }
 
-/** Largo máximo de la nota de un auto en el reporte. */
-const NOTA_MAX = 300;
-
-/** Notas guardadas de un período, indexadas por auto y tipo de gasto. */
-function notasDelPeriodo(ownerId: number, from: string, to: string): Map<string, string> {
-  const notas = new Map<string, string>();
-  for (const fila of selReportNotas.all(ownerId, from, to) as ReportNotaRow[]) notas.set(`${fila.car_id}:${fila.tipo}`, fila.nota);
-  return notas;
-}
-
-type NotaTipo = 'talleres' | 'mantenimiento' | 'otros';
-interface NotaBloque { tipo: NotaTipo; titulo: string; total: number; filas: { detalle: string; total: number; fecha: string }[]; nota: string }
-interface NotaAuto { carId: string; label: string; seccion: string; total: number; bloques: NotaBloque[] }
-
-/** Recorrido de notas: los autos con gastos del período, en el mismo orden en
- *  que salen en el PDF (tipo de gasto → sección → auto), cada uno con sus tres
- *  bloques y la nota que ya tenga guardada. */
-function autosParaNotas(rows: FleetReportExpenseRow[], notas: Map<string, string>, sectionOrder: string[]): NotaAuto[] {
-  const autos = new Map<string, NotaAuto>();
-  const bloques: { tipo: NotaTipo; titulo: string; rows: FleetReportExpenseRow[] }[] = [
-    { tipo: 'talleres', titulo: 'GASTOS DE TALLERES', rows: rows.filter((row) => esGastoDeTaller(row.categoria)) },
-    { tipo: 'mantenimiento', titulo: 'GASTOS DE MANTENIMIENTO', rows: rows.filter((row) => esGastoDeMantenimiento(row.categoria)) },
-    { tipo: 'otros', titulo: 'OTROS GASTOS', rows: rows.filter((row) => esGastoOtro(row.categoria)) },
-  ];
-  for (const bloque of bloques) {
-    if (!bloque.rows.length) continue;
-    for (const grupo of groupReportRows(bloque.rows, (row) => row.total, sectionOrder)) {
-      for (const vehicle of grupo.vehicles) {
-        const carId = vehicle.rows[0].carId;
-        // Los gastos sin auto no llevan nota (report_notas.car_id es NOT NULL).
-        if (!carId) continue;
-        const auto = autos.get(carId) ?? { carId, label: reportVehicleLabel(vehicle.rows[0]), seccion: grupo.name, total: 0, bloques: [] };
-        const total = vehicle.rows.reduce((sum, row) => sum + row.total, 0);
-        auto.total += total;
-        auto.bloques.push({
-          tipo: bloque.tipo,
-          titulo: bloque.titulo,
-          total,
-          filas: vehicle.rows.map((row) => ({ detalle: row.detalle, total: row.total, fecha: row.fecha })),
-          nota: notas.get(`${carId}:${bloque.tipo}`) ?? '',
-        });
-        autos.set(carId, auto);
-      }
-    }
-  }
-  return [...autos.values()];
-}
-
 /** Nombre legible y único para las descargas. Se usa la hora de Paraguay
  * aunque el proceso de la API esté corriendo en UTC en la VPS. */
 function reportFileTimestamp(now = new Date()): string {
@@ -514,6 +457,7 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
       gpsTag: car?.gps_tag ?? '',
       categoria: mov.cat ?? 'Otro',
       detalle: mov.descripcion,
+      nota: mov.nota ?? '',
       total: mov.amount,
     };
   });
@@ -524,8 +468,8 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
   const path = join(ASSISTANT_REPORTS_DIR, name);
   let data: Buffer;
   if (request.format === 'xlsx') {
-    const sheetRows = rows.map((row) => [row.fecha, row.vehiculo, row.categoria, row.detalle, row.total]);
-    const sheet = XLSX.utils.aoa_to_sheet([['Fecha', 'Vehículo', 'Categoría', 'Descripción', 'Total gasto'], ...sheetRows]);
+    const sheetRows = rows.map((row) => [row.fecha, row.vehiculo, row.categoria, row.detalle, row.nota, row.total]);
+    const sheet = XLSX.utils.aoa_to_sheet([['Fecha', 'Vehículo', 'Categoría', 'Descripción', 'Nota', 'Total gasto'], ...sheetRows]);
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, sheet, 'Gastos');
     data = XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
@@ -543,15 +487,13 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
         gpsTag: row.gpsTag,
         categoria: row.categoria,
         detalle: row.detalle,
+        nota: row.nota,
         total: row.total,
       })),
       incomeTotal: 0,
       expenseTotal: rows.reduce((sum, row) => sum + row.total, 0),
       resultTotal: -rows.reduce((sum, row) => sum + row.total, 0),
       sectionOrder: sections.map((section) => section.name),
-      // El asistente no arma "el reporte de la quincena": si su rango coincide
-      // exacto con un período con notas guardadas, se imprimen.
-      notas: notasDelPeriodo(ownerId, from ?? '', to),
     });
   }
   await writeFile(path, data);
@@ -585,8 +527,7 @@ interface FleetReportExportBody {
 }
 
 interface FleetReportExpenseRow {
-  /** Auto al que pertenece el gasto: con esto se buscan las notas del reporte.
-   *  Null en los gastos "sin auto" (generales): no llevan nota. */
+  /** Auto al que pertenece el gasto. Null en los gastos "sin auto" (generales). */
   carId: string | null;
   fecha: string;
   vehiculo: string;
@@ -596,6 +537,8 @@ interface FleetReportExpenseRow {
   gpsTag: string;
   categoria: string;
   detalle: string;
+  /** Nota libre que el dueño escribió al cargar el gasto. Vacía = sin nota. */
+  nota: string;
   total: number;
 }
 
@@ -646,8 +589,6 @@ async function pdfFromFleetReport(data: {
   expenseTotal: number;
   resultTotal: number;
   sectionOrder: string[];
-  /** Notas del reporte, indexadas por `carId:tipo` ('talleres' | 'mantenimiento' | 'otros'). */
-  notas: Map<string, string>;
 }): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 36 });
@@ -697,36 +638,56 @@ async function pdfFromFleetReport(data: {
     /** Lo que avanza una fila de subtotal (ver `totalRow`). */
     const totalRowHeight = (label: string, padAfter = 8) => amountRowHeight(label, 18, 'bold') + padAfter;
 
-    /** Alto del bloque de un auto — rótulo, filas, "Total del auto" y su nota —
-     *  para que no quede partido entre dos páginas. `padTotal` es el `padAfter`
-     *  del total. */
-    const vehicleBlockHeight = (label: string, rows: { detalle: string }[], padTotal = 10, nota = '') =>
-      vehicleHeaderHeight(label) + rows.reduce((sum, row) => sum + amountRowHeight(row.detalle, 30), 0) + amountRowHeight('Total del auto', 18, 'bold') + padTotal + (nota ? notaHeight(nota) : 0);
+    /** Nota del gasto: una línea chica en gris debajo de su fila. Se mide con
+     *  `heightOfString` para que el bloque del auto la tenga en cuenta. */
+    const GASTO_NOTA_SIZE = 8.5;
+    const GASTO_NOTA_INDENT = 30;
+    const GASTO_NOTA_WIDTH = width - GASTO_NOTA_INDENT - 24;
+    const gastoNotaHeight = (texto: string) =>
+      doc.font('Helvetica-Oblique').fontSize(GASTO_NOTA_SIZE).heightOfString(`Nota: ${texto}`, { width: GASTO_NOTA_WIDTH }) + 3;
+    const gastoNotaRow = (texto: string) => {
+      const height = gastoNotaHeight(texto);
+      // Una nota enorme no entra en una página: pdfkit la parte sola. El caso
+      // normal entra, así que `ensureSpace` mantiene el encabezado de página.
+      if (height <= pageInner) {
+        ensureSpace(height + 2);
+        const y = doc.y;
+        doc.fillColor(REPORT_COLORS.muted).font('Helvetica-Oblique').fontSize(GASTO_NOTA_SIZE).text(`Nota: ${texto}`, margin + GASTO_NOTA_INDENT, y, { width: GASTO_NOTA_WIDTH });
+        doc.y = y + height;
+        return;
+      }
+      doc.fillColor(REPORT_COLORS.muted).font('Helvetica-Oblique').fontSize(GASTO_NOTA_SIZE).text(`Nota: ${texto}`, margin + GASTO_NOTA_INDENT, doc.y, { width: GASTO_NOTA_WIDTH });
+      doc.y += 3;
+    };
+
+    /** Alto de una fila de gasto: concepto + monto, más su nota si tiene. */
+    const gastoRowHeight = (detalle: string, nota: string) =>
+      amountRowHeight(detalle, 30) + (nota ? gastoNotaHeight(nota) : 0);
+
+    /** Fila de gasto con su nota opcional debajo. Si la nota no entra con su
+     *  fila, se van juntas a la página siguiente: una nota sin el gasto al que
+     *  pertenece no se entiende. */
+    const gastoRow = (detalle: string, amount: number, nota: string) => {
+      const alto = amountRowHeight(detalle, 30) + (nota ? gastoNotaHeight(nota) : 0);
+      if (nota && alto <= pageInner) ensureSpace(alto + 4);
+      amountRow(detalle, amount, 30);
+      if (nota) gastoNotaRow(nota);
+    };
+
+    /** Alto del bloque de un auto — rótulo, filas, "Total del auto" y las notas
+     *  de cada gasto — para que no quede partido entre dos páginas. `padTotal`
+     *  es el `padAfter` del total. */
+    const vehicleBlockHeight = (label: string, rows: { detalle: string; nota: string }[], padTotal = 10) =>
+      vehicleHeaderHeight(label) + rows.reduce((sum, row) => sum + gastoRowHeight(row.detalle, row.nota), 0) + amountRowHeight('Total del auto', 18, 'bold') + padTotal;
 
     /** Cuánto tiene que acompañar una barra o un título al bloque que viene
      *  abajo: el bloque completo si entra en una página, o al menos el rótulo y
      *  la primera fila cuando el auto tiene más gastos de los que entran. */
-    const keepWithBlock = (vehicle: { label: string; rows: { detalle: string }[] } | undefined, prefix = 0, nota = '') => {
+    const keepWithBlock = (vehicle: { label: string; rows: { detalle: string; nota: string }[] } | undefined, prefix = 0) => {
       if (!vehicle) return 0;
-      const minBlock = vehicleHeaderHeight(vehicle.label) + (vehicle.rows[0] ? amountRowHeight(vehicle.rows[0].detalle, 30) : 0);
-      const block = vehicleBlockHeight(vehicle.label, vehicle.rows, 10, nota);
+      const minBlock = vehicleHeaderHeight(vehicle.label) + (vehicle.rows[0] ? gastoRowHeight(vehicle.rows[0].detalle, vehicle.rows[0].nota) : 0);
+      const block = vehicleBlockHeight(vehicle.label, vehicle.rows, 10);
       return Math.max(0, Math.min(block <= pageInner ? block : minBlock, pageInner - prefix));
-    };
-
-    /** Nota del reporte de un auto para un tipo de gasto. */
-    const notaDe = (carId: string, tipo: NotaTipo) => (data.notas.get(`${carId}:${tipo}`) ?? '').trim();
-
-    /** Alto de la línea de nota, que va abajo del "Total del auto". */
-    const NOTA_SIZE = 9;
-    const NOTA_INDENT = 30;
-    const NOTA_WIDTH = width - NOTA_INDENT - 24;
-    const notaHeight = (texto: string) => doc.font('Helvetica-Oblique').fontSize(NOTA_SIZE).heightOfString(`Nota: ${texto}`, { width: NOTA_WIDTH }) + 5;
-    const notaRow = (texto: string) => {
-      const height = notaHeight(texto);
-      ensureSpace(height + 2);
-      const y = doc.y;
-      doc.fillColor(REPORT_COLORS.muted).font('Helvetica-Oblique').fontSize(NOTA_SIZE).text(`Nota: ${texto}`, margin + NOTA_INDENT, y, { width: NOTA_WIDTH });
-      doc.y = y + height;
     };
 
     /** Fila "concepto → monto": el monto siempre alineado a la derecha. */
@@ -799,30 +760,28 @@ async function pdfFromFleetReport(data: {
     const firstVehicleBlock = (rows: FleetReportExpenseRow[]) => groupVehicles(rows, (row) => row.total)[0];
 
     /** Bloques de autos de una sección. `closingHeight` es el alto de los totales
-     *  que vienen después: el último auto se lleva el cierre con él. La nota del
-     *  reporte de ese auto (si hay) va abajo del "Total del auto". Los autos van
-     *  numerados `1)`, `2)`… y la numeración reinicia en cada sección. */
-    const renderExpenseVehicles = (rows: FleetReportExpenseRow[], closingHeight = 0, tipo: NotaTipo = 'talleres') => {
+     *  que vienen después: el último auto se lleva el cierre con él. Cada gasto
+     *  imprime su nota debajo. Los autos van numerados `1)`, `2)`… y la
+     *  numeración reinicia en cada sección. */
+    const renderExpenseVehicles = (rows: FleetReportExpenseRow[], closingHeight = 0) => {
       const vehicles = groupVehicles(rows, (row) => row.total);
       vehicles.forEach((vehicle, index) => {
         const isLast = index === vehicles.length - 1;
         const label = `${index + 1}) ${vehicle.label}`;
-        const nota = notaDe(vehicle.rows[0].carId ?? '', tipo);
-        const blockHeight = vehicleBlockHeight(label, vehicle.rows, 10, nota) + (isLast ? closingHeight : 0);
+        const blockHeight = vehicleBlockHeight(label, vehicle.rows, 10) + (isLast ? closingHeight : 0);
         if (blockHeight <= pageInner) {
           ensureSpace(blockHeight);
         } else {
           // El auto tiene más gastos de los que entran en una página: al menos
           // el rótulo viaja con su primera fila.
           const firstRow = vehicle.rows[0];
-          ensureSpace(vehicleHeaderHeight(label) + (firstRow ? amountRowHeight(firstRow.detalle, 30) : 0));
+          ensureSpace(vehicleHeaderHeight(label) + (firstRow ? gastoRowHeight(firstRow.detalle, firstRow.nota) : 0));
         }
         vehicleHeader(label);
         for (const row of vehicle.rows) {
-          amountRow(row.detalle, row.total, 30);
+          gastoRow(row.detalle, row.total, row.nota);
         }
         totalRow('Total del auto', vehicle.total, 10);
-        if (nota) notaRow(nota);
       });
     };
 
@@ -832,10 +791,10 @@ async function pdfFromFleetReport(data: {
     // de mantenimiento y al final los otros gastos. Un auto con gastos de más de
     // un tipo aparece en cada bloque, que es lo correcto con este orden.
     const expenseBlocks = ([
-      { title: 'GASTOS DE TALLERES', total: 'TOTAL TALLERES', tipo: 'talleres', rows: data.expenseRows.filter(isWorkshop) },
-      { title: 'GASTOS DE MANTENIMIENTO', total: 'TOTAL MANTENIMIENTO', tipo: 'mantenimiento', rows: data.expenseRows.filter(isMantenimiento) },
-      { title: 'OTROS GASTOS', total: 'TOTAL OTROS GASTOS', tipo: 'otros', rows: data.expenseRows.filter(isOtro) },
-    ] as { title: string; total: string; tipo: NotaTipo; rows: FleetReportExpenseRow[] }[]).filter((block) => block.rows.length > 0);
+      { title: 'GASTOS DE TALLERES', total: 'TOTAL TALLERES', rows: data.expenseRows.filter(isWorkshop) },
+      { title: 'GASTOS DE MANTENIMIENTO', total: 'TOTAL MANTENIMIENTO', rows: data.expenseRows.filter(isMantenimiento) },
+      { title: 'OTROS GASTOS', total: 'TOTAL OTROS GASTOS', rows: data.expenseRows.filter(isOtro) },
+    ] as { title: string; total: string; rows: FleetReportExpenseRow[] }[]).filter((block) => block.rows.length > 0);
 
     if (!expenseBlocks.length && !data.incomeRows.length) {
       pageHeader();
@@ -862,8 +821,8 @@ async function pdfFromFleetReport(data: {
         const sectionTotalLabel = `Total gastos ${section}`;
         const subtotal = totalRowHeight(sectionTotalLabel, 16);
         const primero = firstVehicleBlock(rows);
-        sectionBanner(`${letraDeSeccion(sectionIndex)}) ${section}`, keepWithBlock(primero, SECTION_BAR_TOTAL, primero ? notaDe(primero.rows[0].carId ?? '', block.tipo) : ''));
-        renderExpenseVehicles(rows, subtotal, block.tipo);
+        sectionBanner(`${letraDeSeccion(sectionIndex)}) ${section}`, keepWithBlock(primero, SECTION_BAR_TOTAL));
+        renderExpenseVehicles(rows, subtotal);
         totalRow(sectionTotalLabel, sumExpenses(rows), 16);
       }
       ensureSpace(totalRowHeight(block.total, 10));
@@ -1070,8 +1029,7 @@ interface ReporteArmado {
 }
 
 /** Arma los datos del reporte: período resuelto, filas con sus filtros y
- *  totales. Lo usan el export y la vista previa de notas, así el PDF y el
- *  recorrido de notas muestran exactamente lo mismo. */
+ *  totales. Lo usa el export (PDF y Excel). */
 function armarReporte(ownerId: number, body: FleetReportExportBody): ReporteArmado {
   const include = body.include;
   const range = reportPeriodRange(body.period);
@@ -1122,10 +1080,10 @@ function armarReporte(ownerId: number, body: FleetReportExportBody): ReporteArma
     .filter((mov) => mov.type === 'egreso' && mov.date >= range.from && mov.date <= range.to && carAllowed(mov.car_id) && categoryAllowed(mov.cat || 'Otros'))
     .filter((mov) => {
       const car = carById.get(mov.car_id ?? '');
-      return matchesSearch(mov.descripcion, mov.cat || 'Otros', car?.plate, car?.model, car?.driver);
+      return matchesSearch(mov.descripcion, mov.nota, mov.cat || 'Otros', car?.plate, car?.model, car?.driver);
     })
     .map((mov) => {
-      return { carId: mov.car_id, fecha: mov.date, vehiculo: carPlate(mov.car_id), seccion: mov.car_id == null ? 'Repuesto para stock' : carSection(mov.car_id), modelo: carModel(mov.car_id), gpsTag: carGpsTag(mov.car_id), categoria: mov.cat || 'Otros', detalle: mov.descripcion, total: mov.amount };
+      return { carId: mov.car_id, fecha: mov.date, vehiculo: carPlate(mov.car_id), seccion: mov.car_id == null ? 'Repuesto para stock' : carSection(mov.car_id), modelo: carModel(mov.car_id), gpsTag: carGpsTag(mov.car_id), categoria: mov.cat || 'Otros', detalle: mov.descripcion, nota: mov.nota || '', total: mov.amount };
     });
 
   const counts = { ingresos: incomeRows.length, gastos: expenseRows.length, total: incomeRows.length + expenseRows.length };
@@ -1185,8 +1143,8 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
       ]), 'Ingresos');
     }
     if (expenseRows.length) {
-      const detailRows: (string | number)[][] = [['Fecha', 'Vehículo', 'Categoría', 'Descripción', 'Total gasto']];
-      expenseRows.forEach((row) => detailRows.push([row.fecha, row.vehiculo, row.categoria, row.detalle, row.total]));
+      const detailRows: (string | number)[][] = [['Fecha', 'Vehículo', 'Categoría', 'Descripción', 'Nota', 'Total gasto']];
+      expenseRows.forEach((row) => detailRows.push([row.fecha, row.vehiculo, row.categoria, row.detalle, row.nota, row.total]));
       XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(detailRows), 'Gastos');
     }
     data = XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
@@ -1217,7 +1175,6 @@ async function createFleetReport(ownerId: number, body: FleetReportExportBody): 
       expenseTotal,
       resultTotal,
       sectionOrder: reporte.sectionOrder,
-      notas: notasDelPeriodo(ownerId, reporte.range.from, reporte.range.to),
     });
   }
 
@@ -1585,64 +1542,6 @@ app.get<{ Params: { id: string } }>('/api/reports/files/:id', async (req, reply)
   if (!file || file.expiresAt <= Date.now() || !existsSync(file.path)) return reply.code(404).send({ error: 'El archivo ya no está disponible' });
   reply.header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
   return reply.type(file.mimeType).send(createReadStream(file.path));
-});
-
-/** Recorrido de notas del reporte: los autos con gastos del período, en el
- *  orden del PDF, con sus bloques y la nota que ya tengan guardada. Es la
- *  misma data que arma el PDF, para que el recorrido muestre lo que va a salir. */
-app.post<{ Body: FleetReportExportBody }>('/api/report-notes/preview', async (req, reply) => {
-  const u = quien(req);
-  try {
-    const reporte = armarReporte(u.id, req.body ?? {});
-    const notas = notasDelPeriodo(u.id, reporte.range.from, reporte.range.to);
-    return {
-      from: reporte.range.from,
-      to: reporte.range.to,
-      periodLabel: reporte.periodLabel,
-      autos: autosParaNotas(reporte.expenseRows, notas, reporte.sectionOrder),
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'No se pudo preparar el reporte';
-    return reply.code(message.startsWith('No hay datos') ? 422 : 400).send({ error: message });
-  }
-});
-
-interface ReportNotasBody { from?: string; to?: string; notes?: { carId?: string; tipo?: string; nota?: string }[] }
-
-/** Guarda las notas del reporte de un período. La nota vacía se borra, así el
- *  PDF no imprime nada para ese auto. */
-app.put<{ Body: ReportNotasBody }>('/api/report-notes', async (req, reply) => {
-  const u = quien(req);
-  const from = String(req.body?.from ?? '');
-  const to = String(req.body?.to ?? '');
-  if (!FECHA.test(from) || !FECHA.test(to) || from > to) return reply.code(400).send({ error: 'El período del reporte no es válido' });
-  const items = Array.isArray(req.body?.notes) ? req.body.notes : [];
-  if (items.length > 500) return reply.code(400).send({ error: 'Son demasiadas notas para guardar de una vez' });
-  const carIds = new Set((selCars.all(u.id) as CarRow[]).map((car) => car.id));
-  const ahora = new Date().toISOString();
-  try {
-    const guardadas = db.transaction(() => {
-      let total = 0;
-      for (const item of items) {
-        const carId = String(item?.carId ?? '');
-        const tipo = String(item?.tipo ?? '');
-        if (!carIds.has(carId)) throw new Error('Uno de los vehículos no pertenece a tu flota');
-        if (tipo !== 'talleres' && tipo !== 'mantenimiento' && tipo !== 'otros') throw new Error('El tipo de gasto de la nota no es válido');
-        const nota = String(item?.nota ?? '').trim().slice(0, NOTA_MAX);
-        if (nota) {
-          upsertReportNota.run({ owner_id: u.id, car_id: carId, tipo, desde: from, hasta: to, nota, actualizado: ahora });
-          total += 1;
-        } else {
-          borrarReportNota.run(u.id, carId, tipo, from, to);
-        }
-      }
-      return total;
-    })();
-    req.log.info({ from, to, guardadas }, 'notas del reporte guardadas');
-    return { ok: true, guardadas };
-  } catch (error) {
-    return reply.code(400).send({ error: error instanceof Error ? error.message : 'No se pudieron guardar las notas' });
-  }
 });
 
 app.get('/api/locations', async (req) => {
@@ -2202,11 +2101,18 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
   const u = quien(req);
   const car = selCar.get(req.params.id, u.id) as CarRow | undefined;
   if (!car) return reply.code(404).send({ error: 'Vehículo inexistente' });
+  return registrarEgreso(req, reply, u, car);
+});
 
+/** Gasto "sin auto": general del dueño, se guarda con car_id NULL. */
+app.post('/api/egresos', async (req, reply) => registrarEgreso(req, reply, quien(req), null));
+
+async function registrarEgreso(req: FastifyRequest, reply: FastifyReply, u: ReturnType<typeof quien>, car: CarRow | null) {
   let razon = '';
   let monto = 0;
   let cat = '';
   let fecha = '';
+  let nota = '';
   let archivoPendiente: ComprobantePendiente | null = null;
 
   try {
@@ -2216,6 +2122,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
         if (parte.fieldname === 'monto') monto = Number(String(parte.value).replace(/\D/g, '')) || 0;
         if (parte.fieldname === 'cat') cat = normalizarCategoria(String(parte.value));
         if (parte.fieldname === 'fecha') fecha = String(parte.value).trim();
+        if (parte.fieldname === 'nota') nota = String(parte.value).trim().slice(0, MAX_GASTO_NOTA);
         // `items` y `manoObra` quedaron fuera del modelo: si un cliente viejo
         // todavía los manda, se ignoran.
         continue;
@@ -2254,21 +2161,21 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/egreso', async (req, reply) 
     info = db.transaction(() => {
     return db
       .prepare(
-        `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
-         VALUES (?, ?, 'egreso', ?, ?, ?, ?, NULL, ?, ?, ?)`,
+        `INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, nota, cat, estado, comprobante, comprobante_nombre, comprobante_tipo)
+         VALUES (?, ?, 'egreso', ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
       )
-      .run(u.id, car.id, monto, fechaMov, razon, cat, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
+      .run(u.id, car?.id ?? null, monto, fechaMov, razon, nota || null, cat, archivo?.id ?? null, archivo?.nombre ?? null, archivo?.tipo ?? null);
     })();
   } catch (error) {
     if (archivo) await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
     throw error;
   }
 
-  req.log.info({ car: car.plate, cat, monto, comprobante: !!archivo }, 'gasto registrado');
+  req.log.info({ car: car?.plate ?? null, cat, monto, comprobante: !!archivo }, 'gasto registrado');
 
   const mov = db.prepare('SELECT * FROM movs WHERE id = ?').get(info.lastInsertRowid) as MovRow;
   return reply.code(201).send({ mov: movToJson(mov) });
-});
+}
 
 /** Corrige un gasto cargado por error. Solo toca egresos: una cuota emitida es
  *  un cargo del sistema, no un dato que el dueño pueda reescribir. */
@@ -2284,6 +2191,7 @@ app.patch<{ Params: { id: string } }>('/api/movs/:id', async (req, reply) => {
   let monto = mov.amount;
   let cat = mov.cat ?? '';
   let fecha = mov.date;
+  let nota = mov.nota ?? '';
   let quitarComprobante = false;
   let archivoPendiente: ComprobantePendiente | null = null;
 
@@ -2294,6 +2202,8 @@ app.patch<{ Params: { id: string } }>('/api/movs/:id', async (req, reply) => {
         if (parte.fieldname === 'monto') monto = Number(String(parte.value).replace(/\D/g, '')) || 0;
         if (parte.fieldname === 'cat') cat = normalizarCategoria(String(parte.value));
         if (parte.fieldname === 'fecha') fecha = String(parte.value).trim();
+        // Vacía = borrar la nota; el cliente que no manda el campo la conserva.
+        if (parte.fieldname === 'nota') nota = String(parte.value).trim().slice(0, MAX_GASTO_NOTA);
         if (parte.fieldname === 'quitarComprobante') quitarComprobante = String(parte.value) === '1';
         continue;
       }
@@ -2338,9 +2248,9 @@ app.patch<{ Params: { id: string } }>('/api/movs/:id', async (req, reply) => {
   try {
     db.prepare(
       `UPDATE movs
-          SET amount = ?, date = ?, descripcion = ?, cat = ?, comprobante = ?, comprobante_nombre = ?, comprobante_tipo = ?
+          SET amount = ?, date = ?, descripcion = ?, nota = ?, cat = ?, comprobante = ?, comprobante_nombre = ?, comprobante_tipo = ?
         WHERE id = ? AND owner_id = ?`,
-    ).run(monto, fecha, descripcion, cat, comprobante?.id ?? null, comprobante?.nombre ?? null, comprobante?.tipo ?? null, mov.id, u.id);
+    ).run(monto, fecha, descripcion, nota || null, cat, comprobante?.id ?? null, comprobante?.nombre ?? null, comprobante?.tipo ?? null, mov.id, u.id);
   } catch (error) {
     if (archivo) await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
     throw error;

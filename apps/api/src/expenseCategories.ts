@@ -29,3 +29,7 @@ export const normalizarCategoria = (value: string) => {
 /** Tope de un gasto y de una carga desde el asistente. */
 export const MAX_EGRESO_MONTO = 1_000_000_000;
 export const MAX_EGRESO_LINEAS = 50;
+
+/** Largo máximo de la nota libre de un gasto. Se escribe al cargarlo y el
+ *  reporte la imprime debajo de esa fila. */
+export const MAX_GASTO_NOTA = 2000;

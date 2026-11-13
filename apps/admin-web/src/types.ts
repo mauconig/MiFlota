@@ -61,6 +61,8 @@ export interface Mov {
   amount: number;
   date: Date;
   desc: string;
+  /** Nota libre del gasto, escrita al cargarlo. Vacía en los gastos sin nota. */
+  nota?: string;
   cat?: string;
   estado?: MovEstado;
   /** Chofer al que corresponde este cobro. Ausente en los egresos, y en

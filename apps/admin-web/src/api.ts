@@ -147,6 +147,8 @@ export interface EditarMovPayload {
   monto: number;
   cat: string;
   fecha: string;
+  /** Nota libre del gasto; vacía borra la que tuviera. */
+  nota: string;
   comprobante: File | null;
   quitarComprobante: boolean;
 }
@@ -191,47 +193,6 @@ export interface ReportExportResponse {
 }
 
 export const exportFleetReport = (payload: ReportExportPayload) => req<ReportExportResponse>('/api/reports/export', { method: 'POST', body: JSON.stringify(payload) });
-
-/** Notas del reporte: se piden con los mismos filtros del export y se guardan
- *  por período, así el recorrido muestra lo que va a salir en el PDF. */
-export type ReportNoteTipo = 'talleres' | 'mantenimiento' | 'otros';
-
-export interface ReportNoteFila {
-  detalle: string;
-  total: number;
-  /** Fecha del gasto, en ISO `YYYY-MM-DD`. */
-  fecha: string;
-}
-
-export interface ReportNoteBloque {
-  tipo: ReportNoteTipo;
-  titulo: string;
-  total: number;
-  filas: ReportNoteFila[];
-  nota: string;
-}
-
-export interface ReportNoteAuto {
-  carId: string;
-  label: string;
-  seccion: string;
-  total: number;
-  bloques: ReportNoteBloque[];
-}
-
-export interface ReportNotesPreview {
-  from: string;
-  to: string;
-  periodLabel: string;
-  autos: ReportNoteAuto[];
-}
-
-export const previewReportNotes = (payload: Omit<ReportExportPayload, 'format'>) =>
-  req<ReportNotesPreview>('/api/report-notes/preview', { method: 'POST', body: JSON.stringify(payload) });
-
-export const saveReportNotes = (payload: { from: string; to: string; notes: { carId: string; tipo: ReportNoteTipo; nota: string }[] }) =>
-  req<{ ok: true; guardadas: number }>('/api/report-notes', { method: 'PUT', body: JSON.stringify(payload) });
-
 
 export interface DriverCredentials {
   username: string;
@@ -535,6 +496,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     fd.append('monto', String(datos.monto));
     fd.append('cat', datos.cat);
     fd.append('fecha', datos.fecha);
+    fd.append('nota', datos.nota);
     if (datos.quitarComprobante) fd.append('quitarComprobante', '1');
     if (datos.comprobante) fd.append('comprobante', datos.comprobante);
     const r = await req<{ mov: MovDto }>(`/api/movs/${id}`, { method: 'PATCH', body: fd });

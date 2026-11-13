@@ -149,6 +149,17 @@ export function MovementDetailSheet({ movement }: { movement: MovementDetailView
                 }))}
               />
             </Campo>
+            <Campo label="Nota (opcional)">
+              <TextInput
+                value={nota}
+                onChangeText={setNota}
+                multiline
+                placeholder="Una aclaración que se imprime debajo del gasto"
+                placeholderTextColor="#a39a8b"
+                accessibilityLabel="Nota del gasto"
+                style={{ ...input, minHeight: 72, textAlignVertical: 'top' }}
+              />
+            </Campo>
           </>
         ) : (
           <>
@@ -250,7 +261,7 @@ export function MovementDetailSheet({ movement }: { movement: MovementDetailView
         <Info label="GPS tag" value={movement.gpsTag} />
       </View>
       <Info label="Sección" value={movement.section} />
-      {!!movement.note && <Info label="Detalle" value={movement.note} multiline />}
+      {!!movement.note && <Info label="Nota" value={movement.note} multiline />}
 
       {movement.comprobante && <ComprobantePreview source={movement.comprobante} />}
 

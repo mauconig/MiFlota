@@ -43,6 +43,8 @@ export interface Mov {
   amount: number;
   date: Date;
   desc: string;
+  /** Nota libre del gasto, escrita al cargarlo. Vacía en los gastos sin nota. */
+  nota?: string;
   cat?: string;
   estado?: MovEstado;
   /** Chofer al que corresponde este cobro. Ausente en los egresos, y en
@@ -175,6 +177,9 @@ export interface RegistrarForm {
   carId: string;
   digits: string;
   fecha: string;
+  /** Detalle/título del gasto o del mantenimiento. Obligatorio en esos flujos. */
+  detalle: string;
+  /** Nota libre del gasto (o del pago): opcional y más larga que el detalle. */
   nota: string;
   /** Solo Cobro. */
   driver: string;
@@ -191,6 +196,10 @@ export interface RegistrarForm {
   baseStep: RegistrarStep;
   /** El vehículo viene fijado cuando el flujo se abre desde su ficha. */
   lockCar: boolean;
+  /** Primer paso de ingreso/egreso sin auto fijo: 's:<id>' para una sección,
+   *  'unassigned' para autos sin sección, 'none' para un movimiento sin auto.
+   *  Vacío hasta que se elige. */
+  seccion: string;
   guardando: boolean;
   success: RegistrarSuccess | null;
 }
@@ -212,42 +221,6 @@ export interface ReportComparativa {
 }
 export type ReportSelection = 'todos' | string[];
 export type ReportCategorySelection = 'todas' | string[];
-
-/** Notas del reporte: una por auto y tipo de gasto, atada al período. Se cargan
- *  en un recorrido antes de generar el PDF y se imprimen bajo el total del auto. */
-export type ReportNoteTipo = 'talleres' | 'mantenimiento' | 'otros';
-
-export interface NotasBloque {
-  tipo: ReportNoteTipo;
-  titulo: string;
-  total: number;
-  /** Cada gasto con su fecha (ISO `YYYY-MM-DD`). */
-  filas: { detalle: string; total: number; fecha: string }[];
-  /** Lo que se está escribiendo ahora. */
-  nota: string;
-  /** La que ya estaba guardada en el servidor: "Saltar" vuelve a esta. */
-  notaGuardada: string;
-}
-
-export interface NotasAuto {
-  carId: string;
-  label: string;
-  seccion: string;
-  total: number;
-  bloques: NotasBloque[];
-}
-
-/** Lo que devuelve la vista previa del servidor (todavía sin `notaGuardada`). */
-export interface ReportNotesPreview {
-  from: string;
-  to: string;
-  periodLabel: string;
-  autos: { carId: string; label: string; seccion: string; total: number; bloques: Omit<NotasBloque, 'notaGuardada'>[] }[];
-}
-
-export type ReportNotasEstado =
-  | { fase: 'pregunta' }
-  | { fase: 'recorrido'; from: string; to: string; autos: NotasAuto[]; paso: number; guardando: boolean; error: string };
 
 /** Archivo elegido con expo-document-picker: no hay `File` del browser en
  *  React Native, así que el comprobante viaja como URI + metadata. */
@@ -316,8 +289,6 @@ export interface MobileState {
   reportesComparativa: ReportComparativa;
   reportesExportando: boolean;
   reportesError: string;
-  /** Pregunta y recorrido de notas antes de generar el PDF. */
-  reportesNotas: ReportNotasEstado | null;
   toast: string;
   fleetFilter: FleetFilter;
   fleetSectionId: number | null;

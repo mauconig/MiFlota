@@ -51,6 +51,8 @@ export interface MovRow {
   amount: number;
   date: string;
   descripcion: string;
+  /** Nota libre del gasto (máx. MAX_GASTO_NOTA). Null = sin nota. */
+  nota: string | null;
   cat: string | null;
   estado: string | null;
   /** Chofer al que corresponde el cobro. Null = usar el chofer actual del
@@ -206,6 +208,10 @@ export function openDb() {
       amount      INTEGER NOT NULL,
       date        TEXT NOT NULL,
       descripcion TEXT NOT NULL,
+      -- Nota libre del gasto: la explicación que se escribe al cargarlo y que
+      -- el reporte imprime debajo de esa fila. Nullable: los gastos viejos y
+      -- los que no la necesiten quedan sin nota.
+      nota        TEXT,
       cat         TEXT,
       estado      TEXT CHECK (estado IN ('pagado','pendiente','parcial')),
       driver      TEXT,
@@ -423,10 +429,9 @@ function migrarOwner(db: Database.Database) {
       PRIMARY KEY (owner_id, car_id, notified_date)
     );
   `);
-  // Notas del reporte: una explicación por auto y por tipo de gasto, atada al
-  // período que se está informando (no al auto ni al movimiento). Se imprimen
-  // abajo del "Total del auto" en el PDF. Tres tipos: taller, mantenimiento y
-  // otros gastos.
+  // LEGACY: notas del reporte por auto y tipo de gasto. La app ya no las lee
+  // ni las escribe (la nota vive ahora en `movs.nota`), pero la tabla y sus
+  // datos se conservan para no perder el historial de los períodos ya cerrados.
   db.exec(`
     CREATE TABLE IF NOT EXISTS report_notas (
       owner_id INTEGER NOT NULL,
@@ -517,6 +522,10 @@ function migrarOwner(db: Database.Database) {
   // chofer actual del auto sigue siendo el valor por defecto para esas, así
   // que la migración no necesita rellenarlas.
   if (!cols('movs').includes('driver')) db.exec('ALTER TABLE movs ADD COLUMN driver TEXT');
+
+  // Nota libre del gasto. Las bases viejas nacieron sin esta columna y sus
+  // filas quedan con NULL: el reporte simplemente no imprime nota.
+  if (!cols('movs').includes('nota')) db.exec('ALTER TABLE movs ADD COLUMN nota TEXT');
 
   // Credenciales del chofer para entrar a apps/driver. Nulas hasta que el
   // dueño las genera con POST /api/cars/:id/chofer-credenciales: un auto
@@ -861,6 +870,7 @@ export function movToJson(r: MovRow) {
     amount: r.amount,
     date: r.date,
     desc: r.descripcion,
+    nota: r.nota ?? '',
     ...(r.cat ? { cat: r.cat } : {}),
     ...(r.estado ? { estado: r.estado } : {}),
     ...(r.driver ? { driver: r.driver } : {}),

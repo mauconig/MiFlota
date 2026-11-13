@@ -148,6 +148,17 @@ export function MovementDetailModal({ v }: { v: View }) {
                       {CATS_EGRESO.map((name) => <option key={name} value={name}>{name}</option>)}
                     </select>
                   </label>
+                  <label style={fieldLabel}>
+                    <span style={fieldLabelText}>Nota (opcional)</span>
+                    <textarea
+                      value={nota}
+                      onChange={(e) => setNota(e.target.value.slice(0, 2000))}
+                      placeholder="Una aclaración que se imprime debajo del gasto en el reporte"
+                      aria-label="Nota del gasto"
+                      rows={3}
+                      style={{ ...fieldInput, resize: 'vertical', lineHeight: 1.45 }}
+                    />
+                  </label>
                 </>
               ) : (
                 <>

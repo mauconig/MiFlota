@@ -260,10 +260,10 @@ function AssistantTableSheet({ table, onAction, onClose }: { table: TableSheetSt
 
 const money = (value: number) => 'Gs. ' + new Intl.NumberFormat('es-PY').format(value);
 
-interface DraftRow { key: string; description: string; amount: string }
+interface DraftRow { key: string; description: string; amount: string; note: string }
 
 function ExpenseDraftCard({ draft, onConfirm, onOpenCar }: { draft: AssistantExpenseDraft; onConfirm: (items: AssistantExpenseInput[]) => Promise<{ created: number; total: number }>; onOpenCar: (carId: string) => void }) {
-  const [rows, setRows] = useState<DraftRow[]>(() => draft.items.map((item) => ({ key: item.id, description: item.description, amount: String(item.amount) })));
+  const [rows, setRows] = useState<DraftRow[]>(() => draft.items.map((item) => ({ key: item.id, description: item.description, amount: String(item.amount), note: item.nota || '' })));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<{ created: number; total: number } | null>(null);
   const [discarded, setDiscarded] = useState(false);
@@ -271,10 +271,10 @@ function ExpenseDraftCard({ draft, onConfirm, onOpenCar }: { draft: AssistantExp
   const total = rows.reduce((sum, row) => sum + (Number(row.amount.replace(/\D/g, '')) || 0), 0);
   const editar = (key: string, patch: Partial<DraftRow>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const quitar = (key: string) => setRows((rs) => rs.filter((r) => r.key !== key));
-  const agregar = () => setRows((rs) => [...rs, { key: `n${Date.now()}${rs.length}`, description: '', amount: '' }]);
+  const agregar = () => setRows((rs) => [...rs, { key: `n${Date.now()}${rs.length}`, description: '', amount: '', note: '' }]);
   const confirmar = async () => {
     const items: AssistantExpenseInput[] = rows
-      .map((row) => ({ carId: draft.vehicle.carId, description: row.description.trim(), amount: Number(row.amount.replace(/\D/g, '')) || 0, category: draft.category, date: draft.date }))
+      .map((row) => ({ carId: draft.vehicle.carId, description: row.description.trim(), amount: Number(row.amount.replace(/\D/g, '')) || 0, category: draft.category, date: draft.date, nota: row.note.trim() || undefined }))
       .filter((item) => item.description && item.amount > 0);
     if (!items.length) { setError('Agregá al menos una línea con descripción y monto.'); return; }
     setSaving(true);
@@ -305,10 +305,13 @@ function ExpenseDraftCard({ draft, onConfirm, onOpenCar }: { draft: AssistantExp
       </Pressable>
     </View>
     <View style={{ gap: 7 }}>
-      {rows.map((row) => <View key={row.key} style={styles.draftRow}>
-        <TextInput value={row.description} onChangeText={(v) => editar(row.key, { description: v })} placeholder="Qué se gastó" placeholderTextColor="#a09a8d" maxLength={120} style={styles.draftInput} accessibilityLabel="Descripción del gasto" />
-        <TextInput value={row.amount} onChangeText={(v) => editar(row.key, { amount: v.replace(/\D/g, '') })} placeholder="0" placeholderTextColor="#a09a8d" keyboardType="number-pad" style={styles.draftAmount} accessibilityLabel="Monto del gasto" />
-        <Pressable onPress={() => quitar(row.key)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Borrar línea"><Text style={styles.draftRemove}>×</Text></Pressable>
+      {rows.map((row) => <View key={row.key} style={{ gap: 6 }}>
+        <View style={styles.draftRow}>
+          <TextInput value={row.description} onChangeText={(v) => editar(row.key, { description: v })} placeholder="Qué se gastó" placeholderTextColor="#a09a8d" maxLength={120} style={styles.draftInput} accessibilityLabel="Descripción del gasto" />
+          <TextInput value={row.amount} onChangeText={(v) => editar(row.key, { amount: v.replace(/\D/g, '') })} placeholder="0" placeholderTextColor="#a09a8d" keyboardType="number-pad" style={styles.draftAmount} accessibilityLabel="Monto del gasto" />
+          <Pressable onPress={() => quitar(row.key)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Borrar línea"><Text style={styles.draftRemove}>×</Text></Pressable>
+        </View>
+        <TextInput value={row.note} onChangeText={(v) => editar(row.key, { note: v })} placeholder="Nota (opcional)" placeholderTextColor="#a09a8d" multiline style={styles.draftInput} accessibilityLabel="Nota del gasto" />
       </View>)}
     </View>
     <Pressable onPress={agregar} style={styles.draftAdd} accessibilityRole="button"><Text style={styles.draftAddText}>+ Agregar línea</Text></Pressable>

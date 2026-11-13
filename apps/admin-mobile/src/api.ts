@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { API_BASE } from './config';
-import type { Car, CarLocation, Driver, LocationHistory, Mov, Pago, PickedFile, Reporte, ReportNotesPreview, ReportNoteTipo, ReportStatus } from './types';
+import type { Car, CarLocation, Driver, LocationHistory, Mov, Pago, PickedFile, Reporte, ReportStatus } from './types';
 
 /** Las fechas viajan como ISO `YYYY-MM-DD`. Se parsean a mediodía para que
  *  ningún huso horario corra el día al construir el Date. */
@@ -264,6 +264,8 @@ export interface NuevoEgresoPayload {
   razon: string;
   monto: number;
   cat: string;
+  /** Nota libre opcional (máx. 2000). Va debajo del gasto en el reporte. */
+  nota?: string;
   /** ISO `YYYY-MM-DD`. Si falta, el servidor usa la fecha de hoy. */
   fecha: string;
   comprobante: PickedFile | null;
@@ -276,6 +278,8 @@ export interface EditarEgresoPayload {
   monto: number;
   cat: string;
   fecha: string;
+  /** Nota libre; vacía borra la que tuviera. */
+  nota: string;
   comprobante: PickedFile | null;
   quitarComprobante: boolean;
 }
@@ -333,6 +337,7 @@ export interface AssistantExpenseDraftItem {
   id: string;
   description: string;
   amount: number;
+  nota: string;
   displayAmount: string;
 }
 
@@ -353,6 +358,7 @@ export interface AssistantExpenseInput {
   amount: number;
   category: string;
   date?: string;
+  nota?: string;
 }
 
 export interface AssistantReply {
@@ -426,23 +432,6 @@ export function exportFleetReport(payload: ReportExportPayload): Promise<ReportE
     body: JSON.stringify(payload),
   });
 }
-
-/** Notas del reporte: se piden con los mismos filtros del export y se guardan
- *  por período, así el recorrido muestra lo que va a salir en el PDF. */
-export function previewReportNotes(payload: Omit<ReportExportPayload, 'format'>): Promise<ReportNotesPreview> {
-  return req<ReportNotesPreview>('/api/report-notes/preview', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function saveReportNotes(payload: { from: string; to: string; notes: { carId: string; tipo: ReportNoteTipo; nota: string }[] }): Promise<{ ok: true; guardadas: number }> {
-  return req<{ ok: true; guardadas: number }>('/api/report-notes', {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  });
-}
-
 
 export interface DriverCredentials {
   username: string;
@@ -671,13 +660,16 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     fd.append('monto', String(datos.monto));
     fd.append('cat', datos.cat);
     fd.append('fecha', datos.fecha);
+    if (datos.nota) fd.append('nota', datos.nota);
     // React Native no tiene `File`: un archivo elegido con expo-document-picker
     // se adjunta como este objeto {uri,name,type}, que el fetch de RN entiende
     // igual que un File real al armar el multipart.
     if (datos.comprobante) {
       fd.append('comprobante', { uri: datos.comprobante.uri, name: datos.comprobante.name, type: datos.comprobante.mimeType } as unknown as Blob);
     }
-    const r = await req<{ mov: MovDto }>(`/api/cars/${carId}/egreso`, { method: 'POST', body: fd });
+    // Sin auto (carId vacío) es un gasto general del dueño.
+    const ruta = carId ? `/api/cars/${carId}/egreso` : '/api/egresos';
+    const r = await req<{ mov: MovDto }>(ruta, { method: 'POST', body: fd });
     const mov = toMov(r.mov);
     setMovs((ms) => [mov, ...ms]);
     return mov;
@@ -689,6 +681,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     fd.append('monto', String(datos.monto));
     fd.append('cat', datos.cat);
     fd.append('fecha', datos.fecha);
+    fd.append('nota', datos.nota);
     if (datos.quitarComprobante) fd.append('quitarComprobante', '1');
     if (datos.comprobante) {
       fd.append('comprobante', { uri: datos.comprobante.uri, name: datos.comprobante.name, type: datos.comprobante.mimeType } as unknown as Blob);

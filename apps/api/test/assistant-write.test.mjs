@@ -25,7 +25,7 @@ test('propose builds a validated draft without writing', () => {
     vehicle: 'A416',
     category: 'taller',
     items: [
-      { description: 'Caño de aire acondicionado', amount: 250000 },
+      { description: 'Caño de aire acondicionado', amount: 250000, nota: 'Se cambió el caño original' },
       { description: 'Filtro cabina aire acondicionado', amount: 70000 },
       { description: 'Mano de obra', amount: 150000 },
     ],
@@ -35,6 +35,8 @@ test('propose builds a validated draft without writing', () => {
   assert.equal(draft.category, 'Taller');
   assert.equal(draft.date, today);
   assert.equal(draft.items.length, 3);
+  assert.equal(draft.items[0].nota, 'Se cambió el caño original');
+  assert.equal(draft.items[1].nota, '');
   assert.equal(draft.total, 470000);
   assert.equal(draft.displayTotal, 'Gs. 470.000');
   assert.equal(db.prepare('SELECT COUNT(*) n FROM movs').get().n, before);
@@ -51,7 +53,7 @@ test('propose rejects unknown vehicle, category and bad amounts', () => {
 
 test('apply writes owner-scoped expenses atomically', () => {
   const result = applyExpenseDraft(db, 1, { items: [
-    { carId: 'a', description: 'Caño de aire acondicionado', amount: 250000, category: 'Taller' },
+    { carId: 'a', description: 'Caño de aire acondicionado', amount: 250000, category: 'Taller', nota: 'Se cambió el caño original' },
     { carId: 'a', description: 'Cubierta usada', amount: 120000, category: 'taller' },
   ] }, today);
   assert.equal(result.created, 2);
@@ -60,6 +62,8 @@ test('apply writes owner-scoped expenses atomically', () => {
   assert.equal(rows.length, 2);
   assert.equal(rows[0].cat, 'Taller');
   assert.equal(rows[0].date, today);
+  assert.equal(rows[0].nota, 'Se cambió el caño original');
+  assert.equal(rows[1].nota, null);
   assert.equal(rows[1].amount, 120000);
   // Un carId de otro dueño no se puede grabar y no deja nada a medias.
   const before = db.prepare('SELECT COUNT(*) n FROM movs').get().n;
@@ -77,7 +81,7 @@ test('agent proposes an expense load and returns the draft', async () => {
     const toolResult = JSON.parse(init.body).messages.findLast((m) => m.role === 'tool');
     const message = toolResult
       ? { role: 'assistant', content: JSON.stringify({ answer: 'Preparé la carga.', draftId: 0, followUps: [] }) }
-      : { role: 'assistant', content: null, tool_calls: [{ id: 'p', type: 'function', function: { name: 'propose_expenses', arguments: JSON.stringify({ vehicle: 'A416', category: 'Taller', items: [{ description: 'Cubierta usada', amount: 120000 }] }) } }] };
+      : { role: 'assistant', content: null, tool_calls: [{ id: 'p', type: 'function', function: { name: 'propose_expenses', arguments: JSON.stringify({ vehicle: 'A416', category: 'Taller', items: [{ description: 'Cubierta usada', amount: 120000, nota: 'Póliza 123' }] }) } }] };
     return new Response(JSON.stringify({ choices: [{ message }] }), { status: 200 });
   };
   const reply = await answerAssistant('Ahora vamos a hacer cargas de gastos para el admin', [], today, {
@@ -89,5 +93,6 @@ test('agent proposes an expense load and returns the draft', async () => {
   assert.equal(calls[0].tool_choice.function.name, 'propose_expenses');
   assert.equal(reply.drafts.length, 1);
   assert.equal(reply.drafts[0].items[0].amount, 120000);
+  assert.equal(reply.drafts[0].items[0].nota, 'Póliza 123');
   assert.match(reply.answer, /Preparé la carga/);
 });
