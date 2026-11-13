@@ -35,7 +35,8 @@ export type MovEstado = 'pagado' | 'pendiente' | 'parcial';
 
 export interface Mov {
   id: number;
-  carId: string;
+  /** Null en los movimientos "Sin auto" (gastos generales del dueño). */
+  carId: string | null;
   type: 'ingreso' | 'egreso';
   /** Lo facturado: en un ingreso, la cuota emitida, se haya cobrado o no.
       Cuánto se cobró de ella no se guarda: sale de imputar los pagos
@@ -220,6 +221,9 @@ export interface ReportComparativa {
   nota: string;
 }
 export type ReportSelection = 'todos' | string[];
+/** Token que, dentro de una ReportSelection, representa los movimientos sin
+ *  auto. Viaja igual a la API de reportes. */
+export const SIN_AUTO = '__sin_auto__';
 export type ReportCategorySelection = 'todas' | string[];
 
 /** Archivo elegido con expo-document-picker: no hay `File` del browser en
@@ -247,7 +251,8 @@ export interface MobileState {
   carId: string | null;
   dashboardDetail: DashboardDetailKind | null;
   period: Period;
-  dashboardSectionId: number | null;
+  /** null = todas; 'none' = solo movimientos sin auto. */
+  dashboardSectionId: number | 'none' | null;
   gananciasSectionId: number | null;
   ingresosSectionId: number | null;
   cFrom: string;

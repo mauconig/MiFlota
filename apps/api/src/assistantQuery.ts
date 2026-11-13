@@ -208,13 +208,13 @@ export function queryFleetData(db: Database.Database, ownerId: number, r: Assist
       const status = income ? debt === 0 ? 'pagado' : debt < m.amount ? 'parcial' : 'pendiente' : 'registrado';
       const value = metric === 'cantidad' ? 1 : entity === 'deudas' ? debt : metric === 'ganancia' ? -m.amount : m.amount;
       add({ label: m.descripcion, carId: m.car_id ?? undefined, driver: driverName(m.driver_id, m.driver || byId.get(m.car_id ?? '')?.driver || null), category: m.cat || (income ? 'Cuota' : 'Sin categoría'), status, date: m.date, value,
-        details: { Fecha: m.date, Vehículo: byId.get(m.car_id ?? '')?.plate ?? 'Repuesto para stock', Chofer: driverName(m.driver_id, m.driver || byId.get(m.car_id ?? '')?.driver || null), Tipo: income ? 'Cuota' : 'Gasto', Estado: status, Monto: money(m.amount), ...(income ? { 'Saldo pendiente': money(debt) } : {}), Comprobante: m.comprobante_nombre || 'Sin comprobante' } });
+        details: { Fecha: m.date, Vehículo: byId.get(m.car_id ?? '')?.plate ?? 'Sin auto', Chofer: driverName(m.driver_id, m.driver || byId.get(m.car_id ?? '')?.driver || null), Tipo: income ? 'Cuota' : 'Gasto', Estado: status, Monto: money(m.amount), ...(income ? { 'Saldo pendiente': money(debt) } : {}), Comprobante: m.comprobante_nombre || 'Sin comprobante' } });
     }
     for (const p of payments) {
       if (!dateAllowed(p.fecha)) continue;
       const include = entity === 'ajustes' ? p.tipo === 'ajuste' : p.tipo === 'pago' && (entity === 'pagos' || entity === 'finanzas' && (metric === 'cobrado' || metric === 'ganancia'));
       if (!include) continue;
-      add({ label: p.nota || (p.tipo === 'ajuste' ? 'Ajuste' : 'Pago'), carId: p.car_id ?? undefined, driver: driverName(p.driver_id, p.driver), category: p.tipo, status: p.tipo, date: p.fecha, value: metric === 'cantidad' ? 1 : p.monto, details: { Fecha: p.fecha, Chofer: driverName(p.driver_id, p.driver), Vehículo: p.car_id ? byId.get(p.car_id)!.plate : 'Sin vehículo', Tipo: p.tipo, Medio: p.medio || 'Sin datos', Monto: money(p.monto), Comprobante: p.comprobante_nombre || 'Sin comprobante' } });
+      add({ label: p.nota || (p.tipo === 'ajuste' ? 'Ajuste' : 'Pago'), carId: p.car_id ?? undefined, driver: driverName(p.driver_id, p.driver), category: p.tipo, status: p.tipo, date: p.fecha, value: metric === 'cantidad' ? 1 : p.monto, details: { Fecha: p.fecha, Chofer: driverName(p.driver_id, p.driver), Vehículo: p.car_id ? byId.get(p.car_id)?.plate ?? 'Vehículo eliminado' : 'Sin auto', Tipo: p.tipo, Medio: p.medio || 'Sin datos', Monto: money(p.monto), Comprobante: p.comprobante_nombre || 'Sin comprobante' } });
     }
   }
   const numericDetails = ![...vehicleEntities, 'choferes', 'ubicaciones', 'fallas', 'secciones'].includes(entity);

@@ -4,6 +4,7 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type { MobileView } from '../useMobileView';
 import { Pagination } from '../components/Pagination';
 import { BrandIcon } from '../components/BrandIcon';
+import { NoCarIcon } from '../components/NoCarIcon';
 import { DateRangeInputs } from '../components/DateRangeInputs';
 import { ChipRow } from '../components/ChipRow';
 import { BackButton } from '../components/BackButton';
@@ -32,10 +33,10 @@ function StepHeader({ step, title }: { step: number; title: string }) {
   );
 }
 
-function ChoiceCard({ label, brand, selected, onPress }: { label: string; sub?: string; brand?: string; selected: boolean; onPress: () => void }) {
+function ChoiceCard({ label, brand, sinAuto, selected, onPress }: { label: string; sub?: string; brand?: string; sinAuto?: boolean; selected: boolean; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} style={{ minHeight: 58, borderWidth: 1.5, borderColor: selected ? INK : BORDER, backgroundColor: selected ? '#f0ece3' : PAPER, borderRadius: 18, paddingHorizontal: 16, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-      {brand && <View style={{ width: 34, height: 34, borderRadius: 12, backgroundColor: selected ? INK : '#f4f0e8', alignItems: 'center', justifyContent: 'center' }}><BrandIcon brand={brand} size={21} color={selected ? PAPER : INK} /></View>}
+      {(brand || sinAuto) && <View style={{ width: 34, height: 34, borderRadius: 12, backgroundColor: selected ? INK : '#f4f0e8', alignItems: 'center', justifyContent: 'center' }}>{sinAuto ? <NoCarIcon size={22} color={selected ? PAPER : INK} /> : <BrandIcon brand={brand} size={21} color={selected ? PAPER : INK} />}</View>}
       <View style={{ flex: 1, minWidth: 0, flexShrink: 1 }}>
         <Text numberOfLines={2} style={{ color: INK, fontSize: 16, lineHeight: 20, fontWeight: '700', flexShrink: 1 }}>{label}</Text>
       </View>
@@ -138,7 +139,7 @@ export function Ingresos({ v }: { v: MobileView }) {
           <View style={{ flex: 1, minHeight: 0 }}>
             <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ gap: 10, paddingBottom: 12 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" nestedScrollEnabled>
               <ChoiceCard label={income.allOption.label} sub={income.allOption.sub} selected={income.allOption.selected} onPress={income.allOption.pick} />
-              {income.sectionOptions.map((option) => <ChoiceCard key={option.id} label={option.label} sub={option.sub} brand={option.brand} selected={option.selected} onPress={option.pick} />)}
+              {income.sectionOptions.map((option) => <ChoiceCard key={option.id} label={option.label} sub={option.sub} brand={option.brand} sinAuto={option.sinAuto} selected={option.selected} onPress={option.pick} />)}
             </ScrollView>
             <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>

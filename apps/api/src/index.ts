@@ -375,6 +375,21 @@ function reportVehicleLabel(row: FleetReportVehicleRef): string {
   return parts.join(' - ').toUpperCase() || 'Vehículo eliminado';
 }
 
+/** Rótulo de vehículo y de sección para lo que no va a ningún auto. */
+const SIN_AUTO_LABEL = 'Sin auto';
+/** Token de la selección de autos que pide incluir los movimientos sin auto. */
+const SIN_AUTO_TOKEN = '__sin_auto__';
+
+/** Orden de secciones: el del panel, después las desconocidas, "Sin sección" y
+ *  por último "Sin auto". */
+function reportSectionRank(order: Map<string, number>, name: string): number {
+  const known = order.get(name.trim().toLowerCase());
+  if (known !== undefined) return known;
+  if (name === SIN_AUTO_LABEL) return Number.MAX_SAFE_INTEGER;
+  if (name === 'Sin sección') return Number.MAX_SAFE_INTEGER - 1;
+  return Number.MAX_SAFE_INTEGER - 2;
+}
+
 /** Agrupa por sección y, dentro de cada sección, por vehículo. */
 function groupReportRows<T extends FleetReportVehicleRef>(rows: T[], amountOf: (row: T) => number, sectionOrder: string[]): FleetReportGroup<T>[] {
   const order = new Map(sectionOrder.map((name, index) => [name.trim().toLowerCase(), index]));
@@ -387,7 +402,7 @@ function groupReportRows<T extends FleetReportVehicleRef>(rows: T[], amountOf: (
     bySection.set(section, vehicles);
   }
   // Las secciones respetan el orden del panel; lo que no está definido va al final.
-  const rank = (name: string) => order.get(name.trim().toLowerCase()) ?? (name === 'Sin sección' ? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER - 1);
+  const rank = (name: string) => reportSectionRank(order, name);
   return [...bySection.entries()]
     .sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0], 'es'))
     .map(([name, vehicles]) => {
@@ -451,8 +466,8 @@ async function createAssistantReport(ownerId: number, request: AssistantReportRe
     return {
       carId: mov.car_id,
       fecha: mov.date,
-      vehiculo: mov.car_id == null ? 'Repuesto para stock' : car?.plate ?? 'Vehículo eliminado',
-      seccion: sectionById.get(car?.section_id ?? -1) ?? 'Sin sección',
+      vehiculo: mov.car_id == null ? SIN_AUTO_LABEL : car?.plate ?? 'Vehículo eliminado',
+      seccion: mov.car_id == null ? SIN_AUTO_LABEL : sectionById.get(car?.section_id ?? -1) ?? 'Sin sección',
       modelo: car?.model ?? '',
       gpsTag: car?.gps_tag ?? '',
       categoria: mov.cat ?? 'Otro',
@@ -747,9 +762,9 @@ async function pdfFromFleetReport(data: {
     const sumExpenses = (rows: FleetReportExpenseRow[]) => rows.reduce((sum, row) => sum + row.total, 0);
     const sumIncome = (rows: FleetReportIncomeRow[]) => rows.reduce((sum, row) => sum + row.monto, 0);
 
-    // Orden de secciones: el del panel y, al final, "Sin sección".
+    // Orden de secciones: el del panel y, al final, "Sin sección" y "Sin auto".
     const sectionRankOrder = new Map(data.sectionOrder.map((name, index) => [name.trim().toLowerCase(), index]));
-    const sectionRank = (name: string) => sectionRankOrder.get(name.trim().toLowerCase()) ?? (name === 'Sin sección' ? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER - 1);
+    const sectionRank = (name: string) => reportSectionRank(sectionRankOrder, name);
     const orderedSections = (rows: FleetReportVehicleRef[]) => [...new Set(rows.map(sectionOf))]
       .sort((a, b) => sectionRank(a) - sectionRank(b) || a.localeCompare(b, 'es'));
 
@@ -781,7 +796,7 @@ async function pdfFromFleetReport(data: {
         for (const row of vehicle.rows) {
           gastoRow(row.detalle, row.total, row.nota);
         }
-        totalRow('Total del auto', vehicle.total, 10);
+        totalRow(vehicle.label === SIN_AUTO_LABEL.toUpperCase() ? 'Total sin auto' : 'Total del auto', vehicle.total, 10);
       });
     };
 
@@ -1044,14 +1059,17 @@ function armarReporte(ownerId: number, body: FleetReportExportBody): ReporteArma
   const carSection = (carId: string | null) => sectionById.get(carById.get(carId ?? '')?.section_id ?? -1) ?? 'Sin sección';
   const carModel = (carId: string | null) => carById.get(carId ?? '')?.model ?? '';
   const carGpsTag = (carId: string | null) => carById.get(carId ?? '')?.gps_tag ?? '';
-  /** Rótulo del auto en el reporte: "Repuesto para stock" para los gastos
-   *  generales (car_id null) y "Vehículo eliminado" cuando el auto referenciado
-   *  ya no existe. */
-  const carPlate = (carId: string | null) => (carId == null ? 'Repuesto para stock' : carById.get(carId)?.plate ?? 'Vehículo eliminado');
+  /** Rótulo del auto en el reporte: "Sin auto" para lo que no va a ningún
+   *  vehículo (car_id null) y "Vehículo eliminado" cuando el auto referenciado
+   *  ya no existe. La sección de lo sin auto también es "Sin auto". */
+  const carPlate = (carId: string | null) => (carId == null ? SIN_AUTO_LABEL : carById.get(carId)?.plate ?? 'Vehículo eliminado');
+  const rowSection = (carId: string | null) => (carId == null ? SIN_AUTO_LABEL : carSection(carId));
   const selectedCars = reportSelection(body.carIds);
+  // El token "Sin auto" no es un vehículo: se separa antes de validar los ids.
+  const includeSinAuto = selectedCars === 'todos' || selectedCars.delete(SIN_AUTO_TOKEN);
   if (selectedCars !== 'todos' && [...selectedCars].some((id) => !carById.has(id))) throw new Error('Uno de los vehículos no pertenece a tu flota');
   const selectedCategories = body.categories === 'todas' ? 'todos' : reportSelection(body.categories);
-  const carAllowed = (carId: string | null) => selectedCars === 'todos' || (carId !== null && selectedCars.has(carId));
+  const carAllowed = (carId: string | null) => selectedCars === 'todos' || (carId === null ? includeSinAuto : selectedCars.has(carId));
   const categoryAllowed = (category: string) => selectedCategories === 'todos' || selectedCategories.has(category);
   const search = String(body.search ?? '').trim().toLocaleLowerCase();
   const matchesSearch = (...fields: unknown[]) => !search || fields.some((field) => String(field ?? '').toLocaleLowerCase().includes(search));
@@ -1061,8 +1079,8 @@ function armarReporte(ownerId: number, body: FleetReportExportBody): ReporteArma
     .filter((pago) => matchesSearch('Pago recibido', 'Pago', carById.get(pago.car_id ?? '')?.plate, carById.get(pago.car_id ?? '')?.model, pago.driver, pago.nota, pago.medio))
     .map((pago) => ({
       fecha: pago.fecha,
-      vehiculo: carById.get(pago.car_id ?? '')?.plate ?? 'Sin vehículo',
-      seccion: carSection(pago.car_id),
+      vehiculo: carPlate(pago.car_id),
+      seccion: rowSection(pago.car_id),
       modelo: carModel(pago.car_id),
       gpsTag: carGpsTag(pago.car_id),
       chofer: pago.driver || 'Sin chofer',
@@ -1083,7 +1101,7 @@ function armarReporte(ownerId: number, body: FleetReportExportBody): ReporteArma
       return matchesSearch(mov.descripcion, mov.nota, mov.cat || 'Otros', car?.plate, car?.model, car?.driver);
     })
     .map((mov) => {
-      return { carId: mov.car_id, fecha: mov.date, vehiculo: carPlate(mov.car_id), seccion: mov.car_id == null ? 'Repuesto para stock' : carSection(mov.car_id), modelo: carModel(mov.car_id), gpsTag: carGpsTag(mov.car_id), categoria: mov.cat || 'Otros', detalle: mov.descripcion, nota: mov.nota || '', total: mov.amount };
+      return { carId: mov.car_id, fecha: mov.date, vehiculo: carPlate(mov.car_id), seccion: rowSection(mov.car_id), modelo: carModel(mov.car_id), gpsTag: carGpsTag(mov.car_id), categoria: mov.cat || 'Otros', detalle: mov.descripcion, nota: mov.nota || '', total: mov.amount };
     });
 
   const counts = { ingresos: incomeRows.length, gastos: expenseRows.length, total: incomeRows.length + expenseRows.length };
@@ -2192,12 +2210,15 @@ app.patch<{ Params: { id: string } }>('/api/movs/:id', async (req, reply) => {
   let cat = mov.cat ?? '';
   let fecha = mov.date;
   let nota = mov.nota ?? '';
+  // Ausente = conserva el auto; '' = "Sin auto"; un id = ese auto.
+  let carIdInput: string | undefined;
   let quitarComprobante = false;
   let archivoPendiente: ComprobantePendiente | null = null;
 
   try {
     for await (const parte of req.parts()) {
       if (parte.type === 'field') {
+        if (parte.fieldname === 'carId') carIdInput = String(parte.value).trim();
         if (parte.fieldname === 'descripcion') descripcion = String(parte.value).trim().slice(0, 120);
         if (parte.fieldname === 'monto') monto = Number(String(parte.value).replace(/\D/g, '')) || 0;
         if (parte.fieldname === 'cat') cat = normalizarCategoria(String(parte.value));
@@ -2231,6 +2252,8 @@ app.patch<{ Params: { id: string } }>('/api/movs/:id', async (req, reply) => {
   if (monto <= 0 || monto > MAX_EGRESO_MONTO) return reply.code(400).send({ error: 'Indicá cuánto se gastó' });
   const hoy = hoyISO();
   if (!FECHA.test(fecha) || fecha > hoy) return reply.code(400).send({ error: 'La fecha del gasto no es válida' });
+  const carId = carIdInput === undefined ? mov.car_id : carIdInput || null;
+  if (carId && !selCar.get(carId, u.id)) return reply.code(404).send({ error: 'Vehículo inexistente' });
 
   const guardado = await guardarComprobanteParaRuta(archivoPendiente, reply);
   if (!guardado.ok) return;
@@ -2248,9 +2271,9 @@ app.patch<{ Params: { id: string } }>('/api/movs/:id', async (req, reply) => {
   try {
     db.prepare(
       `UPDATE movs
-          SET amount = ?, date = ?, descripcion = ?, nota = ?, cat = ?, comprobante = ?, comprobante_nombre = ?, comprobante_tipo = ?
+          SET car_id = ?, amount = ?, date = ?, descripcion = ?, nota = ?, cat = ?, comprobante = ?, comprobante_nombre = ?, comprobante_tipo = ?
         WHERE id = ? AND owner_id = ?`,
-    ).run(monto, fecha, descripcion, nota || null, cat, comprobante?.id ?? null, comprobante?.nombre ?? null, comprobante?.tipo ?? null, mov.id, u.id);
+    ).run(carId, monto, fecha, descripcion, nota || null, cat, comprobante?.id ?? null, comprobante?.nombre ?? null, comprobante?.tipo ?? null, mov.id, u.id);
   } catch (error) {
     if (archivo) await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
     throw error;
@@ -2259,7 +2282,7 @@ app.patch<{ Params: { id: string } }>('/api/movs/:id', async (req, reply) => {
   if (mov.comprobante && mov.comprobante !== comprobante?.id) {
     await borrarComprobante(mov.comprobante).catch((e) => req.log.warn({ e, id: mov.comprobante }, 'no se pudo borrar el comprobante reemplazado'));
   }
-  req.log.info({ id: mov.id, monto, fecha, cat }, 'gasto editado');
+  req.log.info({ id: mov.id, monto, fecha, cat, carId }, 'gasto editado');
   return { mov: movToJson(db.prepare('SELECT * FROM movs WHERE id = ? AND owner_id = ?').get(mov.id, u.id) as MovRow) };
 });
 
@@ -2554,12 +2577,16 @@ app.patch<{ Params: { id: string } }>('/api/pagos/:id', async (req, reply) => {
   let fecha = pago.fecha;
   let medio = pago.medio ?? '';
   let nota = pago.nota ?? '';
+  // El auto es solo referencia (la imputación va por chofer): ausente = se
+  // conserva, '' = "Sin auto", un id = ese auto.
+  let carIdInput: string | undefined;
   let quitarComprobante = false;
   let archivoPendiente: ComprobantePendiente | null = null;
 
   try {
     for await (const parte of req.parts()) {
       if (parte.type === 'field') {
+        if (parte.fieldname === 'carId') carIdInput = String(parte.value).trim();
         if (parte.fieldname === 'monto') monto = Number(String(parte.value).replace(/\D/g, '')) || 0;
         if (parte.fieldname === 'fecha') fecha = String(parte.value).trim();
         if (parte.fieldname === 'medio') medio = String(parte.value).trim().slice(0, 40);
@@ -2590,6 +2617,8 @@ app.patch<{ Params: { id: string } }>('/api/pagos/:id', async (req, reply) => {
   const hoy = hoyISO();
   if (!FECHA.test(fecha)) return reply.code(400).send({ error: 'Fecha inválida' });
   if (fecha > hoy) return reply.code(400).send({ error: 'No se puede registrar un pago con fecha futura' });
+  const carId = carIdInput === undefined ? pago.car_id : carIdInput || null;
+  if (carId && !selCar.get(carId, u.id)) return reply.code(404).send({ error: 'Vehículo inexistente' });
 
   const guardado = await guardarComprobanteParaRuta(archivoPendiente, reply);
   if (!guardado.ok) return;
@@ -2605,9 +2634,9 @@ app.patch<{ Params: { id: string } }>('/api/pagos/:id', async (req, reply) => {
   try {
     db.prepare(
       `UPDATE pagos
-          SET fecha = ?, monto = ?, medio = ?, nota = ?, comprobante = ?, comprobante_nombre = ?, comprobante_tipo = ?
+          SET car_id = ?, fecha = ?, monto = ?, medio = ?, nota = ?, comprobante = ?, comprobante_nombre = ?, comprobante_tipo = ?
         WHERE id = ? AND owner_id = ?`,
-    ).run(fecha, monto, medio || null, nota || null, comprobante?.id ?? null, comprobante?.nombre ?? null, comprobante?.tipo ?? null, pago.id, u.id);
+    ).run(carId, fecha, monto, medio || null, nota || null, comprobante?.id ?? null, comprobante?.nombre ?? null, comprobante?.tipo ?? null, pago.id, u.id);
   } catch (error) {
     if (archivo) await borrarComprobante(archivo.id).catch((cleanupError) => req.log.warn({ err: cleanupError, id: archivo.id }, 'no se pudo limpiar el comprobante fallido'));
     throw error;

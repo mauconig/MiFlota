@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { BackHandler, Keyboard, Linking } from 'react-native';
 import type { AdminNotificationRoute, Car, Driver, Mov, Pago, Reporte, MobileState, Screen, DashboardDetailKind, RegistrarTab, FleetFilter, PickedFile, CarLocation, ReportCategorySelection, ReportInclude, ReportSelection, ReportStep, IncomeTypeSelection } from './types';
+import { SIN_AUTO } from './types';
 import { imputar, type Aplicacion } from './cobranza';
 import { CATS, CATCOLORS } from './data';
 import { COLORS, TODAY, addD, addM, daysBetween, durLbl, dLbl, dLblFull, fmt, fmtShort, initials, statusColor, numFromInput, miles, isoLocal } from './format';
@@ -12,6 +13,13 @@ import { dateTextFromIso, maskDateInput, validateDateRange } from './dateRange';
 const UMBRAL_VERDE = 2500000;
 const SVC_AVISO_DIAS = 15;
 const SECTION_COLORS = ['#4a7fb5', '#8a6bb1', '#e8a13a', '#2e9c86', '#c0553f', '#b3aa99'] as const;
+/** Color de los movimientos sin auto en los gráficos: neutro, fuera de la paleta de secciones. */
+const SIN_AUTO_COLOR = '#7d766a';
+
+/** Filtro único para selecciones de autos: 'todos', ids de autos y el token
+ *  SIN_AUTO para los movimientos sin vehículo. */
+export const carAllowed = (sel: ReportSelection, carId: string | null | undefined) =>
+  sel === 'todos' || (carId ? sel.includes(carId) : sel.includes(SIN_AUTO));
 /** Tope de meses entre renovaciones de la póliza. Coincide con el del servidor. */
 const SEG_CADA_MAX = 120;
 const MESES_ABR = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -360,6 +368,8 @@ export interface MovementEditInput {
   nota: string;
   comprobante: PickedFile | null;
   quitarComprobante: boolean;
+  /** Auto elegido en la edición: id, o '' para "Sin auto". */
+  carId: string;
 }
 
 export interface MovementEditData {
@@ -373,6 +383,9 @@ export interface MovementEditData {
   medio: string;
   nota: string;
   tieneComprobante: boolean;
+  /** Auto actual ('' = sin auto) y los autos a los que se puede pasar. */
+  carId: string;
+  carOptions: { id: string; label: string; sub: string }[];
 }
 
 export interface MovementDetailView {
@@ -514,6 +527,8 @@ interface GastoChoiceView {
   label: string;
   sub: string;
   brand?: string;
+  /** Opción "Sin auto": se dibuja con el ícono de auto tachado. */
+  sinAuto?: boolean;
   selected: boolean;
   pick: () => void;
 }
@@ -650,9 +665,11 @@ export interface MobileView {
     open: boolean;
     openSheet: () => void;
     closeSheet: () => void;
-    sectionId: number | null;
+    sectionId: number | 'none' | null;
     sectionOptions: import('./api').FleetSection[];
-    setSectionId: (id: number | null) => void;
+    setSectionId: (id: number | 'none' | null) => void;
+    /** Hay movimientos sin auto: el selector ofrece la opción "Sin auto". */
+    hasSinAuto: boolean;
   };
 
   dashboard: {
@@ -886,7 +903,7 @@ export interface MobileView {
     include: ReportInclude | null;
     setInclude: (value: ReportInclude) => void;
     carSelection: ReportSelection;
-    sectionOptions: { id: string; label: string; sub: string; brand?: string; selected: boolean; toggle: () => void }[];
+    sectionOptions: { id: string; label: string; sub: string; brand?: string; sinAuto?: boolean; selected: boolean; toggle: () => void }[];
     selectAllCars: () => void;
     categorySelection: ReportCategorySelection;
     categoryOptions: { label: string; selected: boolean; toggle: () => void }[];
@@ -1005,7 +1022,7 @@ export function useMobileView(
   // por pantalla, igual que hacía `history.back()` en la versión web. Los
   // sheets no entran en la pila a propósito: solo se cierran con la X o
   // tocando afuera, para no complicarla con entradas que no son pantallas.
-  const stackRef = useRef<{ screen: Screen; backTo: Screen; carId: string | null; dashboardDetail: DashboardDetailKind | null; dashboardSectionId: number | null; gananciasSectionId: number | null; ingresosSectionId: number | null }[]>([]);
+  const stackRef = useRef<{ screen: Screen; backTo: Screen; carId: string | null; dashboardDetail: DashboardDetailKind | null; dashboardSectionId: number | 'none' | null; gananciasSectionId: number | null; ingresosSectionId: number | null }[]>([]);
 
   // Si queda un input enfocado cuando se cambia de pantalla, el teclado se
   // cierra recién cuando el sistema nota que el campo se desmontó — ese
@@ -1211,7 +1228,7 @@ export function useMobileView(
   const carDe = new Map(cars.map((c) => [c.id, c]));
   const cuotas = movs.filter((m) => m.type === 'ingreso');
   const choferDeCuota = (m: Mov) => {
-    const c = carDe.get(m.carId);
+    const c = m.carId ? carDe.get(m.carId) : undefined;
     return claveChofer(m, c);
   };
   const { aplicaciones, cobrado } = imputar(cuotas, pagos, choferDeCuota);
@@ -1229,7 +1246,8 @@ export function useMobileView(
   const inRP = (p: Pago) => p.fecha >= r.start && p.fecha <= r.end;
   const inPrevP = (p: Pago) => p.fecha >= prevStart && p.fecha <= prevEnd;
 
-  const sectionMatches = (carId: string | null) => state.dashboardSectionId == null || (!!carId && carDe.get(carId)?.sectionId === state.dashboardSectionId);
+  const sectionMatches = (carId: string | null) => state.dashboardSectionId == null
+    || (state.dashboardSectionId === 'none' ? !carId : !!carId && carDe.get(carId)?.sectionId === state.dashboardSectionId);
   const inRSection = (m: Mov) => inR(m) && sectionMatches(m.carId);
   const inPrevSection = (m: Mov) => inPrev(m) && sectionMatches(m.carId);
   const inRASection = (a: Aplicacion) => inRA(a) && sectionMatches(a.carId);
@@ -1254,30 +1272,39 @@ export function useMobileView(
   // individual vehicles. The section order is the manual order persisted in
   // the account; unassigned vehicles are kept in a final automatic bucket.
   const knownSectionIds = new Set(persist.sections.map((section) => section.id));
-  const sectionExpenseTotals = new Map<number | null, number>();
+  const sectionExpenseTotals = new Map<number | 'none' | null, number>();
+  const bucketDe = (carId: string | null): number | 'none' | null => {
+    if (!carId) return 'none';
+    const rawSectionId = carDe.get(carId)?.sectionId ?? null;
+    return rawSectionId != null && knownSectionIds.has(rawSectionId) ? rawSectionId : null;
+  };
   if (state.dashboardSectionId == null) {
     movs.forEach((m) => {
       if (m.type !== 'egreso' || !inR(m)) return;
-      const rawSectionId = carDe.get(m.carId)?.sectionId ?? null;
-      const sectionId = rawSectionId != null && knownSectionIds.has(rawSectionId) ? rawSectionId : null;
+      const sectionId = bucketDe(m.carId);
       sectionExpenseTotals.set(sectionId, (sectionExpenseTotals.get(sectionId) ?? 0) + m.amount);
     });
   }
-  const sectionIncomeTotals = new Map<number | null, number>();
+  const sectionIncomeTotals = new Map<number | 'none' | null, number>();
   if (state.dashboardSectionId == null) {
     pagos.forEach((p) => {
       if (p.tipo !== 'pago' || !inRP(p)) return;
-      const rawSectionId = p.carId ? carDe.get(p.carId)?.sectionId ?? null : null;
-      const sectionId = rawSectionId != null && knownSectionIds.has(rawSectionId) ? rawSectionId : null;
+      const sectionId = bucketDe(p.carId);
       sectionIncomeTotals.set(sectionId, (sectionIncomeTotals.get(sectionId) ?? 0) + p.monto);
     });
   }
-  const sectionNetTotals = new Map<number | null, number>();
+  const sectionNetTotals = new Map<number | 'none' | null, number>();
   sorted.forEach((x) => {
     const rawSectionId = x.c.sectionId ?? null;
     const sectionId = rawSectionId != null && knownSectionIds.has(rawSectionId) ? rawSectionId : null;
     sectionNetTotals.set(sectionId, (sectionNetTotals.get(sectionId) ?? 0) + x.n);
   });
+  // Ganancia de lo que no va a ningún auto: entra en el neto total, así que
+  // también tiene que tener su barra.
+  const hasSinAutoEnPeriodo = movs.some((m) => !m.carId && m.type === 'egreso' && inR(m)) || pagos.some((p) => !p.carId && inRP(p));
+  const sinAutoNet = stats(movs, aplicaciones, (m) => !m.carId && inR(m), () => false, pagos, (p) => !p.carId && inRP(p)).net;
+  if (hasSinAutoEnPeriodo) sectionNetTotals.set('none', sinAutoNet);
+  const hasSinAuto = movs.some((m) => !m.carId && m.type === 'egreso') || pagos.some((p) => !p.carId);
 
   const deudaPorChofer = new Map<string, number>();
   cuotas.forEach((m) => {
@@ -1362,6 +1389,8 @@ export function useMobileView(
     .filter((x) => x.v > 0);
   const unassignedExpense = sectionExpenseTotals.get(null) ?? 0;
   if (unassignedExpense > 0) sectionDonut.push({ label: 'Sin sección', v: unassignedExpense, color: unassignedSectionColor });
+  const sinAutoExpense = sectionExpenseTotals.get('none') ?? 0;
+  if (sinAutoExpense > 0) sectionDonut.push({ label: 'Sin auto', v: sinAutoExpense, color: SIN_AUTO_COLOR });
   sectionDonut.sort((a, b) => sortSectionValues({ label: a.label, n: a.v }, { label: b.label, n: b.v }));
   const categoryDonut = CATS.map((cat) => ({ label: cat, v: tot.byCat[cat] || 0, color: CATCOLORS[cat] }))
     .filter((x) => x.v > 0)
@@ -1379,7 +1408,7 @@ export function useMobileView(
     return { slices, total };
   };
   const { slices: donut, total: donutTotalValue } = buildDonut(donutSource);
-  const sectionBars: { id: number | null; label: string; n: number }[] = sectionOrder.flatMap((section) => {
+  const sectionBars: { id: number | 'none' | null; label: string; n: number }[] = sectionOrder.flatMap((section) => {
     const totals = sectionNetTotals.get(section.id);
     return totals === undefined ? [] : [{ id: section.id, label: section.name, n: totals }];
   }).sort(sortSectionValues);
@@ -1388,14 +1417,25 @@ export function useMobileView(
     sectionBars.push({ id: null, label: 'Sin sección', n: unassignedNet });
     sectionBars.sort(sortSectionValues);
   }
+  const sinAutoBar = sectionNetTotals.get('none');
+  if (sinAutoBar !== undefined) {
+    sectionBars.push({ id: 'none', label: 'Sin auto', n: sinAutoBar });
+    sectionBars.sort(sortSectionValues);
+  }
   const barMode = state.dashboardSectionId == null ? 'section' as const : 'vehicle' as const;
-  const barSource = barMode === 'section' ? sectionBars : dashboardSorted.map((x) => ({ label: x.c.plate, n: x.n }));
+  const barSource = barMode === 'section'
+    ? sectionBars
+    : state.dashboardSectionId === 'none'
+      ? (hasSinAutoEnPeriodo ? [{ label: 'Sin auto', n: sinAutoNet }] : [])
+      : dashboardSorted.map((x) => ({ label: x.c.plate, n: x.n }));
   const maxAbs = Math.max(...barSource.map((x) => Math.abs(x.n)), 1);
   const bars = barSource.map((x) => ({ label: x.label, w: Math.max(4, Math.round((Math.abs(x.n) / maxAbs) * 100)), color: statusColor(x.n, UMBRAL_VERDE), short: fmtShort(x.n) }));
 
   const dashboardSectionLabel = state.dashboardSectionId == null
     ? 'Todas'
-    : persist.sections.find((section) => section.id === state.dashboardSectionId)?.name ?? 'Sección';
+    : state.dashboardSectionId === 'none'
+      ? 'Sin auto'
+      : persist.sections.find((section) => section.id === state.dashboardSectionId)?.name ?? 'Sección';
   const collectedByCar = new Map<string, number>();
   let collectedWithoutCar = 0;
   pagos.forEach((p) => {
@@ -1409,18 +1449,24 @@ export function useMobileView(
     .filter((x) => x.v > 0);
   const unassignedIncome = sectionIncomeTotals.get(null) ?? 0;
   if (unassignedIncome > 0) incomeSectionDonut.push({ label: 'Sin sección', v: unassignedIncome, color: unassignedSectionColor });
+  const sinAutoIncome = sectionIncomeTotals.get('none') ?? 0;
+  if (sinAutoIncome > 0) incomeSectionDonut.push({ label: 'Sin auto', v: sinAutoIncome, color: SIN_AUTO_COLOR });
   incomeSectionDonut.sort((a, b) => sortSectionValues({ label: a.label, n: a.v }, { label: b.label, n: b.v }));
   const incomeVehicleDonut = dashboardSorted
     .map((item, index) => ({ label: item.c.plate, v: collectedByCar.get(item.c.id) ?? 0, color: SECTION_COLORS[index % SECTION_COLORS.length] }))
     .filter((x) => x.v > 0)
     .sort((a, b) => b.v - a.v || a.label.localeCompare(b.label));
-  const incomeDonutSource = state.dashboardSectionId == null ? incomeSectionDonut : incomeVehicleDonut;
+  const incomeDonutSource = state.dashboardSectionId == null
+    ? incomeSectionDonut
+    : state.dashboardSectionId === 'none'
+      ? [{ label: 'Sin auto', v: collectedWithoutCar, color: SIN_AUTO_COLOR }].filter((x) => x.v > 0)
+      : incomeVehicleDonut;
   const { slices: incomeDonut, total: incomeDonutTotalValue } = buildDonut(incomeDonutSource);
   const expensesByCar = new Map<string, number>();
   let expensesWithoutCar = 0;
   movs.forEach((m) => {
     if (m.type !== 'egreso' || !inRSection(m)) return;
-    const c = carDe.get(m.carId);
+    const c = m.carId ? carDe.get(m.carId) : undefined;
     if (c) expensesByCar.set(c.id, (expensesByCar.get(c.id) ?? 0) + m.amount);
     else expensesWithoutCar += m.amount;
   });
@@ -1440,29 +1486,35 @@ export function useMobileView(
     .filter((c) => sectionMatches(c.id))
     .map((c) => ({ id: c.id, label: c.plate, sub: c.model + ' · ' + c.driver, n: collectedByCar.get(c.id) ?? 0, color: COLORS.pos, onPress: () => push('detalle', { carId: c.id }) }))
     .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
-  if (collectedWithoutCar > 0 && state.dashboardSectionId == null) collectedRows.push({ id: 'none', label: 'Sin vehículo', sub: 'Pagos sin auto asociado', n: collectedWithoutCar, color: COLORS.pos, onPress: undefined });
+  if (collectedWithoutCar > 0) collectedRows.push({ id: 'none', label: 'Sin auto', sub: 'Ingresos sin auto vinculado', n: collectedWithoutCar, color: COLORS.pos, onPress: () => openIngresosForSection('none') });
   const expenseRows: DashboardDetailValue[] = cars
     .filter((c) => sectionMatches(c.id))
     .map((c) => ({ id: c.id, label: c.plate, sub: c.model + ' · ' + c.driver, n: expensesByCar.get(c.id) ?? 0, color: COLORS.neg, onPress: () => push('detalle', { carId: c.id }) }))
     .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
-  if (expensesWithoutCar > 0) expenseRows.push({ id: 'none', label: 'Sin vehículo', sub: 'Gastos sin auto asociado', n: expensesWithoutCar, color: COLORS.neg });
-  const openGastosForSection = (sectionId: number | null) => {
-    const ids = active.filter((c) => c.sectionId === sectionId).map((c) => c.id);
+  if (expensesWithoutCar > 0) expenseRows.push({ id: 'none', label: 'Sin auto', sub: 'Gastos generales, sin auto', n: expensesWithoutCar, color: COLORS.neg, onPress: () => openGastosForSection('none') });
+  function openGastosForSection(sectionId: number | 'none' | null) {
+    const ids = sectionId === 'none' ? [SIN_AUTO] : active.filter((c) => c.sectionId === sectionId).map((c) => c.id);
     push('gastos', { gastosStep: 'results', gastosCarIds: ids, gastosCat: 'todas', gastosExpanded: {} });
-  };
+  }
   const openGananciaForSection = (sectionId: number) => {
     push('ganancias', { gananciasSectionId: sectionId, ingresosSectionId: null });
   };
-  const openIngresosForSection = (sectionId: number) => {
+  function openIngresosForSection(sectionId: number | 'none') {
+    if (sectionId === 'none') {
+      push('ingresos', { ingresosSectionId: null, ingresosStep: 'results', ingresosCarIds: [SIN_AUTO], ingresosTypes: ['pago'], gananciasSectionId: null });
+      return;
+    }
     const ids = active.filter((car) => car.sectionId === sectionId).map((car) => car.id);
     push('ingresos', { ingresosSectionId: sectionId, ingresosStep: 'results', ingresosCarIds: ids, ingresosTypes: ['pago'], gananciasSectionId: null });
-  };
+  }
   const earningsRows: DashboardDetailValue[] = barMode === 'section'
     ? sectionBars.map((section) => {
       const sectionId = section.id;
-      return { id: 'section:' + section.label, label: section.label, sub: 'Ganancia neta del período', n: section.n, color: statusColor(section.n, UMBRAL_VERDE), onPress: sectionId == null ? undefined : () => openGananciaForSection(sectionId) };
+      return { id: 'section:' + section.label, label: section.label, sub: sectionId === 'none' ? 'Ingresos menos gastos sin auto' : 'Ganancia neta del período', n: section.n, color: statusColor(section.n, UMBRAL_VERDE), onPress: sectionId == null || sectionId === 'none' ? undefined : () => openGananciaForSection(sectionId) };
     })
-    : dashboardSorted.map((x) => ({ id: x.c.id, label: x.c.plate, sub: x.c.model + ' · ' + x.c.driver, n: x.n, color: statusColor(x.n, UMBRAL_VERDE), onPress: () => push('detalle', { carId: x.c.id }) }));
+    : state.dashboardSectionId === 'none'
+      ? (hasSinAutoEnPeriodo ? [{ id: 'none', label: 'Sin auto', sub: 'Ingresos menos gastos sin auto', n: sinAutoNet, color: statusColor(sinAutoNet, UMBRAL_VERDE) }] : [])
+      : dashboardSorted.map((x) => ({ id: x.c.id, label: x.c.plate, sub: x.c.model + ' · ' + x.c.driver, n: x.n, color: statusColor(x.n, UMBRAL_VERDE), onPress: () => push('detalle', { carId: x.c.id }) }));
   const incomeSectionRows: DashboardDetailValue[] = sectionOrder
     .map((section) => ({
       id: 'income-section:' + section.id,
@@ -1475,7 +1527,11 @@ export function useMobileView(
     .filter((row) => row.n > 0)
     .sort((a, b) => sortSectionValues({ label: a.label, n: a.n }, { label: b.label, n: b.n }));
   if (unassignedIncome > 0) {
-    incomeSectionRows.push({ id: 'income-section:none', label: 'Sin sección', sub: 'Ingresos sin sección', n: unassignedIncome, color: unassignedSectionColor });
+    incomeSectionRows.push({ id: 'income-section:unassigned', label: 'Sin sección', sub: 'Ingresos sin sección', n: unassignedIncome, color: unassignedSectionColor });
+    incomeSectionRows.sort((a, b) => sortSectionValues({ label: a.label, n: a.n }, { label: b.label, n: b.n }));
+  }
+  if (sinAutoIncome > 0) {
+    incomeSectionRows.push({ id: 'income-section:none', label: 'Sin auto', sub: 'Ingresos sin auto vinculado', n: sinAutoIncome, color: SIN_AUTO_COLOR, onPress: () => openIngresosForSection('none') });
     incomeSectionRows.sort((a, b) => sortSectionValues({ label: a.label, n: a.n }, { label: b.label, n: b.n }));
   }
   const incomeDetailRows = state.dashboardSectionId == null ? incomeSectionRows : collectedRows;
@@ -1506,12 +1562,19 @@ export function useMobileView(
     : persist.sections.find((section) => section.id === state.ingresosSectionId);
   const ingresosCars = ingresosSection
     ? active.filter((car) => car.sectionId === ingresosSection.id)
-    : state.ingresosCarIds === 'todos'
-      ? active
-      : active.filter((car) => state.ingresosCarIds.includes(car.id));
+    : active.filter((car) => carAllowed(state.ingresosCarIds, car.id));
   const ingresosByCar = new Map<string, number>();
+  let ingresosSinAuto = 0;
+  let haySinAutoIngresos = false;
   pagos.forEach((p) => {
-    if (!inRP(p) || !p.carId || (state.ingresosTypes !== 'todos' && !state.ingresosTypes.includes(p.tipo))) return;
+    if (!inRP(p) || (state.ingresosTypes !== 'todos' && !state.ingresosTypes.includes(p.tipo))) return;
+    if (!p.carId) {
+      if (!ingresosSection && carAllowed(state.ingresosCarIds, null)) {
+        ingresosSinAuto += p.monto;
+        haySinAutoIngresos = true;
+      }
+      return;
+    }
     const c = carDe.get(p.carId);
     if (!c || c.estado === 'baja' || (ingresosSection && c.sectionId !== ingresosSection.id) || (state.ingresosCarIds !== 'todos' && !state.ingresosCarIds.includes(c.id))) return;
     ingresosByCar.set(c.id, (ingresosByCar.get(c.id) ?? 0) + p.monto);
@@ -1531,6 +1594,18 @@ export function useMobileView(
         };
       })
       .sort((a, b) => b.amountValue - a.amountValue || a.plate.localeCompare(b.plate));
+  if (haySinAutoIngresos) {
+    ingresosRows.push({
+      id: SIN_AUTO,
+      plate: 'Sin auto',
+      section: 'Sin auto',
+      driver: 'A nombre del chofer',
+      amount: fmtShort(ingresosSinAuto),
+      amountValue: ingresosSinAuto,
+      color: COLORS.pos,
+      open: () => update({ ingresosDetailCarId: SIN_AUTO }),
+    });
+  }
   const ingresosTotal = ingresosRows.reduce((sum, row) => sum + row.amountValue, 0);
   // La tabla de Ingresos agrupa por auto, así que al tocar una fila se abre el
   // listado de pagos de ese auto en el período; recién ahí se puede abrir el
@@ -1539,8 +1614,9 @@ export function useMobileView(
     const carId = state.ingresosDetailCarId;
     if (!carId) return null;
     const detalleCar = carDe.get(carId);
+    const esSinAuto = carId === SIN_AUTO;
     const filas = pagos
-      .filter((p) => p.carId === carId && inRP(p) && (state.ingresosTypes === 'todos' || state.ingresosTypes.includes(p.tipo)))
+      .filter((p) => (esSinAuto ? !p.carId : p.carId === carId) && inRP(p) && (state.ingresosTypes === 'todos' || state.ingresosTypes.includes(p.tipo)))
       .sort((a, b) => +b.fecha - +a.fecha)
       .map((p) => ({
         id: p.id,
@@ -1551,8 +1627,8 @@ export function useMobileView(
         open: () => update({ movementDetailId: 'pago-' + p.id }),
       }));
     return {
-      title: detalleCar ? 'Ingresos · ' + detalleCar.plate : 'Ingresos',
-      subtitle: detalleCar ? detalleCar.model : '',
+      title: detalleCar ? 'Ingresos · ' + detalleCar.plate : esSinAuto ? 'Ingresos · Sin auto' : 'Ingresos',
+      subtitle: detalleCar ? detalleCar.model : esSinAuto ? 'No vinculados a ningún auto' : '',
       rows: filas,
       close: () => update({ ingresosDetailCarId: null }),
     };
@@ -1565,7 +1641,7 @@ export function useMobileView(
       sub: state.dashboardSectionId == null ? '' : 'Gastos de la categoría',
       n: item.v,
       color: item.color,
-      onPress: section ? () => openGastosForSection(section.id) : undefined,
+      onPress: section ? () => openGastosForSection(section.id) : state.dashboardSectionId == null && item.label === 'Sin auto' ? () => openGastosForSection('none') : undefined,
     };
   });
   const dashboardDetail = state.dashboardDetail == null ? null : (() => {
@@ -1658,26 +1734,47 @@ export function useMobileView(
     return groups;
   };
 
-  const brandForSection = (name: string) => {
-    const firstWord = name.trim().split(/\s+/)[0].toLowerCase();
-    return firstWord === 'hyundai' || firstWord === 'kia' || firstWord === 'chevrolet' || firstWord === 'toyota'
-      ? name.trim().split(/\s+/)[0]
-      : undefined;
+  const brandForSection = (name: string) => brandKey(name) ?? undefined;
+
+  // Opción "Sin auto" de los pasos de sección (Gastos, Ingresos, Reportes).
+  // Se comporta como una sección más: el primer toque reemplaza 'todos'.
+  const sinAutoOption = (sel: ReportSelection, set: (next: ReportSelection) => void, sub: string): GastoChoiceView => ({
+    id: SIN_AUTO,
+    label: 'Sin auto',
+    sub,
+    sinAuto: true,
+    selected: sel !== 'todos' && sel.includes(SIN_AUTO),
+    pick: () => set(sel === 'todos' ? [SIN_AUTO] : sel.includes(SIN_AUTO) ? sel.filter((id) => id !== SIN_AUTO) : [...sel, SIN_AUTO]),
+  });
+  /** Suma "Sin auto" al rótulo de una selección cuando el token está elegido. */
+  const conSinAuto = (sel: ReportSelection, label: string) => {
+    if (sel === 'todos' || !sel.includes(SIN_AUTO)) return label;
+    return sel.length === 1 ? 'Sin auto' : label + ' · Sin auto';
   };
+  const sinCarToken = (sel: ReportSelection) => (sel === 'todos' ? sel : sel.filter((id) => id !== SIN_AUTO));
 
   // ---- gastos -------------------------------------------------------
   // Los movimientos siguen siendo la fuente de verdad. Esta pantalla solo
   // cambia la forma de leerlos: primero por vehículo y después por gasto.
   const expenseCars = active.filter((c) => movs.some((m) => m.type === 'egreso' && m.carId === c.id && inR(m)));
-  const gastoGroups: GastoGroupView[] = expenseCars
-    .filter((c) => state.gastosCarIds === 'todos' || state.gastosCarIds.includes(c.id))
+  // Los gastos sin auto forman un grupo propio al final, con la misma forma.
+  const grupoSinAuto = movs.some((m) => m.type === 'egreso' && !m.carId && inR(m)) && carAllowed(state.gastosCarIds, null)
+    ? [{ id: SIN_AUTO, plate: 'Sin auto', section: 'Sin auto' }]
+    : [];
+  const gastoGroups: GastoGroupView[] = [
+    ...expenseCars
+      .filter((c) => carAllowed(state.gastosCarIds, c.id))
+      .map((c) => ({ id: c.id, plate: c.plate, section: persist.sections.find((section) => section.id === c.sectionId)?.name ?? 'Sin sección' })),
+    ...grupoSinAuto,
+  ]
     .map((c) => {
-      const movements = movs.filter((m) => m.type === 'egreso' && m.carId === c.id && inR(m) && (state.gastosCat === 'todas' || state.gastosCat.includes(m.cat || 'Otros')));
+      const deEsteGrupo = (m: Mov) => (c.id === SIN_AUTO ? !m.carId : m.carId === c.id);
+      const movements = movs.filter((m) => m.type === 'egreso' && deEsteGrupo(m) && inR(m) && (state.gastosCat === 'todas' || state.gastosCat.includes(m.cat || 'Otros')));
       const groupKey = 'car:' + c.id;
       return {
         carId: c.id,
         plate: c.plate,
-        section: persist.sections.find((section) => section.id === c.sectionId)?.name ?? 'Sin sección',
+        section: c.section,
         total: fmt(movements.reduce((sum, m) => sum + m.amount, 0)),
         expanded: state.gastosExpanded[groupKey] !== false,
         toggle: () => update((s) => ({ gastosExpanded: { ...s.gastosExpanded, [groupKey]: !(s.gastosExpanded[groupKey] !== false) } })),
@@ -1719,15 +1816,16 @@ export function useMobileView(
       }),
     })),
   ];
-  const selectedGastoCars = state.gastosCarIds === 'todos' ? active : active.filter((c) => state.gastosCarIds.includes(c.id));
+  const gastoCarSel = sinCarToken(state.gastosCarIds);
+  const selectedGastoCars = gastoCarSel === 'todos' ? active : active.filter((c) => gastoCarSel.includes(c.id));
   // Secciones enteras seleccionadas: alimenta el rótulo del resumen del paso 2.
-  const gastoSelectedSections = state.gastosCarIds === 'todos'
+  const gastoSelectedSections = gastoCarSel === 'todos'
     ? []
-    : carsBySection(active).filter((g) => g.cars.every((c) => state.gastosCarIds.includes(c.id)));
+    : carsBySection(active).filter((g) => g.cars.every((c) => gastoCarSel.includes(c.id)));
   const gastoSelectionFitsSections = gastoSelectedSections.length > 0
-    && gastoSelectedSections.reduce((sum, g) => sum + g.cars.length, 0) === state.gastosCarIds.length;
+    && gastoSelectedSections.reduce((sum, g) => sum + g.cars.length, 0) === gastoCarSel.length;
   const gastoSectionLabel = gastoSelectionFitsSections ? gastoSelectedSections.map((g) => g.name).join(' · ') : '';
-  const selectedGastoCarLabel = state.gastosCarIds === 'todos'
+  const selectedGastoCarLabel = conSinAuto(state.gastosCarIds, state.gastosCarIds === 'todos'
     ? 'Todos los vehículos'
     : gastoSectionLabel
       ? gastoSectionLabel
@@ -1735,7 +1833,7 @@ export function useMobileView(
         ? 'Ningún vehículo'
         : selectedGastoCars.length <= 2
           ? selectedGastoCars.map((c) => c.plate).join(' · ')
-          : `${selectedGastoCars.length} vehículos seleccionados`;
+          : `${selectedGastoCars.length} vehículos seleccionados`);
   const selectedGastoCategoryLabel = state.gastosCat === 'todas'
     ? 'Todas las categorías'
     : state.gastosCat.length === 0
@@ -1770,6 +1868,9 @@ export function useMobileView(
       }),
     };
   });
+  if (movs.some((m) => m.type === 'egreso' && !m.carId)) {
+    gastoSectionOptions.push(sinAutoOption(state.gastosCarIds, (next) => update({ gastosCarIds: next }), 'Gastos generales, no vinculados a ningún auto'));
+  }
   const gastoCategoryOptions: GastoChoiceView[] = [
     {
       id: 'todas',
@@ -1796,13 +1897,13 @@ export function useMobileView(
   const selectedIngresoCars = state.ingresosCarIds === 'todos'
     ? active
     : active.filter((car) => state.ingresosCarIds.includes(car.id));
-  const selectedIngresoCarLabel = state.ingresosCarIds === 'todos'
+  const selectedIngresoCarLabel = conSinAuto(state.ingresosCarIds, state.ingresosCarIds === 'todos'
     ? 'Todos los vehículos'
     : selectedIngresoCars.length === 0
       ? 'Ningún vehículo'
       : selectedIngresoCars.length <= 2
         ? selectedIngresoCars.map((car) => car.plate).join(' · ')
-        : `${selectedIngresoCars.length} vehículos seleccionados`;
+        : `${selectedIngresoCars.length} vehículos seleccionados`);
   const ingresoAllOption: GastoChoiceView = {
     id: 'todos',
     label: 'Todos los vehículos',
@@ -1827,6 +1928,9 @@ export function useMobileView(
       }),
     };
   });
+  if (pagos.some((p) => !p.carId)) {
+    ingresoSectionOptions.push(sinAutoOption(state.ingresosCarIds, (next) => update({ ingresosCarIds: next }), 'Ingresos no vinculados a ningún auto'));
+  }
   const ingresoTypeOptions: { id: 'pago' | 'ajuste'; label: string; sub: string }[] = [
     { id: 'pago', label: 'Pagos', sub: 'Ingresos recibidos' },
     { id: 'ajuste', label: 'Ajustes', sub: 'Ajustes de deuda sin ingreso de caja' },
@@ -1992,7 +2096,20 @@ export function useMobileView(
   const buildMovementDetail = (opciones: { pago?: Pago; gasto?: Mov; car?: Car }): MovementDetailView | null => {
     const { pago, gasto } = opciones;
     const movementCar = opciones.car ?? (pago?.carId ? carDe.get(pago.carId) : undefined) ?? (gasto?.carId ? carDe.get(gasto.carId) : undefined);
-    const section = movementCar ? persist.sections.find((candidate) => candidate.id === movementCar.sectionId)?.name ?? 'Sin sección' : 'Sin sección';
+    const sinAutoMov = pago ? !pago.carId : !!gasto && !gasto.carId;
+    const section = movementCar ? persist.sections.find((candidate) => candidate.id === movementCar.sectionId)?.name ?? 'Sin sección' : sinAutoMov ? 'Sin auto' : 'Sin sección';
+    // Opciones del selector de auto de la edición: "Sin auto" primero (con 15+
+    // autos, al final quedaba fuera de la vista), el auto actual siempre
+    // (aunque esté de baja) y los activos.
+    const actualId = (pago ? pago.carId : gasto?.carId) ?? '';
+    const carOptions = [
+      { id: '', label: 'Sin auto', sub: 'No vinculado a ningún auto' },
+      ...cars
+        .filter((c) => c.estado !== 'baja' || c.id === actualId)
+        .sort((a, b) => a.plate.localeCompare(b.plate))
+        .map((c) => ({ id: c.id, label: c.plate, sub: c.model + ' · ' + (persist.sections.find((candidate) => candidate.id === c.sectionId)?.name ?? 'Sin sección') })),
+    ];
+    const plateDe = (id: string) => (id ? carDe.get(id)?.plate ?? 'Auto' : 'Sin auto');
 
     if (pago) {
       const ajuste = pago.tipo === 'ajuste';
@@ -2005,7 +2122,7 @@ export function useMobileView(
         amount: '+' + fmt(pago.monto),
         amountColor: COLORS.pos,
         date: dLblFull(pago.fecha),
-        vehicle: movementCar?.plate ?? 'Sin vehículo',
+        vehicle: movementCar?.plate ?? (sinAutoMov ? 'Sin auto' : 'Vehículo eliminado'),
         driver: pago.driver || movementCar?.driver || 'Sin chofer',
         section,
         gpsTag: movementCar?.gpsTag.trim() || 'Sin GPS',
@@ -2023,6 +2140,8 @@ export function useMobileView(
           medio: pago.medio ?? '',
           nota: pago.nota ?? '',
           tieneComprobante: !!pago.comprobante,
+          carId: actualId,
+          carOptions,
         },
         save: async (datos) => {
           await persist.updatePago(pago.id, {
@@ -2032,9 +2151,10 @@ export function useMobileView(
             nota: datos.nota,
             comprobante: datos.comprobante,
             quitarComprobante: datos.quitarComprobante,
+            ...(datos.carId !== actualId ? { carId: datos.carId } : {}),
           });
           update({ movementDetailId: null });
-          toast((ajuste ? 'Ajuste actualizado' : 'Pago actualizado') + ' · ' + pago.driver + ' · ' + fmt(datos.monto));
+          toast((ajuste ? 'Ajuste actualizado' : 'Pago actualizado') + ' · ' + pago.driver + ' · ' + plateDe(datos.carId) + ' · ' + fmt(datos.monto));
         },
         remove: async () => {
           await persist.deletePago(pago.id);
@@ -2055,7 +2175,7 @@ export function useMobileView(
       amount: fmt(-gasto.amount),
       amountColor: COLORS.neg,
       date: dLblFull(gasto.date),
-      vehicle: movementCar?.plate ?? 'Vehículo eliminado',
+      vehicle: movementCar?.plate ?? (sinAutoMov ? 'Sin auto' : 'Vehículo eliminado'),
       driver: gasto.driver || movementCar?.driver || 'Sin chofer',
       section,
       gpsTag: movementCar?.gpsTag.trim() || 'Sin GPS',
@@ -2073,6 +2193,8 @@ export function useMobileView(
         medio: '',
         nota: gasto.nota ?? '',
         tieneComprobante: !!gasto.comprobante,
+        carId: actualId,
+        carOptions,
       },
       save: async (datos) => {
         await persist.updateMov(gasto.id, {
@@ -2083,9 +2205,10 @@ export function useMobileView(
           nota: datos.nota,
           comprobante: datos.comprobante,
           quitarComprobante: datos.quitarComprobante,
+          ...(datos.carId !== actualId ? { carId: datos.carId } : {}),
         });
         update({ movementDetailId: null });
-        toast('Gasto actualizado · ' + (movementCar?.plate ?? 'Sin auto') + ' · ' + fmt(datos.monto));
+        toast('Gasto actualizado · ' + plateDe(datos.carId) + ' · ' + fmt(datos.monto));
       },
       remove: async () => {
         await persist.deleteMov(gasto.id);
@@ -2646,7 +2769,7 @@ export function useMobileView(
   }
 
   // ---- reportes -------------------------------------------------------
-  const reportCarAllowed = (carId: string | null) => state.reportesCarIds === 'todos' || (carId !== null && state.reportesCarIds.includes(carId));
+  const reportCarAllowed = (carId: string | null) => carAllowed(state.reportesCarIds, carId);
   const reportCategoryAllowed = (category: string) => state.reportesCategories === 'todas' || state.reportesCategories.includes(category);
   const reportInclude = state.reportesInclude ?? 'ambos';
   const reportIncludeExpenses = reportInclude === 'gastos' || reportInclude === 'ambos';
@@ -2656,7 +2779,7 @@ export function useMobileView(
     : [];
   const reportIncome = reportIncludeIncome ? pagos.filter((p) => p.tipo === 'pago' && p.fecha >= r.start && p.fecha <= r.end && reportCarAllowed(p.carId)) : [];
   const reportCounts = { ingresos: reportIncome.length, gastos: reportExpenses.length, total: reportIncome.length + reportExpenses.length };
-  const reportSectionOptions = carsBySection(cars).map((group) => {
+  const reportSectionOptions: { id: string; label: string; sub: string; brand?: string; sinAuto?: boolean; selected: boolean; toggle: () => void }[] = carsBySection(cars).map((group) => {
     const ids = group.cars.map((c) => c.id);
     const hasBaja = group.cars.some((c) => c.estado === 'baja');
     return {
@@ -2676,6 +2799,11 @@ export function useMobileView(
       }),
     };
   });
+  // "Sin auto" como una sección más: el token viaja a la API en carIds.
+  if (movs.some((m) => m.type === 'egreso' && !m.carId) || pagos.some((p) => !p.carId)) {
+    const o = sinAutoOption(state.reportesCarIds, (next) => update({ reportesCarIds: next, reportesError: '' }), 'Ingresos y gastos no vinculados a ningún auto');
+    reportSectionOptions.push({ id: o.id, label: o.label, sub: o.sub, brand: undefined, sinAuto: true, selected: o.selected, toggle: o.pick });
+  }
   const reportCategoryOptions = CATS.map((category) => ({
     label: category,
     selected: state.reportesCategories === 'todas' || state.reportesCategories.includes(category),
@@ -2686,10 +2814,12 @@ export function useMobileView(
     }),
   }));
   const reportSelectedCarLabels = (() => {
-    const ids = state.reportesCarIds === 'todos' ? cars.map((c) => c.id) : state.reportesCarIds;
+    const sinAuto = state.reportesCarIds !== 'todos' && state.reportesCarIds.includes(SIN_AUTO);
+    const ids = state.reportesCarIds === 'todos' ? cars.map((c) => c.id) : state.reportesCarIds.filter((id) => id !== SIN_AUTO);
+    const extra = sinAuto ? ['Sin auto'] : [];
     const full = carsBySection(cars).filter((g) => g.cars.every((c) => ids.includes(c.id)));
-    if (full.length && full.reduce((sum, g) => sum + g.cars.length, 0) === ids.length) return full.map((g) => g.name);
-    return ids.map((id) => cars.find((c) => c.id === id)?.plate).filter((plate): plate is string => Boolean(plate));
+    if (full.length && full.reduce((sum, g) => sum + g.cars.length, 0) === ids.length) return [...full.map((g) => g.name), ...extra];
+    return [...ids.map((id) => cars.find((c) => c.id === id)?.plate).filter((plate): plate is string => Boolean(plate)), ...extra];
   })();
   const reportSelectedCategoryLabels = reportCategoryOptions.filter((category) => category.selected).map((category) => category.label);
   const reportPreviewRows: ReportPreviewRow[] = [
@@ -2697,7 +2827,7 @@ export function useMobileView(
       id: `ingreso-${pago.id}`,
       tipo: 'Ingreso' as const,
       fecha: dLblFull(pago.fecha),
-      vehiculo: cars.find((car) => car.id === pago.carId)?.plate ?? 'Sin vehículo',
+      vehiculo: pago.carId ? cars.find((car) => car.id === pago.carId)?.plate ?? 'Vehículo eliminado' : 'Sin auto',
       chofer: pago.driver || 'Sin chofer',
       categoria: 'Cobrado',
       detalle: 'Ingreso cobrado',
@@ -2710,8 +2840,8 @@ export function useMobileView(
       id: `gasto-${mov.id}`,
       tipo: 'Gasto' as const,
       fecha: dLblFull(mov.date),
-      vehiculo: cars.find((car) => car.id === mov.carId)?.plate ?? 'Vehículo eliminado',
-      chofer: cars.find((car) => car.id === mov.carId)?.driver ?? 'Sin chofer',
+      vehiculo: mov.carId ? cars.find((car) => car.id === mov.carId)?.plate ?? 'Vehículo eliminado' : 'Sin auto',
+      chofer: (mov.carId ? cars.find((car) => car.id === mov.carId)?.driver : undefined) ?? 'Sin chofer',
       categoria: mov.cat || 'Otros',
       detalle: mov.desc,
       monto: mov.amount,
@@ -2950,6 +3080,7 @@ export function useMobileView(
     sectionId: state.dashboardSectionId,
     sectionOptions: persist.sections,
     setSectionId: (id) => update({ dashboardSectionId: id }),
+    hasSinAuto,
     },
 
     dashboard: {

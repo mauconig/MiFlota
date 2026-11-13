@@ -25,6 +25,8 @@ export function MovementDetailSheet({ movement }: { movement: MovementDetailView
   const [cat, setCat] = useState('');
   const [medio, setMedio] = useState('');
   const [nota, setNota] = useState('');
+  const [carId, setCarId] = useState('');
+  const [eligiendoAuto, setEligiendoAuto] = useState(false);
   const [adjunto, setAdjunto] = useState<PickedFile | null>(null);
   const [quitarComprobante, setQuitarComprobante] = useState(false);
 
@@ -46,6 +48,8 @@ export function MovementDetailSheet({ movement }: { movement: MovementDetailView
     setCat(movement.edit.cat);
     setMedio(movement.edit.medio);
     setNota(movement.edit.nota);
+    setCarId(movement.edit.carId);
+    setEligiendoAuto(false);
     // `movementId` es la identidad estable para este reset.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [movementId]);
@@ -53,6 +57,7 @@ export function MovementDetailSheet({ movement }: { movement: MovementDetailView
   if (!movement) return null;
 
   const esGasto = movement.edit.kind === 'egreso';
+  const autoActual = movement.edit.carOptions.find((o) => o.id === carId);
 
   const guardar = async () => {
     if (guardando) return;
@@ -72,6 +77,7 @@ export function MovementDetailSheet({ movement }: { movement: MovementDetailView
         nota: nota.trim(),
         comprobante: adjunto,
         quitarComprobante,
+        carId,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo guardar el cambio');
@@ -110,10 +116,44 @@ export function MovementDetailSheet({ movement }: { movement: MovementDetailView
         {!esGasto && (
           <View style={{ backgroundColor: '#fdf0dd', borderRadius: 14, padding: 12 }}>
             <Text style={{ color: '#80642f', fontSize: 12, lineHeight: 17 }}>
-              Al cambiar el monto o la fecha se recalcula qué cuotas cancela este pago. El chofer y el auto no se pueden cambiar.
+              Al cambiar el monto o la fecha se recalcula qué cuotas cancela este pago. El chofer no se puede cambiar.
             </Text>
           </View>
         )}
+
+        <Campo label="Auto">
+          <Pressable
+            onPress={() => setEligiendoAuto((v) => !v)}
+            accessibilityRole="button"
+            accessibilityLabel="Cambiar auto"
+            style={{ ...input, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+          >
+            <Text style={{ color: '#16150f', fontSize: 15, fontWeight: '600' }}>{autoActual?.label ?? 'Sin auto'}</Text>
+            <Text style={{ color: '#8d5c10', fontSize: 12, fontWeight: '700' }}>{eligiendoAuto ? 'Cerrar' : 'Cambiar'}</Text>
+          </Pressable>
+          {eligiendoAuto && (
+            <View style={{ borderWidth: 1, borderColor: '#ece4d6', borderRadius: 13, overflow: 'hidden' }}>
+              {movement.edit.carOptions.map((o, i) => {
+                const elegido = o.id === carId;
+                return (
+                  <Pressable
+                    key={o.id || 'sin-auto'}
+                    onPress={() => { setCarId(o.id); setEligiendoAuto(false); }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: elegido }}
+                    style={{ paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: i ? 1 : 0, borderTopColor: '#f0e9de', backgroundColor: elegido ? '#f4efe4' : '#fffdf8', flexDirection: 'row', alignItems: 'center', gap: 10 }}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: '#16150f', fontSize: 14, fontWeight: '700' }}>{o.label}</Text>
+                      <Text style={{ color: '#6b665c', fontSize: 11 }}>{o.sub}</Text>
+                    </View>
+                    {elegido && <Text style={{ color: '#16150f', fontWeight: '800' }}>✓</Text>}
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+        </Campo>
 
         <Campo label="Monto">
           <TextInput

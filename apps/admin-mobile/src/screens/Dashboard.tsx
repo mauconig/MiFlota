@@ -55,7 +55,7 @@ export function Dashboard({ v }: { v: MobileView }) {
       <View style={{ width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 2 }}>
         <PeriodPill label={v.period.compactLabel} days={v.period.days} onPress={v.period.openSheet} />
         <Pressable onPress={() => setSectionOpen(true)} style={{ minWidth: 104, maxWidth: 180, flexShrink: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#fffdf8', borderWidth: 1, borderColor: '#e6ded0', borderRadius: 24, paddingVertical: 9, paddingHorizontal: 10 }}>
-          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82} allowFontScaling={false} style={{ flexShrink: 1, minWidth: 0, textAlign: 'center', fontSize: 13, fontWeight: '600', color: '#1a1a18' }}>{v.period.sectionId == null ? 'Todas' : (v.period.sectionOptions.find((s) => s.id === v.period.sectionId)?.name ?? 'Sección')}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82} allowFontScaling={false} style={{ flexShrink: 1, minWidth: 0, textAlign: 'center', fontSize: 13, fontWeight: '600', color: '#1a1a18' }}>{v.period.sectionId == null ? 'Todas' : v.period.sectionId === 'none' ? 'Sin auto' : (v.period.sectionOptions.find((s) => s.id === v.period.sectionId)?.name ?? 'Sección')}</Text>
           <Svg viewBox="0 0 24 24" width={15} height={15} fill="none" stroke="#6b665c" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
             <Path d="m6 9 6 6 6-6" />
           </Svg>
@@ -67,6 +67,7 @@ export function Dashboard({ v }: { v: MobileView }) {
             <Text style={{ fontSize: 16, fontWeight: '800', marginBottom: 4 }}>Sección</Text>
             <Pressable onPress={() => { v.period.setSectionId(null); setSectionOpen(false); }} style={{ padding: 13, borderRadius: 12, backgroundColor: v.period.sectionId == null ? '#16150f' : '#f4efe4' }}><Text style={{ color: v.period.sectionId == null ? '#fffdf8' : '#3d3a34', fontWeight: '700' }}>Todas</Text></Pressable>
             {v.period.sectionOptions.map((section) => <Pressable key={section.id} onPress={() => { v.period.setSectionId(section.id); setSectionOpen(false); }} style={{ padding: 13, borderRadius: 12, backgroundColor: v.period.sectionId === section.id ? '#16150f' : '#f4efe4' }}><Text style={{ color: v.period.sectionId === section.id ? '#fffdf8' : '#3d3a34', fontWeight: '700' }}>{section.name}</Text></Pressable>)}
+            {v.period.hasSinAuto && <Pressable onPress={() => { v.period.setSectionId('none'); setSectionOpen(false); }} style={{ padding: 13, borderRadius: 12, borderWidth: 1, borderStyle: v.period.sectionId === 'none' ? 'solid' : 'dashed', borderColor: v.period.sectionId === 'none' ? '#16150f' : '#cfc3ac', backgroundColor: v.period.sectionId === 'none' ? '#16150f' : '#faf6ee' }}><Text style={{ color: v.period.sectionId === 'none' ? '#fffdf8' : '#3d3a34', fontWeight: '700' }}>Sin auto</Text></Pressable>}
           </Pressable>
         </Pressable>
       </Modal>

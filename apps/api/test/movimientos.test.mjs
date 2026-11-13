@@ -138,7 +138,7 @@ test('editar y borrar movimientos, aislamiento por dueño y fecha del egreso', {
   assert.equal((await sinAdjunto.json()).mov.comprobante, undefined);
   assert.equal(existsSync(archivoDe(movEditado)), false);
 
-  // Pagos: se editan monto, fecha, medio y nota; chofer y auto no.
+  // Pagos: se editan monto, fecha, medio, nota y auto; el chofer no.
   const pagoCreado = await esperar(await fetch(base + '/api/pagos', {
     method: 'POST',
     headers: { ...auth(tokenA), 'Content-Type': 'application/json' },
@@ -161,6 +161,20 @@ test('editar y borrar movimientos, aislamiento por dueño y fecha del egreso', {
   assert.equal((await editarPago(tokenA, pago.id, { fecha: manana })).status, 400);
   assert.equal((await editarPago(tokenA, pago.id, { monto: 0 })).status, 400);
   assert.equal((await editarPago(tokenB, pago.id, { monto: 999 })).status, 404, 'no se edita un pago ajeno');
+
+  // El auto del pago se puede cambiar: a "Sin auto" ('') y de vuelta. A un auto
+  // ajeno no. Sin el campo, el auto se conserva.
+  assert.equal((await (await esperar(await editarPago(tokenA, pago.id, { carId: '' }), 200)).json()).pago.carId ?? null, null);
+  assert.equal((await (await esperar(await editarPago(tokenA, pago.id, { carId: 'a' }), 200)).json()).pago.carId, 'a');
+  assert.equal((await editarPago(tokenA, pago.id, { carId: 'b' })).status, 404, 'no se pasa a un auto ajeno');
+  assert.equal((await (await esperar(await editarPago(tokenA, pago.id, { nota: 'Sin tocar el auto' }), 200)).json()).pago.carId, 'a');
+
+  // Lo mismo para un gasto.
+  const movAuto = (await (await esperar(await crearEgreso(tokenA, { razon: 'Lavado', monto: 15000, cat: 'Otros', fecha: ayer }), 201)).json()).mov;
+  assert.equal((await (await esperar(await editarGasto(tokenA, movAuto.id, { carId: '' }), 200)).json()).mov.carId ?? null, null);
+  assert.equal((await (await esperar(await editarGasto(tokenA, movAuto.id, { carId: 'a' }), 200)).json()).mov.carId, 'a');
+  assert.equal((await editarGasto(tokenA, movAuto.id, { carId: 'b' })).status, 404, 'no se pasa a un auto ajeno');
+  assert.equal((await (await esperar(await editarGasto(tokenA, movAuto.id, { monto: 16000 }), 200)).json()).mov.carId, 'a');
 
   // Borrar: el gasto se va con su archivo y una cuota emitida no se puede tocar.
   const conAdjunto = await crearEgreso(tokenA, { razon: 'Seguro', monto: 20000, cat: 'Seguro', fecha: ayer }, pdf('borrar'));

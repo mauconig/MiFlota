@@ -282,10 +282,13 @@ export interface EditarEgresoPayload {
   nota: string;
   comprobante: PickedFile | null;
   quitarComprobante: boolean;
+  /** Solo si cambió: id del auto, o '' para dejarlo sin auto. */
+  carId?: string;
 }
 
-/** Corrección de un pago. Chofer, auto y tipo no se tocan: moverlos cambiaría
- *  a quién se le imputa la deuda. */
+/** Corrección de un pago. Chofer y tipo no se tocan: moverlos cambiaría a
+ *  quién se le imputa la deuda. El auto es solo referencia y sí se puede
+ *  cambiar (o dejar sin auto). */
 export interface EditarPagoPayload {
   monto: number;
   fecha: string;
@@ -293,6 +296,8 @@ export interface EditarPagoPayload {
   nota: string;
   comprobante: PickedFile | null;
   quitarComprobante: boolean;
+  /** Solo si cambió: id del auto, o '' para dejarlo sin auto. */
+  carId?: string;
 }
 
 export interface AssistantHistoryItem {
@@ -682,6 +687,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     fd.append('cat', datos.cat);
     fd.append('fecha', datos.fecha);
     fd.append('nota', datos.nota);
+    if (datos.carId !== undefined) fd.append('carId', datos.carId);
     if (datos.quitarComprobante) fd.append('quitarComprobante', '1');
     if (datos.comprobante) {
       fd.append('comprobante', { uri: datos.comprobante.uri, name: datos.comprobante.name, type: datos.comprobante.mimeType } as unknown as Blob);
@@ -703,6 +709,7 @@ export function useFleetStore(onError: (msg: string) => void, onSinSesion: () =>
     fd.append('fecha', datos.fecha);
     fd.append('medio', datos.medio);
     fd.append('nota', datos.nota);
+    if (datos.carId !== undefined) fd.append('carId', datos.carId);
     if (datos.quitarComprobante) fd.append('quitarComprobante', '1');
     if (datos.comprobante) {
       fd.append('comprobante', { uri: datos.comprobante.uri, name: datos.comprobante.name, type: datos.comprobante.mimeType } as unknown as Blob);

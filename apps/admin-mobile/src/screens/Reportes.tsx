@@ -1,7 +1,8 @@
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type { MobileView } from '../useMobileView';
-import type { ReportStep } from '../types';
+import { SIN_AUTO, type ReportStep } from '../types';
+import { NoCarIcon } from '../components/NoCarIcon';
 import { BrandIcon } from '../components/BrandIcon';
 import { DateRangeInputs } from '../components/DateRangeInputs';
 import { ChipRow } from '../components/ChipRow';
@@ -24,11 +25,11 @@ function Check({ active }: { active: boolean }) {
   );
 }
 
-function OptionCard({ title, selected, onPress, icon, brand }: { title: string; description: string; selected: boolean; onPress: () => void; icon?: string; brand?: string }) {
+function OptionCard({ title, selected, onPress, icon, brand, sinAuto }: { title: string; description: string; selected: boolean; onPress: () => void; icon?: string; brand?: string; sinAuto?: boolean }) {
   return (
     <Pressable onPress={onPress} style={{ minHeight: 58, borderWidth: 1.5, borderColor: selected ? INK : BORDER, backgroundColor: selected ? '#f0ece3' : PAPER, borderRadius: 18, paddingHorizontal: 16, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-      {(icon || brand) && <View style={{ width: 34, height: 34, borderRadius: 12, backgroundColor: selected ? INK : SOFT, alignItems: 'center', justifyContent: 'center', flex: 0 }}>
-        {brand ? <BrandIcon brand={brand} size={21} color={selected ? PAPER : INK} /> : <Text style={{ color: selected ? PAPER : INK, fontSize: 22, fontWeight: '700' }}>{icon}</Text>}
+      {(icon || brand || sinAuto) && <View style={{ width: 34, height: 34, borderRadius: 12, backgroundColor: selected ? INK : SOFT, alignItems: 'center', justifyContent: 'center', flex: 0 }}>
+        {sinAuto ? <NoCarIcon size={22} color={selected ? PAPER : INK} /> : brand ? <BrandIcon brand={brand} size={21} color={selected ? PAPER : INK} /> : <Text style={{ color: selected ? PAPER : INK, fontSize: 22, fontWeight: '700' }}>{icon}</Text>}
       </View>}
       <View style={{ flex: 1, minWidth: 0, flexShrink: 1 }}>
         <Text numberOfLines={2} style={{ color: INK, fontSize: 16, lineHeight: 20, fontWeight: '700', flexShrink: 1 }}>{title}</Text>
@@ -67,7 +68,14 @@ export function Reportes({ v }: { v: MobileView }) {
   const totalSteps = steps.length;
   const currentStep = Math.max(1, steps.indexOf(rep.step) + 1);
   const includeLabel = rep.include === 'gastos' ? 'Gastos' : rep.include === 'ingresos' ? 'Ingresos cobrados' : rep.include === 'ambos' ? 'Gastos e ingresos cobrados' : 'Sin elegir';
-  const carLabel = rep.carSelection === 'todos' ? 'Todos los vehículos' : `${rep.carSelection.length} vehículo${rep.carSelection.length === 1 ? '' : 's'}`;
+  const carLabel = rep.carSelection === 'todos'
+    ? 'Todos los vehículos'
+    : (() => {
+      const autos = rep.carSelection.filter((id) => id !== SIN_AUTO).length;
+      const partes = autos ? [`${autos} vehículo${autos === 1 ? '' : 's'}`] : [];
+      if (rep.carSelection.includes(SIN_AUTO)) partes.push('Sin auto');
+      return partes.join(' + ') || 'Ningún vehículo';
+    })();
   const categoryLabel = rep.categorySelection === 'todas' ? 'Todas las categorías' : `${rep.categorySelection.length} categoría${rep.categorySelection.length === 1 ? '' : 's'}`;
 
   return (
@@ -116,8 +124,8 @@ export function Reportes({ v }: { v: MobileView }) {
         <View style={{ flex: 1, minHeight: 0 }}>
           <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ gap: 10, paddingBottom: 12 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" nestedScrollEnabled>
             <OptionCard title="Todos los vehículos" description="Incluye la flota completa" selected={rep.carSelection === 'todos'} onPress={rep.selectAllCars} />
-            {rep.sectionOptions.map((section) => <OptionCard key={section.id} title={section.label} description={section.sub} brand={section.brand} selected={section.selected} onPress={section.toggle} />)}
-            <SelectionLabel value={rep.carSelection} allLabel="Toda la flota" countLabel="vehículo" />
+            {rep.sectionOptions.map((section) => <OptionCard key={section.id} title={section.label} description={section.sub} brand={section.brand} sinAuto={section.sinAuto} selected={section.selected} onPress={section.toggle} />)}
+            <Text style={{ color: MUTED, fontSize: 12 }}>{rep.carSelection === 'todos' ? 'Toda la flota' : carLabel}</Text>
           </ScrollView>
           <View style={{ paddingTop: 10, paddingBottom: 2, backgroundColor: '#f4f0e8' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>

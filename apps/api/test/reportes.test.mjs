@@ -26,6 +26,7 @@ test('el reporte imprime la nota de cada gasto y la exporta al Excel', { timeout
   db.prepare("INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, nota, cat) VALUES (1,'a','egreso',450000,?,'Cambio de aceite',?,'Mantenimiento')").run(hoy, notaLarga);
   db.prepare("INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, nota, cat) VALUES (1,'a','egreso',120000,?,'Cubierta','Nota corta','Taller')").run(hoy);
   db.prepare("INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat) VALUES (1,'a','egreso',30000,?,'Peaje','Otros')").run(hoy);
+  db.prepare("INSERT INTO movs (owner_id, car_id, type, amount, date, descripcion, cat) VALUES (1,NULL,'egreso',80000,?,'Contador','Otros')").run(hoy);
 
   const reserve = createServer();
   reserve.listen(0, '127.0.0.1');
@@ -59,11 +60,17 @@ test('el reporte imprime la nota de cada gasto y la exporta al Excel', { timeout
   }
   assert.ok(ready, output);
 
-  const exportar = (format) => fetch(base + '/api/reports/export', {
+  const exportar = (format, carIds = 'todos') => fetch(base + '/api/reports/export', {
     method: 'POST',
     headers: { ...auth, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ period: { type: 'custom', from: hoy, to: hoy }, include: 'gastos', carIds: 'todos', categories: 'todas', format }),
+    body: JSON.stringify({ period: { type: 'custom', from: hoy, to: hoy }, include: 'gastos', carIds, categories: 'todas', format }),
   });
+  const hojaGastos = async (res) => {
+    assert.equal(res.status, 200, await res.clone().text());
+    const file = await fetch(base + (await res.json()).file.url, { headers: auth });
+    const libro = XLSX.read(Buffer.from(await file.arrayBuffer()), { type: 'buffer' });
+    return XLSX.utils.sheet_to_json(libro.Sheets.Gastos, { header: 1 });
+  };
 
   const pdfRes = await exportar('pdf');
   assert.equal(pdfRes.status, 200);
@@ -85,6 +92,19 @@ test('el reporte imprime la nota de cada gasto y la exporta al Excel', { timeout
   assert.equal(aceite[4], notaLarga, 'la nota larga viaja completa');
   const cubierta = rows.find((row) => row[3] === 'Cubierta');
   assert.equal(cubierta[4], 'Nota corta');
+
+  // Los gastos sin auto se rotulan "Sin auto" y se pueden pedir solos con el
+  // token de la selección; eligiendo solo autos quedan afuera.
+  assert.equal(rows.find((row) => row[3] === 'Contador')[1], 'Sin auto');
+  const soloSinAuto = await hojaGastos(await exportar('xlsx', ['__sin_auto__']));
+  assert.deepEqual(soloSinAuto.slice(1).filter((row) => row.length).map((row) => row[3]), ['Contador']);
+  const soloAutoA = await hojaGastos(await exportar('xlsx', ['a']));
+  assert.ok(!soloAutoA.some((row) => row[3] === 'Contador'), 'con solo autos, lo sin auto queda afuera');
+  assert.ok(soloAutoA.some((row) => row[3] === 'Peaje'));
+  const ambos = await hojaGastos(await exportar('xlsx', ['a', '__sin_auto__']));
+  assert.ok(ambos.some((row) => row[3] === 'Contador') && ambos.some((row) => row[3] === 'Peaje'));
+  assert.equal((await exportar('pdf', ['__sin_auto__'])).status, 200, 'el PDF con solo "Sin auto" se genera');
+  assert.equal((await exportar('xlsx', ['zzz'])).status, 400, 'un auto ajeno sigue rechazándose');
 
   // El flujo viejo de notas del reporte ya no existe.
   const viejo = await fetch(base + '/api/report-notes/preview', { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: '{}' });
